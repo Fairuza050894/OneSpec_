@@ -1,0 +1,172 @@
+// OneSpec SDLC Workbench - Local Artifact Storage Schema
+// Standards: ISO/IEC/IEEE 29148:2018 (StRS/SyRS), ISO/IEC 19510 (BPMN 2.0), ISO/IEC/IEEE 29119:2022 (RTM)
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// ProjectWorkspace represents an isolated SDLC project repository.
+/// Supports GREENFIELD (new project without prior domain) and BROWNFIELD (project with existing production/staging domain).
+model ProjectWorkspace {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  description      String?
+  projectMode      String   @default("GREENFIELD") // "GREENFIELD" | "BROWNFIELD"
+  existingDomain   String?
+  repositoryUrl    String?
+  repositoryBranch String?  @default("main")
+  localPath        String?
+  databaseUrl      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Bi-directional relationships to ISO artifacts
+  brdArtifacts      BrdArtifact[]
+  prdArtifacts      PrdArtifact[]
+  bpmnProcessModels BpmnProcessModel[]
+  rtmTestCases      RtmTestCase[]
+}
+
+/// BrdArtifact represents the Stakeholder Requirements Specification (StRS) per ISO/IEC/IEEE 29148:2018.
+/// Contains Normative Business Rules (BR-xx), quantitative KPIs, and explicit In/Out scope boundaries.
+model BrdArtifact {
+  id               String   @id @default(cuid())
+  projectId        String
+  project          ProjectWorkspace @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title            String
+  version          String   @default("1.0.0")
+  status           String   @default("DRAFT") // "DRAFT" | "REVIEW" | "APPROVED" | "SUPERSEDED"
+  executiveSummary String?
+  rawMeetingNotes  String?
+  kpis             String?  // JSON string: Array<KpiDefinition>
+  scopeIn          String?  // JSON string: Array<string>
+  scopeOut         String?  // JSON string: Array<string>
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Bi-directional child and sibling relationships
+  businessRules    BusinessRule[]
+  prdArtifacts     PrdArtifact[]
+}
+
+/// BusinessRule represents a discrete normative business rule (BR-xx) defined in the StRS / BRD.
+model BusinessRule {
+  id                  String   @id @default(cuid())
+  brdArtifactId       String
+  brdArtifact         BrdArtifact @relation(fields: [brdArtifactId], references: [id], onDelete: Cascade)
+  ruleId              String   // e.g. "BR-01", "BR-02"
+  title               String
+  statement           String   // Formal normative requirement statement
+  rationale           String?
+  priority            String   @default("HIGH") // "HIGH" | "MEDIUM" | "LOW"
+  complianceReference String?  // ISO 29148 clause or regulatory reference
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Traceability links
+  userStories         UserStory[]
+  rtmTestCases        RtmTestCase[]
+
+  @@unique([brdArtifactId, ruleId])
+}
+
+/// PrdArtifact represents the System Requirements Specification (SyRS) per ISO/IEC/IEEE 29148:2018.
+/// Contains User Stories (REQ-US-xx) linked to Business Rules (BR-xx), BDD Gherkin specifications, and HTTP/Field validation tables.
+model PrdArtifact {
+  id               String   @id @default(cuid())
+  projectId        String
+  project          ProjectWorkspace @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  brdArtifactId    String?
+  brdArtifact      BrdArtifact? @relation(fields: [brdArtifactId], references: [id], onDelete: SetNull)
+  title            String
+  version          String   @default("1.0.0")
+  status           String   @default("DRAFT") // "DRAFT" | "IN_DEVELOPMENT" | "VERIFIED"
+  overview         String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Bi-directional relationships
+  userStories       UserStory[]
+  bpmnProcessModels BpmnProcessModel[]
+  rtmTestCases      RtmTestCase[]
+}
+
+/// UserStory represents a functional system capability (REQ-US-xx) in the SyRS / PRD.
+model UserStory {
+  id                      String   @id @default(cuid())
+  prdArtifactId           String
+  prdArtifact             PrdArtifact @relation(fields: [prdArtifactId], references: [id], onDelete: Cascade)
+  businessRuleId          String?
+  businessRule            BusinessRule? @relation(fields: [businessRuleId], references: [id], onDelete: SetNull)
+  storyId                 String   // e.g. "REQ-US-01"
+  title                   String
+  role                    String   // "As a [Actor]"
+  capability              String   // "I want [Action]"
+  benefit                 String   // "So that [Outcome]"
+  acceptanceCriteriaGherkin String // Feature/Scenario BDD specification in standard Gherkin syntax
+  fieldValidations        String?  // JSON string: Array<FieldValidationSpec>
+  httpContracts           String?  // JSON string: Array<HttpContractSpec>
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  // Traceability link to Test Cases
+  rtmTestCases            RtmTestCase[]
+
+  @@unique([prdArtifactId, storyId])
+}
+
+/// BpmnProcessModel represents an ISO/IEC 19510 (BPMN 2.0) compliant workflow model.
+/// Contains Pools, Swimlanes, Start/End Events, User/Service Tasks, and Exclusive Gateways (XOR) with Manhattan orthogonal routing.
+model BpmnProcessModel {
+  id            String   @id @default(cuid())
+  projectId     String
+  project       ProjectWorkspace @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prdArtifactId String?
+  prdArtifact   PrdArtifact? @relation(fields: [prdArtifactId], references: [id], onDelete: SetNull)
+  name          String
+  version       String   @default("1.0.0")
+  poolName      String
+  swimlanes     String   // JSON string: Array<BpmnSwimlane>
+  nodes         String   // JSON string: Array<BpmnNode>
+  edges         String   // JSON string: Array<BpmnEdge>
+  xmlPayload    String?  // Canonical ISO/IEC 19510 XML serialization
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+/// RtmTestCase represents a verification test specification per ISO/IEC/IEEE 29119-3.
+/// Provides bi-directional traceability from Business Rules (BR-xx) and User Stories (REQ-US-xx) to execution verifications.
+model RtmTestCase {
+  id                  String   @id @default(cuid())
+  projectId           String
+  project             ProjectWorkspace @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  prdArtifactId       String?
+  prdArtifact         PrdArtifact? @relation(fields: [prdArtifactId], references: [id], onDelete: SetNull)
+  businessRuleId      String?
+  businessRule        BusinessRule? @relation(fields: [businessRuleId], references: [id], onDelete: SetNull)
+  userStoryId         String?
+  userStory           UserStory? @relation(fields: [userStoryId], references: [id], onDelete: SetNull)
+  testCaseId          String   // e.g. "TC-VCH-001"
+  title               String
+  testType            String   @default("POSITIVE") // "POSITIVE" | "NEGATIVE" | "BOUNDARY_VALUE" | "SECURITY" | "PERFORMANCE"
+  precondition        String
+  testSteps           String   // JSON string: Array<TestStepSpec>
+  expectedResult      String   // Test Oracle per ISO 29119
+  gherkinScenario     String   // Target Gherkin Scenario
+  domSelector         String?  // Target DOM element selector (e.g. '[data-testid="..."]')
+  apiEndpoint         String?  // Target HTTP endpoint (e.g. 'POST /api/v1/...')
+  executionVerdict    String   @default("NOT_RUN") // "NOT_RUN" | "PASSED" | "FAILED" | "BLOCKED" | "INCONCLUSIVE"
+  executionLatencyMs  Int?     // Tabular-num millisecond latency telemetry
+  executionLog        String?  // Detailed execution log or assertion trace
+  lastExecutedAt      DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([projectId, testCaseId])
+}
