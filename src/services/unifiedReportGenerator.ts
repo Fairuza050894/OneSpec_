@@ -1115,6 +1115,38 @@ ${executionTrace.stages
         ],
         columnWidths: [14, 24, 20, 34, 18, 28, 24, 28, 22, 26, 32, 56],
       });
+
+      const mods = params.compiledState.discoveredFeatureModules || [];
+      sheets.push({
+        name: isId ? 'Otomasi CI-CD' : 'CI-CD Automation',
+        rows: [
+          [
+            'Module ID',
+            'Module Name',
+            'Route',
+            'Primary Selector / Target',
+            'Triggered Endpoint',
+            'Self-Healing Locator Chain',
+            'Playwright Assertion Spec',
+            'Postman Verification Script',
+          ],
+          ...mods.map((m) => {
+            const primarySel = m.searchFilterSelectors?.[0] || m.screenControlsCatalog?.[0]?.screenLocation || 'body';
+            const apiPath = m.triggeredApis?.[0]?.path || `/api${m.routePath}`;
+            return [
+              m.moduleId,
+              m.moduleName,
+              m.routePath,
+              primarySel,
+              `${m.triggeredApis?.[0]?.method || 'GET'} ${apiPath}`,
+              `page.locator('${primarySel.replace(/'/g, "\\'")}').or(page.getByRole('table')).or(page.locator('body')).first()`,
+              `expect(response?.status()).toBeLessThan(400); await expect(page.locator('body')).toBeVisible();`,
+              `pm.test("[${m.moduleId}] Status code is 2xx", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]); });`,
+            ];
+          }),
+        ],
+        columnWidths: [14, 24, 20, 28, 28, 48, 52, 56],
+      });
     }
 
     return buildXlsxWorkbook(sheets);
@@ -1359,6 +1391,43 @@ ${executionTrace.stages
         ${rbac.rows.map((r) => `<tr><td><b>${esc(r.rowId)}</b></td><td>${esc(r.moduleName)}</td><td><code>${esc(r.routePath)}</code></td><td>${esc(r.targetControlOrAction)}</td><td><code>${esc(r.triggeredEndpoint)}</code></td><td><b>${esc(r.pancaranInternalAccess)}</b></td><td><b>${esc(r.eksternalPartnerAccess)}</b></td><td>${esc(r.viewerAuditorAccess)}</td><td>${esc(r.unauthenticatedAccess)}</td><td>${esc(r.owaspSecurityGate)} — ${esc(isId ? r.verificationAssertionId : r.verificationAssertionEn)}</td></tr>`).join('')}
       </tbody>
     </table>`;
+  })() : ''}
+  ${params.compiledState ? (() => {
+    const mods = params.compiledState.discoveredFeatureModules || [];
+    const playwrightCode = automationBundleExportService.generatePlaywrightSpecTs(params.compiledState);
+    return `<h2>16. ${isId ? 'Bundel Skrip Otomasi Eksekusi CI/CD — Playwright .spec.ts & Postman Collection v2.1' : 'CI/CD Automation Execution Bundle — Playwright .spec.ts & Postman Collection v2.1'} (${mods.length} Modules)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Module ID</th>
+          <th>Module Name</th>
+          <th>Route</th>
+          <th>Primary Selector</th>
+          <th>API Contract Endpoint</th>
+          <th>Playwright E2E Assertion Chain</th>
+          <th>Postman v2.1 Contract Test Script</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${mods.map((fm) => {
+          const primarySel = fm.searchFilterSelectors?.[0] || fm.screenControlsCatalog?.[0]?.screenLocation || 'body';
+          const ep = `${fm.triggeredApis?.[0]?.method || 'GET'} ${fm.triggeredApis?.[0]?.path || `/api${fm.routePath}`}`;
+          return `<tr>
+            <td><b>${esc(fm.moduleId)}</b></td>
+            <td>${esc(fm.moduleName)}</td>
+            <td><code>${esc(fm.routePath)}</code></td>
+            <td><code>${esc(primarySel)}</code></td>
+            <td><code>${esc(ep)}</code></td>
+            <td><code>expect(response?.status()).toBeLessThan(400); await expect(page.locator('body')).toBeVisible();</code></td>
+            <td><code>pm.test("[${esc(fm.moduleId)}] Status 2xx", () => pm.expect(pm.response.code).to.be.oneOf([200, 201, 204]));</code></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top: 16px;">
+      <h3>${isId ? 'Cuplikan Test Suite Playwright (@playwright/test .spec.ts)' : 'Playwright Test Suite Preview (@playwright/test .spec.ts)'}</h3>
+      <pre style="background: #0E1015; color: #10B981; padding: 12px; border-radius: 4px; overflow-x: auto; font-family: monospace; font-size: 11px;">${esc(playwrightCode.slice(0, 3500))}...</pre>
+    </div>`;
   })() : ''}
 </body>
 </html>`;

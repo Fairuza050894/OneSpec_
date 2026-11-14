@@ -7,6 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import sharp from 'sharp';
 import { classifySampledPixels } from '../src/lib/screenshotQuality';
 import { buildFeatureModuleBlueprintSvgDataUrl } from '../src/lib/featureModuleBlueprint';
@@ -69,7 +70,10 @@ async function main() {
   assert.equal(await isBlankRasterBuffer(sparseWhite), false, 'a sparse but real page must stay a capture');
   assert.equal(await clientVerdict(sparseWhite), 'CONTENT', 'browser classifier must keep sparse real pages');
 
-  const realUi = await sharp('screenshot-overview.png').jpeg({ quality: 62 }).toBuffer();
+  const screenshotPath = fs.existsSync('public/docs/screenshots/screenshot-overview.png')
+    ? 'public/docs/screenshots/screenshot-overview.png'
+    : 'screenshot-overview.png';
+  const realUi = await sharp(screenshotPath).jpeg({ quality: 62 }).toBuffer();
   assert.equal(await isBlankRasterBuffer(realUi), false, 'real workbench capture must not be replaced');
   assert.equal(await clientVerdict(realUi), 'CONTENT', 'browser classifier must keep real UI');
 

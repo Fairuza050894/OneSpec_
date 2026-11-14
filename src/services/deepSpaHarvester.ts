@@ -103,6 +103,46 @@ export async function runDeepSpaHarvester(
     let activeRouteApis: Array<{ method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; status: number; latencyMs: number }> = [];
     const featureModules: FeatureModuleSurface[] = [];
 
+    // Deteksi Multi-Origin & Subdomain Backend (misal url_mobodfs) dari Auth State
+    const knownOrigins = new Set<string>();
+    const knownHostnames = new Set<string>();
+    try {
+      const parsedTarget = new URL(rawUrl);
+      knownOrigins.add(parsedTarget.origin);
+      knownHostnames.add(parsedTarget.hostname);
+    } catch {}
+
+    if (fs.existsSync(AUTH_STATE_PATH)) {
+      try {
+        const authData = JSON.parse(fs.readFileSync(AUTH_STATE_PATH, 'utf8'));
+        if (Array.isArray(authData.origins)) {
+          for (const o of authData.origins) {
+            if (o?.origin) {
+              try {
+                const u = new URL(o.origin);
+                knownOrigins.add(u.origin);
+                knownHostnames.add(u.hostname);
+              } catch {}
+            }
+          }
+        }
+        if (Array.isArray(authData.cookies)) {
+          for (const c of authData.cookies) {
+            if (c?.domain) {
+              knownHostnames.add(c.domain.replace(/^\./, ''));
+            }
+            if (typeof c?.value === 'string' && (c.value.startsWith('http://') || c.value.startsWith('https://'))) {
+              try {
+                const cu = new URL(c.value);
+                knownOrigins.add(cu.origin);
+                knownHostnames.add(cu.hostname);
+              } catch {}
+            }
+          }
+        }
+      } catch {}
+    }
+
     // ------------------------------------------------------------------------
     // TAHAP 1: POTRET MODUL LOGIN (UNAUTHENTICATED) & EKSEKUSI LOGIN LENGKAP
     // ------------------------------------------------------------------------
@@ -125,7 +165,11 @@ export async function runDeepSpaHarvester(
         const ct = (resp.headers()['content-type'] || '').toLowerCase();
         const isJson = ct.includes('application/json');
         const isXhrOrFetch = rt === 'xhr' || rt === 'fetch';
+        const isKnownHost = Array.from(knownHostnames).some(
+          (h) => u.hostname === h || u.hostname.endsWith(`.${h}`) || h.endsWith(`.${u.hostname}`)
+        );
         const isApiLike =
+          isKnownHost ||
           /api|v[0-9]|rest|service|graphql|data|dfs|mobo/i.test(u.pathname) ||
           /mobo|pancaran/i.test(u.hostname) ||
           u.pathname.includes('/api/') ||
@@ -211,12 +255,18 @@ export async function runDeepSpaHarvester(
             };
             walkJson(jsonBody);
 
-            // Ekstrak Tabel Database dari array objek data API (data, items, results, rows, list, content, records)
+            // Ekstrak Tabel Database dari array objek data API (data, items, results, rows, list, content, records, result, payload)
             const rawCandidates = [
               Array.isArray(jsonBody) ? jsonBody : null,
               Array.isArray(jsonBody.data) ? jsonBody.data : null,
               Array.isArray(jsonBody.items) ? jsonBody.items : null,
               Array.isArray(jsonBody.results) ? jsonBody.results : null,
+              Array.isArray(jsonBody.result) ? jsonBody.result : null,
+              Array.isArray(jsonBody.result?.data) ? jsonBody.result.data : null,
+              Array.isArray(jsonBody.result?.items) ? jsonBody.result.items : null,
+              Array.isArray(jsonBody.payload) ? jsonBody.payload : null,
+              Array.isArray(jsonBody.payload?.data) ? jsonBody.payload.data : null,
+              Array.isArray(jsonBody.response?.data) ? jsonBody.response.data : null,
               Array.isArray(jsonBody.rows) ? jsonBody.rows : null,
               Array.isArray(jsonBody.list) ? jsonBody.list : null,
               Array.isArray(jsonBody.content) ? jsonBody.content : null,
@@ -903,11 +953,27 @@ export async function runDeepSpaHarvester(
             const tabDetails = await page
               .evaluate(`(() => {
                 const cols = Array.from(document.querySelectorAll('table th, [role="columnheader"]')).map((th) => (th.textContent || '').trim()).filter(Boolean);
+                const rows = Array.from(document.querySelectorAll('table tbody tr, [role="row"], .el-table__row'))
+                  .slice(0, 12)
+                  .map((tr) =>
+                    Array.from(tr.querySelectorAll('td, [role="cell"]'))
+                      .map((td) => (td.textContent || '').replace(/\s+/g, ' ').trim())
+                      .filter((c) => c.length > 0)
+                  )
+                  .filter((r) => r.length > 0);
                 const cards = Array.from(document.querySelectorAll('[class*="card" i] h3, [class*="card" i] h4, [class*="card" i] strong')).map((c) => (c.textContent || '').trim()).filter(Boolean).slice(0, 6);
                 const btns = Array.from(document.querySelectorAll('main button')).map((b) => (b.textContent || '').replace(/\s+/g, ' ').trim()).filter((b) => b.length >= 2 && b.length <= 35).slice(0, 5);
-                return { columnsOrCards: cols.length ? cols : cards, actionButtons: btns };
+                return { cols, rows, columnsOrCards: cols.length ? cols : cards, actionButtons: btns };
               })()`)
-              .catch(() => ({ columnsOrCards: [tName], actionButtons: [] }));
+              .catch(() => ({ cols: [], rows: [], columnsOrCards: [tName], actionButtons: [] }));
+
+            if (domSurface.cols.length === 0 && tabDetails.cols.length > 0) {
+              domSurface.cols = tabDetails.cols;
+            }
+            if (domSurface.rows.length === 0 && tabDetails.rows.length > 0) {
+              domSurface.rows = tabDetails.rows;
+            }
+
             subTabsCatalog.push({
               tabName: tName,
               description: `Sub-tab operasional "${tName}" pada modul ${domSurface.heading}`,
