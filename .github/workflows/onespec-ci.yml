@@ -1,0 +1,59 @@
+name: OneSpec Enterprise ISO Quality Gate CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-and-verify:
+    name: ISO Standards Audit, Type Check & Regression Guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate Prisma Client
+        run: pnpm prisma:generate
+
+      - name: TypeScript Strict Compiler Audit (Zero Errors)
+        run: pnpm test:types
+
+      - name: Verify ISO 29119 QA Workbook Sections (16 Sheets)
+        run: pnpm test:workbook-sections
+
+      - name: Verify Merkle Vault Snapshot Diffing (ISO 27001)
+        run: pnpm test:vault-diff
+
+      - name: Verify Product Knowledge AST & Documentation Parity
+        run: pnpm test:product-knowledge
+
+      - name: Verify Screenshot Guard & Anti-Blank Capture Integrity
+        run: pnpm test:screenshot-guard
+
+      - name: Next.js Production Build Gate
+        run: pnpm build

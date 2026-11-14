@@ -592,7 +592,7 @@ export class TriModalDiscoveryService {
         paths[ep.path] = {};
       }
 
-      paths[ep.path][methodKey] = {
+      const operation: Record<string, any> = {
         summary: ep.summary,
         description: ep.description,
         operationId: ep.handlerName || `${methodKey}_${ep.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
@@ -601,6 +601,55 @@ export class TriModalDiscoveryService {
           '400': { description: 'Validation error or invalid request' },
         },
       };
+
+      if (ep.queryParameters && Object.keys(ep.queryParameters).length > 0) {
+        operation.parameters = Object.entries(ep.queryParameters).map(([paramName, paramData]) => {
+          const sampleVal = typeof paramData === 'object' && paramData !== null ? (paramData as any).example : paramData;
+          const paramType =
+            typeof paramData === 'object' && paramData !== null && (paramData as any).type
+              ? (paramData as any).type
+              : /^\d+$/.test(String(sampleVal))
+              ? 'integer'
+              : 'string';
+          return {
+            name: paramName,
+            in: 'query',
+            required: false,
+            schema: {
+              type: paramType,
+              example: sampleVal,
+            },
+          };
+        });
+      }
+
+      if (['post', 'put', 'patch'].includes(methodKey) && ep.requestBodySchema && Object.keys(ep.requestBodySchema).length > 0) {
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: Object.fromEntries(
+                  Object.entries(ep.requestBodySchema).map(([field, fieldType]) => [
+                    field,
+                    {
+                      type:
+                        typeof fieldType === 'string' &&
+                        ['string', 'number', 'integer', 'boolean', 'array', 'object'].includes(fieldType.toLowerCase())
+                          ? fieldType.toLowerCase()
+                          : 'string',
+                      example: `sample_${field}`,
+                    },
+                  ])
+                ),
+              },
+            },
+          },
+        };
+      }
+
+      paths[ep.path][methodKey] = operation;
     }
 
     return {

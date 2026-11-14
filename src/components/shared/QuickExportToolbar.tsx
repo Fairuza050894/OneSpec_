@@ -8,6 +8,7 @@ import {
   Send,
   ShieldCheck,
   RotateCw,
+  Archive,
 } from 'lucide-react';
 import type { CompiledSdlcState } from '@/services/sdlcCompiler';
 import { unifiedReportGenerator } from '@/services/unifiedReportGenerator';
@@ -173,6 +174,17 @@ export function QuickExportToolbar({
       >
         <ShieldCheck className="h-3.5 w-3.5 text-[#8B5CF6]" />
         <span>RBAC Matrix (JSON)</span>
+      </a>
+
+      {/* 6. Master ISO Handover Bundle (.zip) */}
+      <a
+        href={`/api/sdlc/export-all-bundle?format=zip${projectParam}&locale=${locale}`}
+        download={`OneSpec_Master_ISO_Bundle_${slug}.zip`}
+        className="h-7 px-2.5 bg-[#2563EB]/15 hover:bg-[#2563EB]/25 border border-[#2563EB]/60 hover:border-[#3B82F6] text-[#60A5FA] font-bold rounded-[3px] flex items-center gap-1.5 cursor-pointer transition-colors"
+        title="Download Complete 1-Click Master ISO Audit & Handover Bundle (.zip)"
+      >
+        <Archive className="h-3.5 w-3.5 text-[#60A5FA]" />
+        <span>Master ISO Bundle (.zip)</span>
       </a>
     </div>
   );

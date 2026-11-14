@@ -11,6 +11,7 @@ import type {
   DatabaseErdTable,
   DiscoveredApiEndpoint,
   FeatureModuleSurface,
+  FeatureSurfaceAnomaly,
   ScreenControlCatalogItem,
 } from '@/types/sdlc';
 
@@ -59,6 +60,17 @@ export async function waitForSpaDataReady(page: any, maxWaitMs = 2400): Promise<
     await page.waitForTimeout(250);
   }
   await page.waitForTimeout(300);
+}
+
+/**
+ * Normalizes route paths (removes query strings, hashes, trailing slashes)
+ */
+export function normalizeRoutePath(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let clean = raw.trim().split('?')[0].split('#')[0];
+  if (!clean.startsWith('/')) clean = `/${clean}`;
+  if (clean.length > 1 && clean.endsWith('/')) clean = clean.slice(0, -1);
+  return clean;
 }
 
 export async function runDeepSpaHarvester(
@@ -156,6 +168,13 @@ export async function runDeepSpaHarvester(
       r.abort()
     );
 
+    const reqStartMap = new WeakMap<any, number>();
+    context.on('request', (req: any) => {
+      reqStartMap.set(req, Date.now());
+    });
+
+    let activeRouteAnomalies: FeatureSurfaceAnomaly[] = [];
+
     // Sniffer Jaringan: Tangkap semua XHR/Fetch + Cross-Subdomain API + Bedah Isi JSON untuk Menu & Tabel DB!
     context.on('response', async (resp: any) => {
       try {
@@ -179,6 +198,9 @@ export async function runDeepSpaHarvester(
         if (isXhrOrFetch || isJson || isApiLike) {
           const method = req.method().toUpperCase();
           const key = `${method} ${u.pathname}`;
+          const startTime = reqStartMap.get(req);
+          const latencyMs = startTime ? Math.max(8, Date.now() - startTime) : 38;
+
           let reqBodySchema: Record<string, string> | undefined;
           try {
             const postData = req.postDataJSON?.();
@@ -188,9 +210,59 @@ export async function runDeepSpaHarvester(
             }
           } catch {}
 
+          let queryParams: Record<string, { type: string; required?: boolean; example?: string }> | undefined;
+          if (u.searchParams && Array.from(u.searchParams.keys()).length > 0) {
+            queryParams = {};
+            u.searchParams.forEach((v, k) => {
+              if (queryParams) {
+                queryParams[k] = {
+                  type: /^\d+$/.test(v) ? 'integer' : 'string',
+                  required: false,
+                  example: v || 'sample',
+                };
+              }
+            });
+          }
+
           let jsonBody: any = null;
           if (isJson) {
             jsonBody = await resp.json().catch(() => null);
+          }
+
+          // Catat Anomali HTTP Error (>= 400)
+          if (resp.status() >= 400 && activeRouteAnomalies.length < 8) {
+            const hasHttpErr = activeRouteAnomalies.some(
+              (a) => a.type === 'HTTP_ERROR' && a.technicalEvidence.includes(key)
+            );
+            if (!hasHttpErr) {
+              activeRouteAnomalies.push({
+                type: 'HTTP_ERROR',
+                severity: resp.status() >= 500 ? 'CRITICAL' : 'MAJOR',
+                title: `HTTP ${resp.status()} Error on ${method} ${u.pathname}`,
+                expectedBehavior: 'HTTP 200/201 OK response from server',
+                actualBehavior: `Server returned HTTP ${resp.status()} on ${method} ${u.pathname}`,
+                technicalEvidence: `${method} ${u.pathname} -> HTTP ${resp.status()} (${latencyMs}ms)`,
+                stepsToReproduce: [`Execute API call ${method} ${u.pathname}`],
+              });
+            }
+          }
+
+          // Catat Anomali Slow Response (> 1500ms SLA)
+          if (latencyMs > 1500 && activeRouteAnomalies.length < 8) {
+            const hasSlow = activeRouteAnomalies.some(
+              (a) => a.type === 'SLOW_RESPONSE' && a.technicalEvidence.includes(key)
+            );
+            if (!hasSlow) {
+              activeRouteAnomalies.push({
+                type: 'SLOW_RESPONSE',
+                severity: 'MINOR',
+                title: `Slow API Response (${latencyMs}ms) on ${method} ${u.pathname}`,
+                expectedBehavior: 'Response latency < 1500ms SLA',
+                actualBehavior: `Observed ${latencyMs}ms latency on ${method} ${u.pathname}`,
+                technicalEvidence: `${method} ${u.pathname} (${latencyMs}ms)`,
+                stepsToReproduce: [`Measure network latency on ${method} ${u.pathname}`],
+              });
+            }
           }
 
           if (activeRouteApis.length < 25 && !activeRouteApis.some((a) => a.method === method && a.path === u.pathname)) {
@@ -198,7 +270,7 @@ export async function runDeepSpaHarvester(
               method: (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method) ? method : 'GET') as any,
               path: u.pathname,
               status: resp.status(),
-              latencyMs: 42,
+              latencyMs,
             });
           }
           if (!apiMap.has(key)) {
@@ -211,11 +283,17 @@ export async function runDeepSpaHarvester(
               handlerName: `${method.toLowerCase()}_${u.pathname.replace(/[^a-zA-Z0-9]/g, '_')}`,
               summary: `${method} ${u.pathname} (HTTP ${resp.status()})`,
               description: `Intercepted live API call (${u.origin})`,
+              queryParameters: queryParams,
               requestBodySchema: reqBodySchema,
               linkedTestCaseIds: [`TC-${String(apiMap.size + 1).padStart(3, '0')}`],
               linkedRequirementId: 'REQ-US-01',
               authRequired: true,
             });
+          } else if (queryParams) {
+            const existing = apiMap.get(key);
+            if (existing && !existing.queryParameters) {
+              existing.queryParameters = queryParams;
+            }
           }
 
           // Jika respons berupa JSON, ekstrak (a) rute menu tersembunyi & nested routes dan (b) struktur tabel database nyata!
@@ -567,7 +645,7 @@ export async function runDeepSpaHarvester(
             searchFilterSelectors: [],
             paginationControls: [],
             triggeredApis: [{ method: 'POST', path: '/api/v1/auth/login', status: 200, latencyMs: 45 }],
-            observedAnomalies: [],
+            observedAnomalies: [...activeRouteAnomalies],
           });
         }
         await cleanLoginCtx.close().catch(() => {});
@@ -765,20 +843,29 @@ export async function runDeepSpaHarvester(
       }
     } catch {}
 
-    // Gabungkan semua rute dari 5 sumber & saring rute yang valid
-    const allCandidateRoutes = Array.from(
-      new Set([
-        ...(initialResult.discoveredPages || []),
-        ...accordionRoutes,
-        ...Array.from(jsonDiscoveredRoutes),
-        ...clickDiscoveredRoutes,
-      ])
-    ).filter((r) => {
+    // Gabungkan semua rute dari 5 sumber, normalisasi, dan saring rute yang valid
+    const isStaticFileOrAsset = (r: string) =>
+      /\.(js|css|png|jpg|jpeg|webp|gif|svg|ico|woff|woff2|ttf|eot|json|map|pdf|xlsx|xls|docx|doc|zip|csv|xml|txt)$/i.test(r);
+
+    const rawCandidateRoutes = [
+      ...(initialResult.discoveredPages || []),
+      ...accordionRoutes,
+      ...Array.from(jsonDiscoveredRoutes),
+      ...clickDiscoveredRoutes,
+    ]
+      .map(normalizeRoutePath)
+      .filter(Boolean);
+
+    const hasDashboardOrHome = rawCandidateRoutes.some((r) => r === '/home' || r === '/dashboard');
+
+    const allCandidateRoutes = Array.from(new Set(rawCandidateRoutes)).filter((r) => {
       if (!r || !r.startsWith('/') || r.startsWith('//')) return false;
       if (/^\/(api|_nuxt|_next|static|assets|images|icons|favicon)/i.test(r)) return false;
-      if (/\.(js|css|png|jpg|jpeg|svg|ico|woff|woff2|ttf|eot|json|map)$/i.test(r)) return false;
+      if (isStaticFileOrAsset(r)) return false;
       if (/^\/(login|signin|sign-in|logout|signout|keluar)$/i.test(r)) return false;
       if (r.includes(':') || r.includes('[') || r.includes('*')) return false;
+      // Jika ada /home atau /dashboard di dalam daftar rute, lewati rute '/' agar tidak dipindai dua kali
+      if (r === '/' && hasDashboardOrHome) return false;
       return true;
     });
 
@@ -792,31 +879,54 @@ export async function runDeepSpaHarvester(
       const routePath = routesToVisit[idx];
       const fullPageUrl = `${origin}${routePath}`;
       activeRouteApis = [];
+      activeRouteAnomalies = [];
+
+      const pageErrorHandler = (err: any) => {
+        if (activeRouteAnomalies.length < 8) {
+          activeRouteAnomalies.push({
+            type: 'CONSOLE_ERROR',
+            severity: 'MAJOR',
+            title: `Uncaught Runtime Exception on ${routePath}`,
+            expectedBehavior: '0 uncaught exceptions during navigation',
+            actualBehavior: (err?.message || 'Uncaught error').slice(0, 180),
+            technicalEvidence: err?.stack || err?.message || 'Console error',
+            stepsToReproduce: [`Navigate to ${routePath}`],
+          });
+        }
+      };
+      page.once('pageerror', pageErrorHandler);
 
       try {
-        // Coba navigasi via SPA router klik/push terlebih dahulu agar token state di memori terjaga, lalu fallback ke page.goto
-        const navigatedViaSpa = await page
-          .evaluate(`((targetPath) => {
-            const link = document.querySelector('a[href="' + targetPath + '"]');
-            if (link) {
-              link.click();
-              return true;
-            }
-            const nuxtRoot = document.querySelector('#__nuxt') || document.querySelector('#app');
-            const router = nuxtRoot?.__vue_app__?.config?.globalProperties?.$router || window.$nuxt?.$router;
-            if (router && typeof router.push === 'function') {
-              router.push(targetPath);
-              return true;
-            }
-            return false;
-          })(${JSON.stringify(routePath)})`)
-          .catch(() => false);
+        // Anti-Hang Per-Page Navigation Guard dengan batas timeout 14 detik
+        await Promise.race([
+          (async () => {
+            const navigatedViaSpa = await page
+              .evaluate(`((targetPath) => {
+                const link = document.querySelector('a[href="' + targetPath + '"]');
+                if (link) {
+                  link.click();
+                  return true;
+                }
+                const nuxtRoot = document.querySelector('#__nuxt') || document.querySelector('#app');
+                const router = nuxtRoot?.__vue_app__?.config?.globalProperties?.$router || window.$nuxt?.$router;
+                if (router && typeof router.push === 'function') {
+                  router.push(targetPath);
+                  return true;
+                }
+                return false;
+              })(${JSON.stringify(routePath)})`)
+              .catch(() => false);
 
-        if (!navigatedViaSpa) {
-          await page.goto(fullPageUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
-        }
+            if (!navigatedViaSpa) {
+              await page.goto(fullPageUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+            }
 
-        await waitForSpaDataReady(page, 2200);
+            await waitForSpaDataReady(page, 2000);
+          })(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('PAGE_NAVIGATION_TIMEOUT')), 14000)),
+        ]).catch((timeoutErr) => {
+          console.warn(`[DeepSpaHarvester] Route anti-hang guard triggered on ${routePath}:`, timeoutErr?.message);
+        });
 
         // Jika di-redirect paksa ke /login padahal sedang memindai rute non-login, lewati agar tidak menduplikasi modul Login
         const currentPathname = new URL(page.url()).pathname;
@@ -838,8 +948,9 @@ export async function runDeepSpaHarvester(
           })()`)
           .catch(() => []);
 
-        for (const nf of newlyFoundLinks) {
-          if (!routesToVisit.includes(nf) && routesToVisit.length < 45) {
+        for (const rawNf of newlyFoundLinks) {
+          const nf = normalizeRoutePath(rawNf);
+          if (nf && !routesToVisit.includes(nf) && !isStaticFileOrAsset(nf) && routesToVisit.length < 45) {
             routesToVisit.push(nf);
           }
         }
@@ -1120,7 +1231,7 @@ export async function runDeepSpaHarvester(
                     latencyMs: 38,
                   },
                 ],
-          observedAnomalies: [],
+          observedAnomalies: [...activeRouteAnomalies],
         });
       } catch {}
     }

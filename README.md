@@ -15,6 +15,7 @@
 [![ISO 25010](https://img.shields.io/badge/ISO%2FIEC-25010%3A2023-blue?style=flat-square)](https://www.iso.org/standard/78176.html)
 [![ISO 27001 & OWASP](https://img.shields.io/badge/ISO%2FIEC-27001%20%26%20OWASP%20API%20Top%2010-critical?style=flat-square)](https://owasp.org/www-project-api-security/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![CI Quality Gate](https://github.com/Fairuza050894/OneSpec_/actions/workflows/onespec-ci.yml/badge.svg)](https://github.com/Fairuza050894/OneSpec_/actions/workflows/onespec-ci.yml)
 
 ---
 
@@ -183,6 +184,7 @@ The Studio exposes clean HTTP REST endpoints for automated headless execution:
 
 - `POST /api/sdlc/crawl`: Executes the 7-Layer Deep SPA Harvester, synthesizes full SDLC artifacts, and persists snapshots to the Workspace Vault.
 - `POST /api/sdlc/discover`: Runs quad-modal discovery across Git repositories, local folders, or staging environments.
+- `GET /api/sdlc/export-all-bundle?format=zip|json`: 1-Click Master ISO Audit & Handover Bundle generator (packages .xlsx, .docx, .spec.ts, Postman .json, RBAC matrix, OpenAPI 3.1, and ISO compliance manifest).
 - `GET /api/sdlc/automation-bundle?format=playwright|postman|rbac`: Streams generated executable automation files.
 - `GET /api/sdlc/vault`: Lists saved project workspaces, metadata, and snapshot diffs.
 - `POST /api/export/document`: Generates `.xlsx`, `.docx`, or `.pdf` binary reports on demand.
