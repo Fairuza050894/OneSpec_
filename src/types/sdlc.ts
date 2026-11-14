@@ -6,7 +6,7 @@
  * - ISO/IEC/IEEE 29119-3:2022 (Software and systems engineering — Software testing — Part 3: Test documentation)
  */
 
-export type ProjectMode = 'GREENFIELD' | 'BROWNFIELD' | 'BLIND_URL';
+export type ProjectMode = 'GREENFIELD' | 'BROWNFIELD' | 'BLIND_URL' | 'LIVE_URL' | 'GIT_REPO' | 'LOCAL_ZIP' | 'GREENFIELD_MOM';
 
 export interface ProjectWorkspace {
   id: string;
@@ -99,10 +99,10 @@ export interface FieldValidationSpec {
     pattern?: string;
     description?: string;
   };
-  constraintExpression?: string; // e.g. "cartTotal >= 50000"
+  constraintExpression?: string; // e.g. "amount > 0"
   errorCode: string;
   errorHttpStatus: number; // e.g. 400, 422
-  exactUiErrorString?: string; // e.g. "Total belanja minimum Rp 50.000 untuk menggunakan voucher ini"
+  exactUiErrorString?: string; // e.g. "Amount must be a positive non-zero value"
 }
 
 export interface ValidationRuleContract {
@@ -114,6 +114,8 @@ export interface ValidationRuleContract {
   errorCode: string;
   httpStatus: number;
   exactUiErrorString: string;
+  moduleName?: string;
+  pagePath?: string;
 }
 
 export interface BrdMatrixRow {
@@ -124,6 +126,7 @@ export interface BrdMatrixRow {
   sourceMoMLine: string;
   priority: BusinessRulePriority;
   complianceReference?: string;
+  moduleName?: string;
 }
 
 export interface HttpContractSpec {
@@ -302,8 +305,8 @@ export interface RtmTestCase {
   testSteps: TestStepSpec[];
   expectedResult: string; // ISO 29119 Test Oracle
   gherkinScenario: string; // Target BDD scenario
-  domSelector?: string | null; // e.g. '[data-testid="voucher-input"]'
-  apiEndpoint?: string | null; // e.g. 'POST /api/v1/vouchers/apply'
+  domSelector?: string | null; // e.g. '[data-testid="input-field"]'
+  apiEndpoint?: string | null; // e.g. 'POST /api/v1/records/process'
   executionVerdict: ExecutionVerdict;
   executionLatencyMs?: number | null; // Tabular-nums numeric latency metric
   executionLog?: string | null;
@@ -342,19 +345,69 @@ export interface RequirementTraceabilityMatrixRow {
 
 export type AutoDiscoveryMode = 'MODE_A_GIT' | 'MODE_B_LOCAL' | 'MODE_C_STAGING' | 'MODE_D_BLIND_URL';
 
-export type BlindCrawlAuthType = 'NONE' | 'LOGIN_FORM' | 'BEARER_COOKIE' | 'BASIC_OR_FORM';
+export type BlindCrawlAuthType = 'NONE' | 'LOGIN_FORM' | 'BEARER_COOKIE' | 'INTERACTIVE_LOGIN' | 'BASIC_OR_FORM';
+export type TargetEnvironmentMode = 'AUTO_DETECT' | 'SANDBOX_AUTONOMOUS' | 'PRODUCTION_READ_ONLY';
 
 export interface BlindCrawlConfig {
   targetUrl: string; // e.g. "http://10.10.15.75:3100/"
   authType: BlindCrawlAuthType;
+  environmentMode?: TargetEnvironmentMode;
   username?: string;
   password?: string;
+  accessRoleOrTenant?: string;
   authHeaderOrCookie?: string;
   bearerOrCookie?: string;
   crawlDepth?: 'FULL_DOM_JS_AST' | 'DOM_ONLY' | 'DEEP_INTERACTIVE' | 'FULL_DOM_JS_HAR';
   captureHar?: boolean;
+  dynamicFieldValues?: Record<string, string>;
+  extraFields?: Record<string, string>;
 }
 
+export interface DetectedLoginTab {
+  label: string;
+  selector: string;
+  options: string[];
+}
+
+export interface DetectedLoginSelect {
+  name: string;
+  label: string;
+  selector: string;
+  isCustom?: boolean;
+  options: Array<{ label: string; value: string }>;
+}
+
+export interface DetectedLoginInput {
+  key: string;
+  name: string;
+  id: string;
+  type: string;
+  label: string;
+  placeholder: string;
+  selector: string;
+  required: boolean;
+}
+
+export interface DetectedSubmitButton {
+  text: string;
+  selector: string;
+}
+
+export interface LoginSurfaceProbeResult {
+  targetUrl: string;
+  requiresLogin: boolean;
+  pageTitle: string;
+  detectedTabs: DetectedLoginTab[];
+  detectedSelects: DetectedLoginSelect[];
+  detectedInputs: DetectedLoginInput[];
+  submitButton: DetectedSubmitButton | null;
+}
+
+export interface AutoRobotFieldValue {
+  selector: string;
+  kind: 'tab' | 'select' | 'custom_select' | 'input';
+  value: string;
+}
 export interface BlindCrawlDiscoveredForm {
   formId: string;
   action: string;
@@ -367,6 +420,204 @@ export interface BlindCrawlDiscoveredForm {
     validationAttrs?: Record<string, string>;
   }[];
   submitSelector: string;
+}
+export interface FeatureSurfaceInput {
+  name: string;
+  id?: string;
+  type: string;
+  placeholder: string;
+  labelText?: string;
+  required: boolean;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  selector: string;
+  pagePath?: string;
+  moduleName?: string;
+}
+
+export interface FeatureSurfaceAnomaly {
+  type: 'HTTP_ERROR' | 'CONSOLE_ERROR' | 'SLOW_RESPONSE' | 'MISSING_VALIDATION' | 'EMPTY_TABLE_ERROR';
+  title: string;
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR';
+  stepsToReproduce: string[];
+  expectedBehavior: string;
+  actualBehavior: string;
+  technicalEvidence: string;
+}
+export interface SubTabCatalogItem {
+  tabName: string;
+  description: string;
+  columnsOrCards: string[];
+  actionButtons: string[];
+}
+
+export type ScreenControlType =
+  | 'MENU_NAVIGATION'
+  | 'SUB_TAB'
+  | 'PRIMARY_ACTION_BUTTON'
+  | 'FILTER_CONTROL'
+  | 'SEARCH_INPUT'
+  | 'DATA_CARD_OR_TABLE'
+  | 'MODAL_FORM_INPUT';
+
+export type ScreenControlLocation =
+  | 'Header Atas'
+  | 'Sidebar Kiri'
+  | 'Baris Sub-Tab Halaman'
+  | 'Toolbar Pencarian & Filter'
+  | 'Area Konten / Kartu Data'
+  | 'Dialog / Modal Filter & Form'
+  | 'Form Autentikasi Login';
+
+export interface ScreenControlCatalogItem {
+  controlId?: string;
+  controlName: string;
+  controlType: ScreenControlType;
+  screenLocation: ScreenControlLocation;
+  availableOptionsOrSample: string;
+  calloutNumber?: number;
+  xPercent?: number;
+  yPercent?: number;
+}
+export interface FeatureCardItem {
+  title: string;
+  badges: string[];
+  metadata: string[];
+}
+
+export interface VisualCalloutPinItem {
+  calloutNumber: number;
+  label: string;
+  kind: 'BUTTON' | 'FILTER' | 'SUB_TAB';
+  xPercent: number;
+  yPercent: number;
+  summary: string;
+}
+
+export interface ReleaseSignOffCertificate {
+  status: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL';
+  approvedBy: string;
+  roleTitle: string;
+  releaseNotes: string;
+  signedAt: string;
+}
+
+export interface FeatureModuleSurface {
+  moduleId: string;
+  moduleName: string;
+  routePath: string;
+  fullUrl: string;
+  pageHeading: string;
+  hasDataTable: boolean;
+  tableColumns: string[];
+  sampleRowData: string[];
+  sampleRows?: string[][];
+  totalRowCountText?: string;
+  hasSearchOrFilter?: boolean;
+  searchFilterSelectors: string[];
+  toolbarButtons?: string[];
+  datePickers?: string[];
+  subTabsCatalog?: SubTabCatalogItem[];
+  paginationControls?: string[];
+  screenControlsCatalog?: ScreenControlCatalogItem[];
+  cardItems?: FeatureCardItem[];
+  formsAndModals: Array<{
+    formTitle: string;
+    triggerButtonText?: string;
+    inputs: FeatureSurfaceInput[];
+    submitButtonText: string;
+  }>;
+  triggeredApis: Array<{
+    method: string;
+    path: string;
+    status: number;
+    latencyMs: number;
+    requestSample?: string;
+    responseSample?: string;
+  }>;
+  observedAnomalies: FeatureSurfaceAnomaly[];
+  screenshotDataUrl?: string;
+  capturedAt?: string;
+  customCalloutPins?: VisualCalloutPinItem[];
+}
+
+export interface TestScenarioItem {
+  scenarioId: string;
+  moduleId: string;
+  moduleName: string;
+  routePath: string;
+  category:
+    | 'POSITIVE_VIEW_TABLE'
+    | 'POSITIVE_SEARCH_FILTER'
+    | 'NEGATIVE_EMPTY_SEARCH'
+    | 'POSITIVE_FORM_SUBMISSION'
+    | 'NEGATIVE_MANDATORY_VALIDATION'
+    | 'BOUNDARY_FORMAT'
+    | 'SECURITY_API_CONTRACT'
+    | 'MULTI_TAB_INTEGRITY'
+    | 'FILTER_COMBINATION_MATRIX'
+    | 'CARD_DETAIL_WORKFLOW'
+    | 'DOMAIN_MUTATION_RULES'
+    | 'BUSINESS_LOGIC'
+    | 'DATA_INTEGRITY'
+    | 'BVA_PAGINATION';
+  title: string;
+  description: string;
+  linkedTestCaseIds: string[];
+}
+export interface BugReportTicket {
+  bugId: string;
+  moduleId: string;
+  moduleName: string;
+  featureUrl: string;
+  title: string;
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR';
+  priority: 'P1' | 'P2' | 'P3';
+  status: 'OPEN' | 'FIXED' | 'VERIFIED';
+  stepsToReproduce: string[];
+  expectedResult: string;
+  actualResult: string;
+  technicalEvidence: string;
+  recommendedFix: string;
+}
+
+export interface UatAcceptanceCriterion {
+  criterion: string;
+  expected: string;
+  actual: string;
+  passed: boolean;
+}
+
+export interface UatFeatureFlow {
+  uatId: string;
+  moduleId: string;
+  moduleName: string;
+  routePath: string;
+  userRole: string;
+  businessScenarioTitle: string;
+  endToEndJourneySteps: string[];
+  acceptanceCriteria: UatAcceptanceCriterion[];
+  uatStatus: 'ACCEPTED' | 'ACCEPTED_WITH_NOTES' | 'REJECTED';
+  testerNotes: string;
+}
+
+export interface CrawledModuleSummary {
+  moduleName: string;
+  pagePath: string;
+  headings: string[];
+  inputs: Array<{
+    name: string;
+    selector: string;
+    type: string;
+    required: boolean;
+    labelText?: string;
+    placeholder?: string;
+  }>;
+  buttons: string[];
+  tabs: string[];
+  tables: Array<{ tableName: string; columns: string[] }>;
+  apis: Array<{ method: string; path: string; status?: number }>;
 }
 
 export interface BlindCrawlResult {
@@ -385,9 +636,14 @@ export interface BlindCrawlResult {
   bpmnXml: string;
   databaseTables: DatabaseErdTable[];
   domBindings: DomTraceabilityBinding[];
+  discoveredJsChunks?: string[];
+  rawJsSnippets?: Array<{ chunkUrl: string; jsCode: string }>;
   extractedEntities?: any[];
+  discoveredModules?: CrawledModuleSummary[];
+  discoveredFeatureModules?: FeatureModuleSurface[];
+  featureModules?: FeatureModuleSurface[];
+  scrapedHeadings?: string[];
 }
-
 export interface GitDiscoveryConfig {
   repositoryUrl: string;
   branch: string;
@@ -413,6 +669,8 @@ export interface DiscoveredApiEndpoint {
   handlerName?: string;
   summary: string;
   description?: string;
+  featureModule?: string;
+  queryParameters?: Record<string, { type: string; required?: boolean; example?: string }>;
   requestBodySchema?: Record<string, unknown> | null;
   responseSchemas?: Record<string, unknown>;
   linkedTestCaseIds: string[]; // e.g. ["TC-001", "TC-002", "TC-003"]
@@ -446,11 +704,11 @@ export interface DomTraceabilityBinding {
   userStoryId: string; // "REQ-US-01"
   businessRuleId: string; // "BR-01"
   testCaseId: string; // "TC-001"
-  domSelector: string; // '[data-testid="voucher-input"]'
+  domSelector: string; // '[data-testid="username-input"]'
   ariaRole: string; // "textbox"
-  targetElement: string; // "<input id='voucher-code' />"
-  apiEndpoint: string; // "POST /api/v1/checkout/apply-voucher"
-  dbTarget: string; // "Vouchers.code"
+  targetElement: string; // "<input id='username' />"
+  apiEndpoint: string; // "POST /api/v1/auth/login"
+  dbTarget: string; // "SystemUser.email"
   parityStatus: 'BOUND_AND_VERIFIED' | 'SYNTHETIC_CANDIDATE';
 }
 
@@ -492,9 +750,10 @@ export interface DefectTicketPayload {
 export interface AuditDiscrepancyItem {
   id: string; // "GAP-001"
   verdict: GapAuditVerdict;
+  gapCategory?: 'MISSING_VALIDATION' | 'HTTP_ERROR' | 'SCHEMA_MISMATCH' | 'SHADOW_API' | string;
   ruleRef: string; // "VR-01", "BR-03", etc.
   userStoryRef: string; // "REQ-US-01"
-  targetEntity: string; // "POST /api/v1/checkout/apply-voucher"
+  targetEntity: string; // "POST /api/v1/auth/login"
   discrepancyTitle: string;
   discrepancyDescription: string;
   severity: 'CRITICAL' | 'MAJOR' | 'MODERATE' | 'LOW';
@@ -504,6 +763,9 @@ export interface AuditDiscrepancyItem {
   defectTicket: DefectTicketPayload;
   remediationAction: string;
 }
+
+export type GapAuditItem = AuditDiscrepancyItem;
+export type DiscoveredFeatureModule = FeatureModuleSurface;
 
 export interface GapAuditSummary {
   totalAudited: number;
@@ -655,10 +917,12 @@ export interface FunctionalStepAssertion {
 }
 
 export interface FunctionalTestCaseResult {
-  testId: string; // e.g. "TC-001"
+  testId: string; // e.g. "TC-001" or "UAT-E2E-001"
   title: string;
   ruleRef: string;
   userStoryRef: string;
+  moduleName?: string;
+  pagePath?: string;
   scenarioType: 'POSITIVE' | 'BOUNDARY' | 'NEGATIVE' | 'CONCURRENCY';
   verdict: 'PASSED' | 'FAILED' | 'BOTTLENECK';
   durationMs: number;
@@ -683,4 +947,7 @@ export interface UnifiedRunnerExecutionSummary {
   k6Summary: K6MetricSummary;
   functionalResults: FunctionalTestCaseResult[];
   executionTrace: TestSuiteExecutionTrace;
+  testScenarios?: TestScenarioItem[];
+  bugReports?: BugReportTicket[];
+  uatFlows?: UatFeatureFlow[];
 }

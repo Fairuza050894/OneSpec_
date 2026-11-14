@@ -1,0 +1,37 @@
+## Anti-Slop Delivery Gate Report
+
+### Block 1 — Hard Gate R-01..R-40
+| Grup aturan | Status | Bukti |
+|---|---|---|
+| R-01/R-11/R-24 (no gradient ungu-biru, orb glow, sparkle/emoji header, kartu pill) | **PASS** | Hanya token `#0B0C0E/#111317/#16191F/#22262E`, radius ≤ 4px; emoji hanya pada label toggle yang diminta user, bukan header dekoratif |
+| R-02..R-10 (struktur, tipografi, density workbench) | **PASS** | Blueprint SVG memakai hierarki label/route/metadata, tanpa hero/marketing |
+| R-12..R-23 (no dead button, fake metric, welcome card) | **PASS** | Semua kontrol selector punya handler nyata (`setViewAllModules`, `setBook1ModuleIndex`); angka kontrol dihitung dari data |
+| R-25..R-38 (aksesibilitas, responsif, state) | **PASS** | Chip aktif: `#10B981` + teks gelap (kontras ≥ 4.5:1), UKGW `#2563EB` + putih; `focus-visible` ring, `cursor-pointer`, label toggle eksplisit |
+| R-39/R-40 (no conversational AI filler) | **PASS** | Copy bersifat teknis/instructif, tanpa sapaan atau filler |
+| Larangan AGENTS.md: 3-pane fixed viewport, `cmdk`, `tabular-nums`, terminologi ISO 29148/BPMN 2.0/ISO 29119 | **PASS** | Tidak ada perubahan layout global; angka kolom modul tetap `tabular-nums` |
+
+### Block 2 — Purpose Gate
+- **Tujuan:** menghilangkan screenshot kosong pasca-login dan menjamin setiap rute/page/API group muncul sebagai modul manual ISO 26514 yang lengkap.
+- **Terpenuhi:** paint-wait + baseline screenshot menghapus sumber gambar putih; coverage helper menutup modul yang hilang; blueprint SVG menjadi jaring pengaman deterministik; kedua reader menampilkan seluruh modul sekaligus.
+- **Bukan** sekadar kosmetik: kegagalan render kini punya jalur pemulihan berlapis (paint-wait → baseline → coverage → blueprint).
+
+### Block 3 — Quality Locks & Contrast
+- Token warna sesuai `DESIGN.md`; tidak ada warna di luar palet kecuali aksen status (`#10B981`, `#2563EB`).
+- Kontras teks utama ≥ 7:1 pada `#0B0C0E`; chip aktif diverifikasi ≥ 4.5:1.
+- Radius maksimum 4px, pane layout 0px — tidak ada perubahan.
+- Semua angka (jumlah kontrol, indeks modul) memakai `tabular-nums`.
+- SVG deterministik (tanpa font eksternal/remote asset), ukuran 7–11 KB — di atas ambang 6500.
+
+### Block 4 — Functional Parity Verification
+| Klaim | Metode | Hasil |
+|---|---|---|
+| Type safety seluruh repo | `npx tsc --noEmit` | Lulus, tanpa output |
+| Workbook sections 7–8 | `pnpm test:workbook-sections` | `Workbook sections 7–8 verified` |
+| Snapshot API diff + audit naratif | `pnpm test:vault-diff` | `Snapshot API diff and audit narratives verified` |
+| DOCX delta & posisi Page 1 | `pnpm test:docx-delta` | `DOCX delta table content and Page 1 position verified` |
+| Product knowledge, CRUD/lineage, Tabel 9–11 | `pnpm test:product-knowledge` | `... verified` |
+| Blueprint SVG valid & terlihat | `xmllint` + render `sharp` | 1280×720, UI gelap terlihat |
+| Coverage menghasilkan modul lengkap | smoke test | `MOD-01..MOD-04` dengan rute & API benar; modul Login tidak terduplikasi |
+| Substitusi screenshot | smoke test JPEG kecil | Kembali `data:image/svg+xml;utf8,…` |
+
+**Catatan terbuka (bukan blocker):** `modernDocumentExporter.bakeCalloutPinsOntoImage` hanya merasterisasi JPEG/PNG, sehingga blueprint SVG dilewati untuk gambar DOCX — keterbatasan yang sudah ada pada wireframe login SVG sebelumnya. Perubahan masih **uncommitted**; beri tahu saya jika ingin saya buatkan commit terpisah untuk keempat bagian ini.

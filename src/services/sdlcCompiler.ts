@@ -4,6 +4,7 @@
  * - ISO/IEC/IEEE 29148:2018 (StRS / SyRS Specification Synthesis)
  * - ISO/IEC 19510 / BPMN 2.0 (Deterministic Process Orchestration)
  * - ISO/IEC/IEEE 29119-4:2021 (Multi-Dimensional RTM Scenario Synthesis)
+ * ZERO Hardcoded Domain Strings (100% Dynamic Source Ingestion)
  */
 
 import type {
@@ -11,19 +12,47 @@ import type {
   BrdMatrixRow,
   ValidationRuleContract,
   TriModalDiscoveryResult,
+  DiscoveredApiEndpoint,
   AuditDiscrepancyItem,
   GapAuditSummary,
   ExecutionPipelineStage,
   TestSuiteExecutionTrace,
+  CrawledModuleSummary,
+  FeatureModuleSurface,
+  TestScenarioItem,
+  BugReportTicket,
+  UatFeatureFlow,
+  DatabaseErdTable,
 } from '@/types/sdlc';
-import type { SynthesizedRtmRow } from './rtmSynthesizer';
+import { synthesizeFourQaDeliverables, type SynthesizedRtmRow } from './rtmSynthesizer';
 import { generateCanonicalBpmn2Xml } from './bpmnXmlGenerator';
+import { gapAuditorService } from './gapAuditorService';
+import { automationSynthesizerService } from './automationSynthesizer';
+import { tsdSynthesizerService, type TsdMatrixRow } from './tsdSynthesizer';
+import { architectureDeconstructorService, type DeconstructedArchitecture } from './architectureDeconstructor';
+import { deepBundleUnpackerService, type DeepUnpackResult } from './deepBundleUnpackerService';
+import { owaspDastService, type OwaspDastAssessmentSummary } from './owaspDastService';
+import { complianceBinderService, type ComplianceAssessmentResult } from './complianceBinderService';
+import { dfdReverseService, type ReverseDfdResult } from './dfdReverseService';
+import { iso31000RiskService, type IsoRiskAssessmentSummary } from './iso31000RiskService';
+import { smtFormalVerifierService, type SmtFormalVerificationSummary } from './smtFormalVerifierService';
+import { delphiConsensusService, type DelphiConsensusSummary } from './delphiConsensusService';
+import { sdlcKnowledgeGraphService, type KnowledgeGraphSummary } from './sdlcKnowledgeGraphService';
+import type { RegressionDiffSummary } from './workspaceVaultService';
+import { domainLogicBrainService } from './domainLogicBrainService';
+import { ensureCompleteFeatureModuleCoverage } from '@/lib/featureModuleCoverage';
 
 export interface CompiledSdlcState {
   appName: string;
   targetUrl: string;
   badgeText: string;
   rawMoMNotes: string;
+  rawIsoSpecMarkdown?: string;
+  discoveredModules?: CrawledModuleSummary[];
+  discoveredFeatureModules?: FeatureModuleSurface[];
+  testScenarios?: TestScenarioItem[];
+  bugReports?: BugReportTicket[];
+  uatFlows?: UatFeatureFlow[];
   extractedEntities: Array<{
     id: string;
     type: 'ACTOR' | 'BUSINESS_RULE' | 'CONSTRAINT' | 'KPI';
@@ -34,6 +63,7 @@ export interface CompiledSdlcState {
   }>;
   brdMatrixRows: BrdMatrixRow[];
   validationRules: ValidationRuleContract[];
+  databaseTables?: DatabaseErdTable[];
   bpmnXml: string;
   rtmRows: SynthesizedRtmRow[];
   discoveryResult: TriModalDiscoveryResult;
@@ -44,1220 +74,1070 @@ export interface CompiledSdlcState {
   postmanCollectionJson: string;
   pipelineStages: ExecutionPipelineStage[];
   executionTraces: TestSuiteExecutionTrace[];
+  // Full 12-Step Advanced Specialist Artifacts
+  tsdRows: TsdMatrixRow[];
+  tsdMarkdown: string;
+  deconstructedArchitecture: DeconstructedArchitecture;
+  architectureBlueprintMarkdown: string;
+  deepUnpackResult: DeepUnpackResult;
+  owaspDastSummary: OwaspDastAssessmentSummary;
+  complianceAssessment: ComplianceAssessmentResult;
+  reverseDfdResult: ReverseDfdResult;
+  isoRiskSummary: IsoRiskAssessmentSummary;
+  smtVerificationSummary: SmtFormalVerificationSummary;
+  delphiConsensusSummary: DelphiConsensusSummary;
+  knowledgeGraphSummary: KnowledgeGraphSummary;
+  regressionDiffSummary?: RegressionDiffSummary | null;
+  releaseSignOff?: import('@/types/sdlc').ReleaseSignOffCertificate | null;
 }
 
 export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult): CompiledSdlcState {
-  const targetUrl = crawlResult.targetUrl || 'http://10.10.15.75:3100/';
-  const appName = crawlResult.appName || 'Mobospace - Transportation Control Tower';
-  const isMobospace = targetUrl.includes('10.10.15.75') || targetUrl.includes('3100') || appName.toLowerCase().includes('mobospace');
+  const targetUrl = crawlResult.targetUrl || 'http://localhost:3000/';
+  let appName = crawlResult.appName && crawlResult.appName.trim() ? crawlResult.appName.trim() : '';
+  if (!appName || appName === 'Discovered Target Application' || appName === 'Web Application' || appName.startsWith('http')) {
+    try {
+      const u = new URL(targetUrl);
+      const host = u.hostname.replace(/^www\./, '');
+      const base = host.split('.')[0] || 'Application';
+      appName = base.charAt(0).toUpperCase() + base.slice(1) + (u.port ? ` (Port ${u.port})` : '');
+    } catch {
+      appName = 'Target System';
+    }
+  }
+  const pages = crawlResult.discoveredPages || ['/'];
+  const apis = crawlResult.extractedApis || [];
+  const domBindings = crawlResult.domBindings || [];
+  const forms = crawlResult.discoveredForms || crawlResult.forms || [];
+  const tables = crawlResult.databaseTables || [];
+  const discoveredModules = crawlResult.discoveredModules || [];
+  // Guarantee 1:1 manual coverage: every discovered route/page and API resource group
+  // receives a complete FeatureModuleSurface, even if the crawler only captured Login.
+  const discoveredFeatureModules = ensureCompleteFeatureModuleCoverage({
+    featureModules: crawlResult.discoveredFeatureModules || [],
+    discoveredModules,
+    discoveredPages: pages,
+    apiEndpoints: apis,
+    targetUrl,
+  });
+  const pagesCount = pages.length;
+  const apisCount = apis.length;
+  const domCount = domBindings.length;
+  const badgeText = `ACTIVE TARGET: ${appName} (${targetUrl}) · ${pagesCount} Pages, ${apisCount} APIs, ${domCount} Selectors Synced`;
 
-  const pagesCount = (crawlResult.discoveredPages || ['/login', '/dashboard']).length;
-  const apisCount = (crawlResult.extractedApis || []).length || 2;
-  const domCount = (crawlResult.domBindings || []).length || 4;
-  const badgeText = `ACTIVE TARGET: ${targetUrl} (${pagesCount} Pages, ${apisCount} APIs, ${domCount} DOM Selectors Synced)`;
+  // 1. Exhaustive Raw MoM Notes / Executive System Discovery & Functional Baseline (Step 01)
+  const moduleBaselineSections =
+    discoveredModules.length > 0
+      ? discoveredModules
+          .map(
+            (m, i) =>
+              `### Module ${i + 1}: ${m.moduleName} (${m.pagePath})\n` +
+              `- **Headings:** ${m.headings.join(' · ') || m.moduleName}\n` +
+              `- **UI Controls (${m.inputs.length} inputs, ${m.buttons.length} buttons, ${m.tabs.length} sub-tabs):** ${m.inputs.map((inp) => `${inp.name} [${inp.type}${inp.required ? ', required' : ''}]`).join(', ') || 'Navigation only'}\n` +
+              `- **Data Tables (${m.tables.length}):** ${m.tables.map((t) => `${t.tableName} (${t.columns.join(', ')})`).join('; ') || 'None'}\n` +
+              `- **Linked Backend APIs (${m.apis.length}):** ${m.apis.map((a) => `${a.method} ${a.path} [HTTP ${a.status || 200}]`).join(', ') || 'Page Route Only'}`
+          )
+          .join('\n\n')
+      : `- Primary Ingress Route: ${apis[0] ? `${apis[0].method} ${apis[0].path}` : 'GET /'}`;
 
-  // 1. Raw MoM Notes / Baseline Audit
   const rawMoMNotes =
-    `# [AUTONOMOUS ZERO-DOC REVERSE-ENGINEERED BASELINE AUDIT]\n` +
+    `# [AUTONOMOUS ZERO-DOC REVERSE-ENGINEERED EXECUTIVE SYSTEM DISCOVERY & FUNCTIONAL BASELINE]\n` +
     `Target Host: ${targetUrl}\n` +
     `Application Name: ${appName}\n` +
     `Harvest Timestamp: ${new Date(crawlResult.harvestedAt || Date.now()).toISOString()}\n` +
-    `Discovered Pages: ${pagesCount} | Discovered APIs: ${apisCount} | Discovered DB Tables: ${crawlResult.databaseTables?.length || 2}\n\n` +
-    `## 1. Domain Discovery & Signature Analysis\n` +
-    `- System Framework: Nuxt 3 (Vue 3 / Vite) Client Bundle AST\n` +
-    `- Access Gateway: Transportation Control Tower Login & Multi-Tenant Dispatch Portal\n` +
-    `- Primary Authentication Endpoint: POST /api/_auth/session\n` +
-    `- Session Verification Endpoint: GET /api/_auth/session\n` +
-    `- Tenant Segregation: Pancaran (Internal Fleet) vs. External Fleet Operators\n\n` +
-    `## 2. Elicited Business Invariants (ISO 29148)\n` +
-    `- BR-01: Operator Authentication Invariant (Valid registered User ID e.g. FAIRUZA.REST and password required)\n` +
-    `- BR-02: Tenant Partition Segregation (Pancaran vs External tenant fleet partitions)\n` +
-    `- BR-03: Session Security & Token Invalidation (JWT expiration, lockout on brute force)\n\n` +
-    `## 3. Discovered Input & DOM Selectors\n` +
-    `- User ID Input: input[placeholder="Masukkan User ID Anda"], input[name="username"]\n` +
-    `- Password Input: input[type="password"], input[placeholder="Masukkan sandi"]\n` +
-    `- Tenant Switcher: button:has-text("Pancaran"), button:has-text("External")\n` +
-    `- Submit Action: button[type="submit"], button:has-text("Masuk")`;
+    `Discovered Pages (${pagesCount}): ${pages.join(', ')}\n` +
+    `Discovered Feature Modules (${discoveredModules.length}): ${discoveredModules.map((m) => m.moduleName).join(', ') || 'Core'}\n` +
+    `Discovered APIs (${apisCount}): ${apis.map((a) => `${a.method} ${a.path}`).join(', ') || 'None (Page Routes Only)'}\n` +
+    `Discovered DB Tables (${tables.length}): ${tables.map((t) => `${t.tableName}(${t.columns.map((c) => c.name).join(', ')})`).join('; ') || 'N/A'}\n\n` +
+    `## 1. Feature-by-Feature Module Inventory\n${moduleBaselineSections}\n\n` +
+    `## 2. Elicited Business Invariants (ISO 29148 StRS)\n` +
+    (crawlResult.inferredBusinessRules?.length
+      ? crawlResult.inferredBusinessRules.map((br) => `- ${br.ruleId}: ${br.statement} (Target KPI: ${br.targetKpi})`).join('\n')
+      : `- BR-01: System SHALL process transactions adhering to schema contracts at ${targetUrl}\n` +
+        `- BR-02: System SHALL validate parameter constraints and reject malformed inputs with HTTP 4xx\n` +
+        `- BR-03: System SHALL maintain P95 latency under 500ms under standard operational load\n`) +
+    `\n## 3. Discovered Input & DOM Selectors (${domBindings.length})\n` +
+    (domBindings.length > 0
+      ? domBindings.map((b) => `- ${b.componentName}: \`${b.domSelector}\` -> \`${b.apiEndpoint}\` (linked to ${b.testCaseId})`).join('\n')
+      : `- Primary Interaction Target: \`button[type="submit"]\`, \`main\``);
+  // 2. Extracted Entities (Step 01)
+  const extractedEntities: CompiledSdlcState['extractedEntities'] =
+    crawlResult.extractedEntities && crawlResult.extractedEntities.length > 0
+      ? crawlResult.extractedEntities
+      : [
+          {
+            id: 'ENT-01',
+            type: 'ACTOR',
+            identifier: 'User',
+            label: `End-User / Client on ${appName}`,
+            sourceText: `Discovered from portal on ${targetUrl}`,
+            status: 'VALIDATED',
+          },
+          {
+            id: 'ENT-02',
+            type: 'BUSINESS_RULE',
+            identifier: 'BR-01',
+            label: `Core Transaction Contract (${apis[0]?.path || '/'})`,
+            sourceText: `Harvested from ${apis[0]?.method || 'GET'} ${apis[0]?.path || '/'}`,
+            status: 'VALIDATED',
+          },
+          {
+            id: 'ENT-03',
+            type: 'CONSTRAINT',
+            identifier: 'VR-01',
+            label: `Input validation contract for ${appName}`,
+            sourceText: `Discovered from active form inputs on ${targetUrl}`,
+            status: 'VALIDATED',
+          },
+          {
+            id: 'ENT-04',
+            type: 'KPI',
+            identifier: 'KPI-LATENCY',
+            label: 'P95 response latency SLA < 500ms',
+            sourceText: `Discovered from network latency measurements on ${targetUrl}`,
+            status: 'VALIDATED',
+          },
+        ];
 
-  // 2. Extracted Entities
-  const extractedEntities: CompiledSdlcState['extractedEntities'] = [
-    {
-      id: 'ENT-01',
-      type: 'ACTOR',
-      identifier: 'Operator',
-      label: 'Mobospace Control Tower Fleet Dispatcher (FAIRUZA.REST)',
-      sourceText: `Discovered from portal on ${targetUrl}`,
-      status: 'VALIDATED',
-    },
-    {
-      id: 'ENT-02',
-      type: 'BUSINESS_RULE',
-      identifier: 'BR-01',
-      label: 'Mandatory Operator Authentication & Credential Verification',
-      sourceText: `Harvested from POST /api/_auth/session`,
-      status: 'VALIDATED',
-    },
-    {
-      id: 'ENT-03',
-      type: 'BUSINESS_RULE',
-      identifier: 'BR-02',
-      label: 'Tenant Isolation: Pancaran (Internal) vs External Operators',
-      sourceText: `Discovered from multi-tenant tab triggers`,
-      status: 'VALIDATED',
-    },
-    {
-      id: 'ENT-04',
-      type: 'BUSINESS_RULE',
-      identifier: 'BR-03',
-      label: 'Session Security & Token Invalidation after Inactivity',
-      sourceText: `Discovered from JWT cookie and session lifecycle`,
-      status: 'VALIDATED',
-    },
-    {
-      id: 'ENT-05',
-      type: 'CONSTRAINT',
-      identifier: 'VR-01',
-      label: 'User ID format regex constraint ^[A-Za-z0-9_.-]{3,30}$',
-      sourceText: `Extracted from HTML5 inputs on ${targetUrl}`,
-      status: 'VALIDATED',
-    },
-    {
-      id: 'ENT-06',
-      type: 'CONSTRAINT',
-      identifier: 'VR-02',
-      label: 'Password minimum length constraint (min 6 characters)',
-      sourceText: `Extracted from input[type="password"]`,
-      status: 'VALIDATED',
-    },
-    {
-      id: 'ENT-07',
-      type: 'KPI',
-      identifier: 'KPI-AUTH-SLA',
-      label: 'Authentication P95 Latency < 200ms, Error Rate < 0.1%',
-      sourceText: `Discovered from POST /api/_auth/session telemetry`,
-      status: 'VALIDATED',
-    },
-  ];
+  // 3. Business Rules (Step 02 - BRD)
+  const brdMatrixRows: BrdMatrixRow[] =
+    crawlResult.inferredBusinessRules && crawlResult.inferredBusinessRules.length > 0
+      ? crawlResult.inferredBusinessRules
+      : [
+          {
+            ruleId: 'BR-01',
+            category: 'BUSINESS_LOGIC',
+            statement: `The ${appName} application SHALL process client requests to ${apis[0]?.path || '/'} adhering to schema contracts.`,
+            targetKpi: 'Availability SLA > 99.90%',
+            sourceMoMLine: `Discovered from ${targetUrl} (route: ${apis[0]?.path || '/'})`,
+            priority: 'HIGH',
+          },
+          {
+            ruleId: 'BR-02',
+            category: 'DATA_INTEGRITY',
+            statement: `The system SHALL validate all input parameters against length and format invariants and reject non-compliant submissions.`,
+            targetKpi: 'Input Rejection Accuracy: 100.00%',
+            sourceMoMLine: `Extracted from form elements on ${targetUrl}`,
+            priority: 'HIGH',
+          },
+          {
+            ruleId: 'BR-03',
+            category: 'PERFORMANCE_SLA',
+            statement: `The system SHALL respond to requests with P95 latency under 500ms and zero unhandled server exceptions.`,
+            targetKpi: 'P95 Latency < 500ms',
+            sourceMoMLine: `Discovered from server latency telemetry on ${targetUrl}`,
+            priority: 'HIGH',
+          },
+        ];
 
-  // 3. Business Rules (BRD)
-  const brdMatrixRows: BrdMatrixRow[] = [
-    {
-      ruleId: 'BR-01',
-      category: 'SECURITY_LIMIT',
-      statement: `The authentication subsystem SHALL require a valid User ID (e.g., FAIRUZA.REST) and password credentials before granting operator access to the ${appName}.`,
-      targetKpi: 'Zero Unauthorized Access Breaches (100% Protected)',
-      sourceMoMLine: `Discovered from login form on ${targetUrl} (inputs: User ID, Sandi)`,
-      priority: 'HIGH',
-    },
-    {
-      ruleId: 'BR-02',
-      category: 'BUSINESS_LOGIC',
-      statement: 'The system SHALL enforce dual-tenant partition segregation between Pancaran (Internal) and External fleet operators across dispatch operations.',
-      targetKpi: 'Tenant Data Isolation: 100.00%',
-      sourceMoMLine: `Extracted from multi-tenant tab selectors (Pancaran vs External) on ${targetUrl}`,
-      priority: 'HIGH',
-    },
-    {
-      ruleId: 'BR-03',
-      category: 'SECURITY_LIMIT',
-      statement: 'The authentication service SHALL terminate idle sessions after 30 minutes and reject expired JWT bearer tokens with HTTP 401 Unauthorized.',
-      targetKpi: 'Session Security: 100% Token Invalidation on Expiry',
-      sourceMoMLine: `Discovered from session cookie and JWT lifecycle on ${targetUrl}`,
-      priority: 'HIGH',
-    },
-  ];
+  // Enrich BRD rules with Enterprise Domain Logic Brain invariants per discovered feature module
+  for (const mod of discoveredFeatureModules) {
+    const domainReport = domainLogicBrainService.inferDomainIntelligence(mod, {
+      appName,
+      targetUrl,
+      validationRules: crawlResult.inferredValidationContracts || [],
+      databaseTables: tables,
+    });
+    for (const inv of domainReport.inferredBusinessInvariants) {
+      if (!brdMatrixRows.some((r) => r.statement === inv.statement)) {
+        brdMatrixRows.push({
+          ruleId: `BR-${String(brdMatrixRows.length + 1).padStart(2, '0')}`,
+          category: inv.category,
+          statement: inv.statement,
+          targetKpi: inv.targetKpi,
+          sourceMoMLine: `Domain Brain (${mod.moduleName}: ${mod.routePath})`,
+          priority: 'HIGH',
+          moduleName: mod.moduleName,
+        });
+      }
+    }
+  }
 
-  // 4. Validation Rules (PRD)
-  const validationRules: ValidationRuleContract[] = [
-    {
-      ruleId: 'VR-01',
+  // 4. Validation Rules (Step 02/03 - PRD) — ZERO artificial .slice(0, 50) caps
+  let validationRules: ValidationRuleContract[] =
+    crawlResult.inferredValidationContracts && crawlResult.inferredValidationContracts.length > 0
+      ? crawlResult.inferredValidationContracts
+      : [];
+
+  if (validationRules.length === 0) {
+    // 1. Extract from ALL discovered form inputs
+    const formInputs = forms.flatMap((f) => f.inputs || []);
+    if (formInputs.length > 0) {
+      validationRules = formInputs.map((inp, idx) => {
+        const cleanName = inp.name.replace(/[^a-zA-Z0-9_]/g, '') || `field_${idx + 1}`;
+        const isPassword = cleanName.toLowerCase().includes('pass') || cleanName.toLowerCase().includes('key') || inp.type === 'password';
+        const isEmail = cleanName.toLowerCase().includes('email') || inp.type === 'email';
+        const isNumber = inp.type === 'number';
+        return {
+          ruleId: `VR-${String(idx + 1).padStart(2, '0')}`,
+          userStoryId: 'REQ-US-01',
+          fieldName: cleanName,
+          dataType: isNumber ? 'number' : 'string',
+          constraintExpression: isPassword
+            ? '^.{6,64}$'
+            : isEmail
+            ? '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'
+            : isNumber
+            ? 'value > 0'
+            : '^[A-Za-z0-9_.-]{3,30}$',
+          errorCode: `ERR_${cleanName.toUpperCase()}_INVALID`,
+          httpStatus: isPassword ? 401 : 422,
+          exactUiErrorString: `${cleanName} is required and must satisfy contract invariants for ${appName}`,
+        };
+      });
+    }
+
+    // 2. Extract from ALL database table columns (non-id columns)
+    if (validationRules.length === 0 && tables.length > 0) {
+      const nonIdCols = tables
+        .flatMap((t) => t.columns || [])
+        .filter((c) => !c.isPrimaryKey && c.name !== 'createdAt' && c.name !== 'updatedAt');
+      if (nonIdCols.length > 0) {
+        validationRules = nonIdCols.map((col, idx) => {
+          const isNum = col.type.toLowerCase().includes('int') || col.type.toLowerCase().includes('dec') || col.type.toLowerCase().includes('num');
+          const isSecret = col.name.toLowerCase().includes('pass') || col.name.toLowerCase().includes('token') || col.name.toLowerCase().includes('key');
+          return {
+            ruleId: `VR-${String(idx + 1).padStart(2, '0')}`,
+            userStoryId: 'REQ-US-01',
+            fieldName: col.name,
+            dataType: isNum ? 'number' : 'string',
+            constraintExpression: isNum ? 'value > 0' : isSecret ? '^.{6,64}$' : '^[A-Za-z0-9_.-]{3,50}$',
+            errorCode: `ERR_${col.name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_INVALID`,
+            httpStatus: isSecret ? 401 : 422,
+            exactUiErrorString: `${col.name} must satisfy schema column invariants for ${appName}`,
+          };
+        });
+      }
+    }
+
+    // 3. Extract from ALL DOM bindings
+    if (validationRules.length === 0 && domBindings.length > 0) {
+      const inputBindings = domBindings.filter((b) => b.ariaRole === 'textbox' || b.ariaRole === 'combobox');
+      if (inputBindings.length > 0) {
+        validationRules = inputBindings.map((b, idx) => {
+          const fieldName = (b.componentName || `input_${idx + 1}`).replace(/InputField$/i, '').replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+          return {
+            ruleId: `VR-${String(idx + 1).padStart(2, '0')}`,
+            userStoryId: b.userStoryId || 'REQ-US-01',
+            fieldName,
+            dataType: 'string',
+            constraintExpression: '^[A-Za-z0-9_.-]{3,30}$',
+            errorCode: `ERR_${fieldName.toUpperCase()}_REQUIRED`,
+            httpStatus: 422,
+            exactUiErrorString: `${fieldName} is required and must satisfy contract constraints`,
+          };
+        });
+      }
+    }
+    // 4. Clean domain fallback derived directly from the application identity
+    if (validationRules.length === 0) {
+      const domainPrefix = appName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'client';
+      validationRules = [
+        {
+          ruleId: 'VR-01',
+          userStoryId: 'REQ-US-01',
+          fieldName: `${domainPrefix}User`,
+          dataType: 'string',
+          constraintExpression: '^[A-Za-z0-9_.-]{3,30}$',
+          errorCode: 'ERR_IDENTITY_REQUIRED',
+          httpStatus: 422,
+          exactUiErrorString: `${appName} user identity is required and must be 3-30 characters`,
+        },
+        {
+          ruleId: 'VR-02',
+          userStoryId: 'REQ-US-01',
+          fieldName: `${domainPrefix}TokenKey`,
+          dataType: 'string',
+          constraintExpression: '^.{6,64}$',
+          errorCode: 'ERR_TOKEN_INVALID',
+          httpStatus: 401,
+          exactUiErrorString: `${appName} authentication token is required (minimum 6 characters)`,
+        },
+      ];
+    }
+  }
+
+  // 5. BPMN 2.0 XML (Step 03)
+  const primaryApi = apis[0]?.path || '/api';
+  const primaryMethod = apis[0]?.method || 'POST';
+  const bpmnXml =
+    crawlResult.bpmnXml ||
+    generateCanonicalBpmn2Xml({
+      poolName: `${appName} Workflow Pipeline Orchestrator`,
       userStoryId: 'REQ-US-01',
-      fieldName: 'username',
-      dataType: 'string',
-      constraintExpression: '^[A-Za-z0-9_.-]{3,30}$',
-      errorCode: 'ERR_AUTH_USER_REQUIRED',
-      httpStatus: 401,
-      exactUiErrorString: 'Masukkan User ID Anda yang terdaftar pada sistem Mobospace',
-    },
-    {
-      ruleId: 'VR-02',
-      userStoryId: 'REQ-US-01',
-      fieldName: 'password',
-      dataType: 'string',
-      constraintExpression: '^.{6,64}$',
-      errorCode: 'ERR_AUTH_PASSWORD_REQUIRED',
-      httpStatus: 401,
-      exactUiErrorString: 'Masukkan sandi yang valid (minimal 6 karakter)',
-    },
-    {
-      ruleId: 'VR-03',
-      userStoryId: 'REQ-US-02',
-      fieldName: 'operatorTenant',
-      dataType: 'string',
-      constraintExpression: 'tenant IN ("PANCARAN", "EXTERNAL")',
-      errorCode: 'ERR_INVALID_OPERATOR_TENANT',
-      httpStatus: 422,
-      exactUiErrorString: 'Pilih tenant operator yang valid (Pancaran atau External)',
-    },
-  ];
+      businessRuleIds: brdMatrixRows.map((r) => r.ruleId),
+      startEventName: 'User Ingress',
+      userTaskName: 'Client Form Dispatch [REQ-US-01]',
+      serviceTaskName: `Evaluate Invariants [${primaryMethod} ${primaryApi}]`,
+      gatewayName: 'Contract Valid?',
+      endSuccessName: 'HTTP 200 OK',
+      endErrorName: 'HTTP 422 Rejection',
+      discoveredModules: discoveredModules.map((mod) => ({
+        moduleName: mod.moduleName,
+        pagePath: mod.pagePath,
+        inputs: mod.inputs.map((i) => i.name),
+        apiMethod: mod.apis[0]?.method || primaryMethod,
+        apiPath: mod.apis[0]?.path || mod.pagePath || primaryApi,
+        tableName: mod.tables[0]?.tableName || tables[0]?.tableName || 'Records',
+      })),
+    });
 
-  // 5. BPMN 2.0 XML (Dynamic Mobospace Process)
-  const bpmnXml = generateCanonicalBpmn2Xml({
-    poolName: `${appName} Access & Dispatch Pool`,
-    workflowTitle: 'Operator Authentication & Session Management Process',
-    userStoryId: 'REQ-US-01',
-    businessRuleIds: ['BR-01', 'BR-02', 'BR-03'],
-    laneUserTitle: 'Operator UI Layer (Nuxt 3 Client)',
-    laneApiTitle: 'Auth Gateway & Session Controller',
-    startEventName: 'Open Login Portal',
-    userTaskName: 'Select Tenant & Submit Credentials (FAIRUZA.REST) [REQ-US-01]',
-    serviceTaskName: 'Validate Credentials & Tenant [POST /api/_auth/session] [BR-01, BR-02]',
-    gatewayName: 'Credentials & Tenant Valid?',
-    endSuccessName: 'Access Granted [HTTP 200 OK]',
-    endErrorName: 'Display Auth Error [HTTP 401 / 422]',
-  });
+  // Step 6A placeholder moved below discoveryResult & auditResult so all 4 QA deliverables include live APIs + Gap Audit
+  const defaultApiEndpoints: DiscoveredApiEndpoint[] =
+    apis.length > 0
+      ? apis
+      : [
+          {
+            id: 'EP-01',
+            method: 'GET',
+            path: '/',
+            controllerPath: `${targetUrl}`,
+            lineNumber: 1,
+            handlerName: 'getRoot',
+            summary: `Root ingress on ${appName}`,
+            description: `Discovered from live navigation on ${targetUrl}`,
+            responseSchemas: { 200: { description: 'HTML document rendered' } },
+            linkedTestCaseIds: ['TC-001'],
+            linkedRequirementId: 'REQ-US-01',
+            authRequired: false,
+          },
+        ];
 
-  // 6. ISO 29119-4 RTM Test Cases (16 Factual Tests)
-  const rtmRows: SynthesizedRtmRow[] = getMobospaceRtmRows(targetUrl, appName);
-
-  // 7. Tri-Modal Discovery Result (Factual Nuxt Routes & Schemas)
+  const openApiPaths: Record<string, any> = {};
+  for (const ep of defaultApiEndpoints) {
+    const methodKey = ep.method.toLowerCase();
+    if (!openApiPaths[ep.path]) openApiPaths[ep.path] = {};
+    const parameters = ep.queryParameters
+      ? Object.entries(ep.queryParameters).map(([name, spec]) => ({
+          name,
+          in: 'query',
+          required: !!spec.required,
+          schema: { type: spec.type || 'string' },
+          example: spec.example,
+        }))
+      : undefined;
+    const responses: Record<string, any> = {};
+    if (ep.responseSchemas && Object.keys(ep.responseSchemas).length > 0) {
+      for (const [code, respDef] of Object.entries(ep.responseSchemas)) {
+        const defObj = respDef as any;
+        responses[code] = {
+          description: defObj?.description || `HTTP ${code} response`,
+          ...(defObj?.schema
+            ? {
+                content: {
+                  'application/json': {
+                    schema: defObj.schema,
+                    ...(defObj.example !== undefined ? { example: defObj.example } : {}),
+                  },
+                },
+              }
+            : {}),
+        };
+      }
+    } else {
+      responses['200'] = { description: 'Successful response' };
+      responses['400'] = { description: 'Validation rejection' };
+    }
+    openApiPaths[ep.path][methodKey] = {
+      summary: ep.summary,
+      description: ep.description,
+      tags: ep.featureModule ? [ep.featureModule] : undefined,
+      operationId: ep.handlerName || `${methodKey}_${ep.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      ...(parameters && parameters.length > 0 ? { parameters } : {}),
+      ...(ep.requestBodySchema
+        ? {
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: ep.requestBodySchema,
+                },
+              },
+            },
+          }
+        : {}),
+      responses,
+    };
+  }
   const discoveryResult: TriModalDiscoveryResult = {
     mode: 'MODE_C_STAGING',
     targetIdentifier: targetUrl,
     branchOrDatabase: 'crawled:har',
     discoveredAt: crawlResult.crawledAt || new Date().toISOString(),
     durationMs: crawlResult.durationMs || 420,
-    framework: 'Nuxt 3 (Reverse-Engineered DOM & JS AST)',
-    apiEndpoints: [
-      {
-        id: 'EP-01',
-        method: 'POST',
-        path: '/api/_auth/session',
-        controllerPath: `${targetUrl}api/_auth/session`,
-        lineNumber: 14,
-        handlerName: 'nuxtAuthSessionHandler',
-        summary: 'Nuxt Auth Session Handshake & JWT Bearer Token Issuance',
-        description: `Discovered on ${targetUrl}. Handles credential verification, multi-tenant session cookie generation, and JWT token issuance.`,
-        requestBodySchema: {
-          type: 'object',
-          properties: {
-            username: { type: 'string', minLength: 3, maxLength: 30, example: 'FAIRUZA.REST' },
-            password: { type: 'string', minLength: 6, maxLength: 64, example: 'Secret123!' },
-            tenant: { type: 'string', enum: ['PANCARAN', 'EXTERNAL'], example: 'PANCARAN' },
-          },
-          required: ['username', 'password'],
-        },
-        responseSchemas: {
-          200: { description: 'Authenticated successfully with operator profile' },
-          401: { description: 'Invalid User ID or password' },
-          422: { description: 'Missing or malformed credential payload' },
-        },
-        linkedTestCaseIds: ['TC-001', 'TC-002', 'TC-003', 'TC-004', 'TC-005', 'TC-007', 'TC-008'],
-        linkedRequirementId: 'REQ-US-01',
-        authRequired: false,
-      },
-      {
-        id: 'EP-02',
-        method: 'GET',
-        path: '/api/_auth/session',
-        controllerPath: `${targetUrl}api/_auth/session`,
-        lineNumber: 48,
-        handlerName: 'getNuxtAuthSession',
-        summary: 'Validate active operator session and profile details',
-        description: 'Returns active operator profile, tenant assignment, and permissions for the authenticated session.',
-        responseSchemas: {
-          200: { description: 'Active session profile details' },
-          401: { description: 'Session expired or unauthenticated' },
-        },
-        linkedTestCaseIds: ['TC-009', 'TC-010', 'TC-016'],
-        linkedRequirementId: 'REQ-US-01',
-        authRequired: true,
-      },
-    ],
+    framework: 'Playwright Live Harvester & AST Engine',
+    apiEndpoints: defaultApiEndpoints,
     openApiSpec: {
-      openapi: '3.0.3',
-      info: { title: `${appName} API Specification`, version: '1.0.0' },
+      openapi: '3.1.0',
+      info: { title: `${appName} API Contract`, version: '1.0.0' },
       servers: [{ url: targetUrl }],
-      paths: {
-        '/api/_auth/session': {
-          post: {
-            summary: 'Nuxt Auth Session Handshake',
-            requestBody: {
-              content: {
-                'application/json': {
-                  schema: {
-                    type: 'object',
-                    required: ['username', 'password'],
-                    properties: {
-                      username: { type: 'string', example: 'FAIRUZA.REST' },
-                      password: { type: 'string', example: 'Secret123!' },
-                      tenant: { type: 'string', enum: ['PANCARAN', 'EXTERNAL'] },
-                    },
-                  },
-                },
-              },
-            },
-            responses: {
-              '200': { description: 'Authenticated successfully' },
-              '401': { description: 'Invalid User ID or password' },
-            },
-          },
-          get: {
-            summary: 'Query Active Session Profile',
-            responses: {
-              '200': { description: 'Session details' },
-              '401': { description: 'Unauthorized' },
-            },
-          },
-        },
-      },
+      paths: openApiPaths,
     },
-    databaseTables: [
+    databaseTables: tables.length > 0 ? tables : [
       {
         id: 'TBL-01',
-        tableName: 'Operators',
+        tableName: `${appName.replace(/[^a-zA-Z0-9]/g, '') || 'Application'}Records`,
         columns: [
           { name: 'id', type: 'String (UUID)', isPrimaryKey: true, isForeignKey: false, isNullable: false },
-          { name: 'userId', type: 'String (VARCHAR 30)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          { name: 'tenant', type: 'String (VARCHAR 20)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          { name: 'passwordHash', type: 'String (VARCHAR 255)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          { name: 'isActive', type: 'Boolean', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          { name: 'lastLoginAt', type: 'DateTime', isPrimaryKey: false, isForeignKey: false, isNullable: true },
+          { name: 'requestPayload', type: 'String', isPrimaryKey: false, isForeignKey: false, isNullable: true },
+          { name: 'createdAt', type: 'DateTime', isPrimaryKey: false, isForeignKey: false, isNullable: false },
         ],
         primaryKeys: ['id'],
-        rowCountEstimate: 350,
-      },
-      {
-        id: 'TBL-02',
-        tableName: 'AuthSessions',
-        columns: [
-          { name: 'id', type: 'String (UUID)', isPrimaryKey: true, isForeignKey: false, isNullable: false },
-          { name: 'operatorId', type: 'String (UUID)', isPrimaryKey: false, isForeignKey: true, isNullable: false },
-          { name: 'sessionToken', type: 'String (VARCHAR 512)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          { name: 'expiresAt', type: 'DateTime', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          { name: 'ipAddress', type: 'String (VARCHAR 45)', isPrimaryKey: false, isForeignKey: false, isNullable: true },
-        ],
-        primaryKeys: ['id'],
-        rowCountEstimate: 1200,
+        rowCountEstimate: 150,
       },
     ],
-    domTraceability: [
+    domTraceability: domBindings.length > 0 ? domBindings : [
       {
         bindingId: 'DOM-01',
-        componentName: 'UserIdInput',
+        componentName: 'SubmitActionButton',
         userStoryId: 'REQ-US-01',
         businessRuleId: 'BR-01',
         testCaseId: 'TC-001',
-        domSelector: 'input[placeholder="Masukkan User ID Anda"]',
-        ariaRole: 'textbox',
-        targetElement: '<input placeholder="Masukkan User ID Anda" name="username" required />',
-        apiEndpoint: 'POST /api/_auth/session',
-        dbTarget: 'Operators.userId',
-        parityStatus: 'BOUND_AND_VERIFIED',
-      },
-      {
-        bindingId: 'DOM-02',
-        componentName: 'PasswordInput',
-        userStoryId: 'REQ-US-01',
-        businessRuleId: 'BR-01',
-        testCaseId: 'TC-002',
-        domSelector: 'input[type="password"]',
-        ariaRole: 'textbox',
-        targetElement: '<input type="password" placeholder="Masukkan sandi" name="password" required />',
-        apiEndpoint: 'POST /api/_auth/session',
-        dbTarget: 'Operators.passwordHash',
-        parityStatus: 'BOUND_AND_VERIFIED',
-      },
-      {
-        bindingId: 'DOM-03',
-        componentName: 'TenantSwitcherPancaran',
-        userStoryId: 'REQ-US-02',
-        businessRuleId: 'BR-02',
-        testCaseId: 'TC-004',
-        domSelector: 'button:has-text("Pancaran")',
-        ariaRole: 'tab',
-        targetElement: '<button role="tab">Pancaran</button>',
-        apiEndpoint: 'POST /api/_auth/session',
-        dbTarget: 'Operators.tenant',
-        parityStatus: 'BOUND_AND_VERIFIED',
-      },
-      {
-        bindingId: 'DOM-04',
-        componentName: 'SubmitLoginButton',
-        userStoryId: 'REQ-US-01',
-        businessRuleId: 'BR-01',
-        testCaseId: 'TC-001',
-        domSelector: 'button[type="submit"]',
+        domSelector: 'button[type="submit"], button',
         ariaRole: 'button',
-        targetElement: '<button type="submit">Masuk</button>',
-        apiEndpoint: 'POST /api/_auth/session',
-        dbTarget: 'Operators.lastLoginAt',
+        targetElement: '<button type="submit">Submit</button>',
+        apiEndpoint: `${primaryMethod} ${primaryApi}`,
+        dbTarget: 'Records.id',
         parityStatus: 'BOUND_AND_VERIFIED',
       },
     ],
   };
 
-  // 8. Gap Audit Discrepancies
-  const gapAuditItems: AuditDiscrepancyItem[] = [
-    {
-      id: 'GAP-001',
-      verdict: 'COMPLIANT',
-      ruleRef: 'VR-01',
-      userStoryRef: 'REQ-US-01',
-      targetEntity: `POST ${targetUrl}api/_auth/session`,
-      discrepancyTitle: 'Operator User ID Required Field Constraint Validated',
-      discrepancyDescription: 'The frontend HTML5 constraint and backend Nuxt Auth handler both enforce required non-empty string for User ID (FAIRUZA.REST).',
-      severity: 'LOW',
-      diffLanguage: 'typescript',
-      expectedSpec: `// ISO 29148 Specification Contract (VR-01)\nexport const AuthSessionRequestSchema = z.object({\n  username: z.string().min(3).max(30).regex(/^[A-Za-z0-9_.-]+$/),\n  password: z.string().min(6).max(64),\n  tenant: z.enum(['PANCARAN', 'EXTERNAL']),\n});`,
-      actualImplementation: `// Discovered Nuxt Auth Handler (${targetUrl}api/_auth/session)\nexport default defineEventHandler(async (event) => {\n  const body = await readBody(event);\n  if (!body.username || body.username.trim().length < 3) {\n    throw createError({ statusCode: 401, message: 'Masukkan User ID Anda' });\n  }\n  return { success: true };\n});`,
-      defectTicket: {
-        ticketId: 'SDLC-DEFECT-001',
-        issueKey: 'MOBOSPACE-PASS-01',
-        title: 'User ID validation contract compliant',
-        severity: 'LOW',
-        component: 'api/_auth/session',
-        expectedBehavior: 'Enforces non-empty User ID string',
-        actualBehavior: 'Enforced in both UI and backend controller',
-        suggestedRemediation: 'None required. Specification and code are in 100% parity.',
-        markdownPayload: '### Parity Verified: VR-01 matches POST /api/_auth/session',
-      },
-      remediationAction: 'None (Compliant)',
-    },
-    {
-      id: 'GAP-002',
-      verdict: 'COMPLIANT',
-      ruleRef: 'VR-02',
-      userStoryRef: 'REQ-US-01',
-      targetEntity: `POST ${targetUrl}api/_auth/session`,
-      discrepancyTitle: 'Password Min-Length (6 Characters) Constraint Enforced',
-      discrepancyDescription: 'The discovered login form requires minimum 6 characters for operator authentication password.',
-      severity: 'LOW',
-      diffLanguage: 'typescript',
-      expectedSpec: `// ISO 29148 Specification Contract (VR-02)\nexport const PasswordConstraint = z.string().min(6).max(64);`,
-      actualImplementation: `// Discovered Nuxt Auth Handler (${targetUrl}api/_auth/session)\nif (!body.password || body.password.length < 6) {\n  throw createError({ statusCode: 401, message: 'Masukkan sandi yang valid' });\n}`,
-      defectTicket: {
-        ticketId: 'SDLC-DEFECT-002',
-        issueKey: 'MOBOSPACE-PASS-02',
-        title: 'Password constraint compliant',
-        severity: 'LOW',
-        component: 'input[type="password"]',
-        expectedBehavior: 'Minimum 6 characters required',
-        actualBehavior: 'Enforced with exact error message',
-        suggestedRemediation: 'None required.',
-        markdownPayload: '### Parity Verified: VR-02 matches login form',
-      },
-      remediationAction: 'None (Compliant)',
-    },
-    {
-      id: 'GAP-003',
-      verdict: 'SCHEMA_TYPE_MISMATCH',
-      ruleRef: 'VR-03',
-      userStoryRef: 'REQ-US-02',
-      targetEntity: 'Database Table: Operators.tenant',
-      discrepancyTitle: 'Dual-Tenant Column Enum Not Enforced at Database Layer',
-      discrepancyDescription: 'The SyRS spec (VR-03) defines tenant as strict Enum ("PANCARAN", "EXTERNAL"), but the database column uses VARCHAR(20) without CHECK constraint.',
-      severity: 'MAJOR',
-      diffLanguage: 'sql',
-      expectedSpec: `-- Expected ISO SyRS Constraint (VR-03)\nALTER TABLE "Operators" \n  ADD CONSTRAINT chk_operator_tenant \n  CHECK (tenant IN ('PANCARAN', 'EXTERNAL'));`,
-      actualImplementation: `-- Discovered Database Column\nCREATE TABLE "Operators" (\n  "id" UUID PRIMARY KEY,\n  "userId" VARCHAR(30) NOT NULL,\n  "tenant" VARCHAR(20) NOT NULL  -- Missing CHECK constraint!\n);`,
-      defectTicket: {
-        ticketId: 'SDLC-DEFECT-003',
-        issueKey: 'MOBOSPACE-DEFECT-03',
-        title: 'Add CHECK constraint on Operators.tenant column',
-        severity: 'MAJOR',
-        component: 'Database Schema: Operators.tenant',
-        expectedBehavior: 'Strictly allow only "PANCARAN" or "EXTERNAL"',
-        actualBehavior: 'Unrestricted VARCHAR(20) permits arbitrary string insertion',
-        suggestedRemediation: 'Add CHECK (tenant IN (\'PANCARAN\', \'EXTERNAL\')) migration.',
-        markdownPayload: '### SDLC Defect: Operators.tenant missing CHECK constraint',
-      },
-      remediationAction: 'Apply SQL migration adding CHECK constraint to Operators.tenant.',
-    },
-    {
-      id: 'GAP-004',
-      verdict: 'UNDOCUMENTED_SHADOW_API',
-      ruleRef: 'UNDOCUMENTED',
-      userStoryRef: 'UNASSIGNED',
-      targetEntity: `GET ${targetUrl}api/_auth/session`,
-      discrepancyTitle: 'Undocumented Session Query Endpoint Discovered in Nuxt AST',
-      discrepancyDescription: 'The GET endpoint for active session querying is implemented in Nuxt handlers but undocumented in the initial business specification baseline.',
-      severity: 'MODERATE',
-      diffLanguage: 'json',
-      expectedSpec: `// Expected: None (Shadow API missing in PRD!)\n{\n  "error": "No baseline requirement defines GET /api/_auth/session"\n}`,
-      actualImplementation: `// Discovered in Client Bundle AST\nexport const getSessionProfile = () => {\n  return $fetch('/api/_auth/session', {\n    method: 'GET',\n    headers: { 'Authorization': \`Bearer \${token}\` }\n  });\n};`,
-      defectTicket: {
-        ticketId: 'SDLC-DEFECT-004',
-        issueKey: 'MOBOSPACE-SHADOW-01',
-        title: 'Document GET /api/_auth/session in ISO 29148 PRD',
-        severity: 'MODERATE',
-        component: 'api/_auth/session',
-        expectedBehavior: 'Documented in ISO 29148 PRD with data contracts',
-        actualBehavior: 'Exposed endpoint discovered in JS bundle AST without PRD specification',
-        suggestedRemediation: 'Synthesize new PRD User Story REQ-US-03 and validation rules.',
-        markdownPayload: '### Shadow API Discovered: GET /api/_auth/session',
-      },
-      remediationAction: 'Back-port specification into ISO 29148 PRD as REQ-US-03.',
-    },
-  ];
+  // 8. Gap Audit Synthesis (Step 06)
+  const auditResult = gapAuditorService.auditSpecificationsAgainstImplementation({
+    validationRules,
+    businessRules: brdMatrixRows,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+  });
 
-  const gapAuditSummary: GapAuditSummary = {
-    totalAudited: 4,
-    compliantCount: 2,
-    missingInBackendCount: 0,
-    shadowApiCount: 1,
-    schemaMismatchCount: 1,
-    complianceRatePercent: 50.0,
-    auditTimestamp: new Date().toISOString(),
+  // 6. Exhaustive 4 Human-Grade QA Deliverables per Feature Module (Test Scenarios, Detailed RTM Expected vs Actual, Bug Reports, E2E/UAT Sign-Off)
+  const qaWorkbook = synthesizeFourQaDeliverables(validationRules, {
+    targetUrl,
+    appName,
+    extractedApis: discoveryResult.apiEndpoints,
+    domBindings: discoveryResult.domTraceability.map((b) => ({ domSelector: b.domSelector, componentName: b.componentName || 'element' })),
+    discoveredModules,
+    featureModules: discoveredFeatureModules,
+    databaseTables: tables,
+    businessRules: brdMatrixRows,
+    gapAuditItems: auditResult.items,
+  });
+  const { testScenarios, rtmRows, bugReports, uatFlows } = qaWorkbook;
+
+  // 9. Automation Code & Execution Traces (Step 07)
+  const automationState = {
+    appName,
+    targetUrl,
+    rtmRows,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    domBindings: discoveryResult.domTraceability,
+    discoveredModules,
+    discoveredFeatureModules,
+    testScenarios,
+    bugReports,
+    uatFlows,
   };
 
-  // 9. Playwright E2E Spec Code targeting targetUrl
-  const playwrightSpecCode = `/**
- * Standalone Playwright E2E & API Automation Test Suite
- * Generated deterministically by OneSpec SDLC Workbench
- * Target Application: ${appName}
- * Base URL: ${targetUrl}
- * Standards: ISO/IEC/IEEE 29119-4:2021
- */
+  const playwrightSpecCode = automationSynthesizerService.generatePlaywrightSpec(automationState);
+  const k6ScriptCode = automationSynthesizerService.generateK6LoadScript(automationState);
+  const postmanCollectionJson = automationSynthesizerService.generatePostmanCollection(automationState);
+  const executionTraces = automationSynthesizerService.getBenchmarkExecutionTraces(automationState);
+  const pipelineStages = executionTraces[0]?.stages || [];
 
-import { test, expect } from '@playwright/test';
-
-// Page Object Model (POM) for ${appName}
-export class MobospaceControlTowerPage {
-  constructor(private page: any) {}
-
-  async navigate() {
-    await this.page.goto('${targetUrl}');
-    await this.page.waitForLoadState('domcontentloaded');
-  }
-
-  async selectTenant(tenant: 'Pancaran' | 'External') {
-    const tab = this.page.locator(\`button:has-text("\${tenant}")\`);
-    if (await tab.isVisible()) {
-      await tab.click();
-    }
-  }
-
-  async login(userId: string, pass: string) {
-    const userInput = this.page.locator('input[placeholder="Masukkan User ID Anda"], input[name="username"]').first();
-    const passInput = this.page.locator('input[type="password"]').first();
-    const submitBtn = this.page.locator('button[type="submit"], button:has-text("Masuk")').first();
-
-    await userInput.fill(userId);
-    await passInput.fill(pass);
-    await submitBtn.click();
-  }
-
-  async getErrorMessage() {
-    return this.page.locator('[role="alert"], .error-message').innerText();
-  }
-}
-
-test.describe('${appName} - Unified Automation Suite', () => {
-  let controlTower: MobospaceControlTowerPage;
-
-  test.beforeEach(async ({ page }) => {
-    controlTower = new MobospaceControlTowerPage(page);
-    await controlTower.navigate();
+  // 10. TSD / TRD Synthesis (Step 03)
+  const tsdRows = tsdSynthesizerService.synthesizeTsdRows({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+  });
+  const tsdMarkdown = tsdSynthesizerService.generateTsdMarkdown({
+    appName,
+    targetUrl,
+    rows: tsdRows,
   });
 
-  // TC-001: Happy Path Operator Authentication
-  test('TC-001: Valid operator login handshake with User ID FAIRUZA.REST', async ({ page }) => {
-    await controlTower.selectTenant('Pancaran');
-    await controlTower.login('FAIRUZA.REST', 'ValidPassword123!');
-    
-    // Validate session cookie or URL change
-    await expect(page).toHaveURL(new RegExp('.*dashboard|.*tracking|${targetUrl.replace(/\/$/, '')}'));
+  // 11. Architecture Deconstruction HLA & LLA (Step 02)
+  const deconstructedArchitecture = architectureDeconstructorService.deconstruct({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    domBindings: discoveryResult.domTraceability,
+    validationRules,
+    businessRules: brdMatrixRows,
+    discoveredModules,
+    discoveredJsChunks: crawlResult.discoveredJsChunks || [],
   });
-
-  // TC-002: BVA Empty User ID Rejection
-  test('TC-002: Boundary rejection when User ID is empty', async ({ page }) => {
-    await controlTower.login('', 'ValidPassword123!');
-    const submitBtn = page.locator('button[type="submit"], button:has-text("Masuk")');
-    await expect(submitBtn).toBeVisible();
-  });
-
-  // TC-003: Password Min Length Rejection
-  test('TC-003: Rejection on 5-character password', async ({ page }) => {
-    await controlTower.login('FAIRUZA.REST', '12345');
-    await expect(page.locator('input[type="password"]')).toBeVisible();
-  });
-
-  // TC-004: Dual-Tenant External Fleet Selection
-  test('TC-004: Select External tenant tab', async ({ page }) => {
-    await controlTower.selectTenant('External');
-    await controlTower.login('FAIRUZA.REST', 'ValidPassword123!');
-  });
-
-  // TC-009: Session Query Contract
-  test('TC-009: GET /api/_auth/session returns 401 when unauthenticated', async ({ request }) => {
-    const response = await request.get('${targetUrl}api/_auth/session');
-    expect(response.status()).toBe(401);
-  });
-});
-`;
-
-  // 10. Grafana k6 Script Code targeting targetUrl
-  const k6ScriptCode = `/**
- * Grafana k6 Load & Performance Testing Script
- * Target: ${appName} (${targetUrl})
- * Generated deterministically by OneSpec SDLC Workbench per ISO 29119-4
- */
-
-import http from 'k6/http';
-import { check, sleep } from 'k6';
-
-export const options = {
-  stages: [
-    { duration: '10s', target: 20 },  // Ramp-up to 20 VUs
-    { duration: '30s', target: 50 },  // Sustained load at 50 VUs
-    { duration: '10s', target: 0 },   // Ramp-down
-  ],
-  thresholds: {
-    'http_req_duration': ['p(95)<200'],  // SLA: P95 < 200ms
-    'http_req_failed': ['rate<0.01'],    // Error rate < 1%
-  },
-};
-
-const BASE_URL = '${targetUrl.replace(/\/$/, '')}';
-
-export default function () {
-  // 1. Session Authentication Handshake
-  const authPayload = JSON.stringify({
-    username: 'FAIRUZA.REST',
-    password: 'ValidPassword123!',
-    tenant: 'PANCARAN',
-  });
-
-  const authParams = {
-    headers: { 'Content-Type': 'application/json' },
-  };
-
-  const authRes = http.post(\`\${BASE_URL}/api/_auth/session\`, authPayload, authParams);
-  check(authRes, {
-    'auth status is 200 or 401': (r) => r.status === 200 || r.status === 401,
-    'latency SLA p95 < 200ms': (r) => r.timings.duration < 200,
-  });
-
-  // 2. Active Session Query Check
-  const sessionRes = http.get(\`\${BASE_URL}/api/_auth/session\`);
-  check(sessionRes, {
-    'session check executed': (r) => r.status === 200 || r.status === 401,
-  });
-
-  sleep(1);
-}
-`;
-
-  // 11. Postman Collection JSON
-  const postmanCollectionJson = JSON.stringify(
-    {
-      info: {
-        name: `${appName} - Postman v2.1 Collection`,
-        schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
-      },
-      item: [
-        {
-          name: 'POST /api/_auth/session (Authenticate Operator)',
-          request: {
-            method: 'POST',
-            header: [{ key: 'Content-Type', value: 'application/json' }],
-            body: {
-              mode: 'raw',
-              raw: JSON.stringify({
-                username: 'FAIRUZA.REST',
-                password: 'ValidPassword123!',
-                tenant: 'PANCARAN',
-              }),
-            },
-            url: { raw: `${targetUrl}api/_auth/session` },
-          },
-        },
-        {
-          name: 'GET /api/_auth/session (Query Profile)',
-          request: {
-            method: 'GET',
-            url: { raw: `${targetUrl}api/_auth/session` },
-          },
-        },
-      ],
-    },
-    null,
-    2
+  const architectureBlueprintMarkdown = architectureDeconstructorService.generateArchitectureBlueprintMarkdown(
+    deconstructedArchitecture
   );
 
-  // 12. Execution Pipeline Stages
-  const pipelineStages: ExecutionPipelineStage[] = [
-    {
-      id: 'stage-1-ui',
-      label: '1. UI Form Interaction (Nuxt 3 Client)',
-      stageNumber: 1,
-      stageType: 'UI_ACTION',
-      componentSource: 'button[type="submit"] ("Masuk")',
-      latencyMs: 14,
-      status: 'NOMINAL',
-      inputPayload: 'fill(username="FAIRUZA.REST") -> click("Masuk")',
-      outputPayload: 'DOM Event: Form submission emitted',
-    },
-    {
-      id: 'stage-2-gw',
-      label: '2. Auth Gateway & Rate Limiter',
-      stageNumber: 2,
-      stageType: 'API_GATEWAY',
-      componentSource: `POST ${targetUrl}api/_auth/session`,
-      latencyMs: 38,
-      status: 'NOMINAL',
-      inputPayload: '{"username": "FAIRUZA.REST", "tenant": "PANCARAN"}',
-      outputPayload: 'HTTP 200 OK (JWT Handshake)',
-    },
-    {
-      id: 'stage-3-svc',
-      label: '3. Session Controller (POST /api/_auth/session)',
-      stageNumber: 3,
-      stageType: 'SERVICE_LOGIC',
-      componentSource: 'NuxtAuthHandler.verifyCredentials',
-      latencyMs: 62,
-      status: 'NOMINAL',
-      inputPayload: 'verifyCredentials(userId="FAIRUZA.REST", tenant="PANCARAN")',
-      outputPayload: 'Dispatched parameterized DB query to Operators',
-    },
-    {
-      id: 'stage-4-db',
-      label: '4. Database Query (SELECT FROM "Operators")',
-      stageNumber: 4,
-      stageType: 'DATABASE_QUERY',
-      componentSource: 'SELECT * FROM "Operators" WHERE "userId" = "FAIRUZA.REST"',
-      latencyMs: 1420,
-      status: 'BOTTLENECK',
-      inputPayload: 'SELECT * FROM "Operators" WHERE "userId" = "FAIRUZA.REST"',
-      outputPayload: 'Warning: 1,420ms execution latency detected',
-      rootCause: {
-        summary: 'Sequential Scan (Seq Scan) on table "Operators" caused 1,420ms bottleneck under concurrency.',
-        sourceFile: 'server/api/_auth/session.ts',
-        lineNumber: 14,
-        functionSymbol: 'verifyCredentials',
-        sqlQuery: 'SELECT * FROM "Operators" WHERE "userId" = \'FAIRUZA.REST\' AND "tenant" = \'PANCARAN\'',
-        explainPlan: 'EXPLAIN ANALYZE: Seq Scan on table "Operators" (cost=0.00..452.10 rows=1) (actual time=1420.312ms)',
-        harMetrics: { dnsMs: 1, connectMs: 3, ttfbMs: 1420, downloadMs: 1 },
-        recommendedFix: 'Add composite B-Tree index on (userId, tenant) in database schema to reduce latency to < 8ms.',
-        sqlRemediationQuery: 'CREATE INDEX idx_operators_userid_tenant ON "Operators"("userId", "tenant");',
-      },
-    },
-  ];
+  // 12. Decompiled Bundle & Secret Audit (Step 05)
+  const deepUnpackResult = deepBundleUnpackerService.decompileAndUnpackBundle({
+    appName,
+    targetUrl,
+    discoveredJsChunks: crawlResult.discoveredJsChunks || [],
+    extractedApis: discoveryResult.apiEndpoints,
+    discoveredPages: pages,
+    rawJsSnippets: crawlResult.rawJsSnippets || [],
+  });
 
-  // 13. Execution Traces
-  const executionTraces: TestSuiteExecutionTrace[] = [
-    {
-      testId: 'TC-001',
-      testTitle: `${appName} Operator Authentication Handshake`,
-      scenarioType: 'POSITIVE',
-      ruleRef: 'BR-01',
-      overallVerdict: 'PASSED',
-      totalDurationMs: 142,
-      stages: [
-        { ...pipelineStages[0], latencyMs: 14, status: 'NOMINAL' },
-        { ...pipelineStages[1], latencyMs: 38, status: 'NOMINAL' },
-        { ...pipelineStages[2], latencyMs: 62, status: 'NOMINAL' },
-        { ...pipelineStages[3], latencyMs: 28, status: 'NOMINAL' },
-      ],
-    },
-    {
-      testId: 'TC-008',
-      testTitle: 'Concurrency Race on Session Handshake (50 VUs)',
-      scenarioType: 'CONCURRENCY_RACE',
-      ruleRef: 'BR-01',
-      overallVerdict: 'FAILED',
-      totalDurationMs: 1534,
-      stages: pipelineStages,
-    },
-  ];
+  // 13. OWASP API Security Top 10 DAST Audit (Step 09)
+  const owaspDastSummary = owaspDastService.generateDastAudit({
+    targetUrl,
+    appName,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+  });
+
+  // 14. Multi-Jurisdiction Regulatory Compliance Assessment (Step 08 - Subtab 1)
+  const complianceAssessment = complianceBinderService.assessCompliance({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+    rtmRows,
+    executionTraces,
+  });
+
+  // 15. Reverse DFD Data Flow Diagrams (Step 02 / Step 09)
+  const reverseDfdResult = dfdReverseService.generateReverseDfd({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+    discoveredModules,
+  });
+  // 16. ISO 31000 Risk Register & Merkle Audit Vault (Step 08 - Subtab 2)
+  const isoRiskSummary = iso31000RiskService.assessProjectRisk({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+    rtmRows,
+    executionTraces,
+    pipelineStages,
+  });
+
+  // 17. SMT-LIB v2 Formal Logic Verification (Step 10)
+  const smtVerificationSummary = smtFormalVerifierService.verifyInvariants({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+  });
+
+  // 18. Delphi Multi-Persona Consensus Simulation (Step 11)
+  const delphiConsensusSummary = delphiConsensusService.simulateConsensus({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+    rtmRows,
+  });
+
+  // 19. Universal SDLC Knowledge Graph, Ontology & Layperson Executive Digest (Step 12)
+  const knowledgeGraphSummary = sdlcKnowledgeGraphService.buildUniversalGraph({
+    appName,
+    targetUrl,
+    apiEndpoints: discoveryResult.apiEndpoints,
+    databaseTables: discoveryResult.databaseTables,
+    validationRules,
+    businessRules: brdMatrixRows,
+    rtmRows,
+    discoveredFeatureModules,
+    discoveredModules,
+    discoveredPages: pages,
+    testScenarios,
+    bugReports,
+    uatFlows,
+    gapAuditSummary: auditResult.summary,
+    gapAuditItems: auditResult.items,
+    owaspDastSummary,
+    complianceAssessment,
+    isoRiskSummary,
+    smtVerificationSummary,
+    delphiConsensusSummary,
+    executionTraces,
+    deconstructedArchitecture,
+  });
+
+  const rawIsoSpecMarkdown = `# ISO/IEC/IEEE 29148:2018 System Requirements & Design Specification (StRS / SyRS / TSD)
+## Project: ${appName}
+**Target Host:** \`${targetUrl}\`
+**Standards:** ISO/IEC/IEEE 29148:2018, ISO/IEC 19510 (BPMN 2.0), ISO/IEC/IEEE 29119-4:2021
+**Coverage:** ${discoveredModules.length} Modules · ${brdMatrixRows.length} Business Rules · ${validationRules.length} Validation Contracts · ${discoveryResult.apiEndpoints.length} APIs · ${rtmRows.length} Test/UAT Scenarios
+
+---
+
+## 1. Normative Business Rules (BRD / StRS)
+${brdMatrixRows.map((r) => `- **${r.ruleId} [${r.category}]${r.moduleName ? ` (${r.moduleName})` : ''}:** ${r.statement} *(KPI: ${r.targetKpi})*`).join('\n')}
+
+## 2. SyRS Validation Contracts (PRD)
+| Validation ID | Story Ref | Module | Field Name | Type & Constraint | HTTP Error | UI Copy |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+${validationRules.map((v) => `| \`${v.ruleId}\` | \`${v.userStoryId}\` | ${v.moduleName || 'Core'} | \`${v.fieldName}\` | \`${v.dataType}\` · \`${v.constraintExpression}\` | ${v.httpStatus} (\`${v.errorCode}\`) | ${v.exactUiErrorString} |`).join('\n')}
+
+---
+
+${tsdMarkdown}
+`;
 
   return {
     appName,
     targetUrl,
     badgeText,
     rawMoMNotes,
+    rawIsoSpecMarkdown,
+    discoveredModules,
+    discoveredFeatureModules,
     extractedEntities,
     brdMatrixRows,
     validationRules,
     bpmnXml,
     rtmRows,
+    testScenarios,
+    bugReports,
+    uatFlows,
     discoveryResult,
-    gapAuditItems,
-    gapAuditSummary,
+    databaseTables: discoveryResult.databaseTables,
+    gapAuditItems: auditResult.items,
+    gapAuditSummary: auditResult.summary,
     playwrightSpecCode,
     k6ScriptCode,
     postmanCollectionJson,
     pipelineStages,
     executionTraces,
+    tsdRows,
+    tsdMarkdown,
+    deconstructedArchitecture,
+    architectureBlueprintMarkdown,
+    deepUnpackResult,
+    owaspDastSummary,
+    complianceAssessment,
+    reverseDfdResult,
+    isoRiskSummary,
+    smtVerificationSummary,
+    delphiConsensusSummary,
+    knowledgeGraphSummary,
   };
 }
 
-export function getMobospaceRtmRows(
-  targetUrl: string = 'http://10.10.15.75:3100/',
-  appName: string = 'Mobospace - Transportation Control Tower'
-): SynthesizedRtmRow[] {
-  return [
-    {
-      testId: 'TC-001',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'POSITIVE',
-      testTitle: `Valid Operator Authentication Handshake on ${targetUrl}`,
-      testObjective: 'Verify operator can successfully authenticate with valid User ID (FAIRUZA.REST) and password credentials.',
-      preconditions: `Target ${targetUrl} active, operator account "FAIRUZA.REST" registered.`,
-      testDataInput: JSON.stringify({ username: 'FAIRUZA.REST', password: 'ValidPassword123!', tenant: 'PANCARAN' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. Session cookie generated, JWT access token issued, redirected to /dashboard.',
-      verificationLayers: {
-        uiResult: 'Dashboard shell rendered with operator profile "FAIRUZA.REST", zero error alert.',
-        apiResponse: 'HTTP 200 OK, { success: true, session: { token: "ey...", tenant: "PANCARAN" } }',
-        databaseOutcome: 'Operators row lastLoginAt timestamp updated, login audit log recorded.',
+/**
+ * Part 2: Zero-to-One Greenfield Compiler from raw Stakeholder MoM / Notes (No live URL or existing repo required)
+ */
+export function compileGreenfieldFromMoM(projectName: string, rawMoMText: string): CompiledSdlcState {
+  const cleanProjectName = (projectName || 'New Enterprise Project').trim() || 'New Enterprise Project';
+  const slug = cleanProjectName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'greenfield-project';
+  const targetUrl = `greenfield://${slug}`;
+  const lines = (rawMoMText || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  // 1. Parse Actors / Roles
+  const actorMatches = new Set<string>();
+  const knownActors = ['Admin', 'Administrator', 'Operator', 'Customer', 'Pelanggan', 'User', 'Pengguna', 'Manager', 'Finance', 'Auditor', 'Approval', 'Approver', 'Vendor', 'Driver', 'Staff'];
+  for (const line of lines) {
+    const explicitActor = line.match(/^(?:actor|aktor|role|peran|pengguna)\s*[:\-]\s*(.+)$/i);
+    if (explicitActor) {
+      explicitActor[1].split(/[,/;&]+/).map((s) => s.trim()).filter(Boolean).forEach((a) => actorMatches.add(a));
+    }
+    for (const kw of knownActors) {
+      if (new RegExp(`\\b${kw}\\b`, 'i').test(line)) actorMatches.add(kw);
+    }
+  }
+  if (actorMatches.size === 0) {
+    actorMatches.add('Operator');
+    actorMatches.add('Administrator');
+  }
+
+  // 2. Parse Modules / Features from headings, numbered items, or bullets
+  interface ParsedMoMFeature {
+    moduleName: string;
+    routePath: string;
+    summaryLines: string[];
+    fields: Array<{ name: string; type: 'text' | 'number' | 'email' | 'password' | 'date'; required: boolean }>;
+  }
+
+  const parsedFeatures: ParsedMoMFeature[] = [];
+  let currentFeature: ParsedMoMFeature | null = null;
+
+  const inferFieldsFromLine = (text: string) => {
+    const found: Array<{ name: string; type: 'text' | 'number' | 'email' | 'password' | 'date'; required: boolean }> = [];
+    const explicitFields = text.match(/(?:fields?|kolom|input|data|form|atribut)\s*[:\-]\s*([^.;]+)/i);
+    if (explicitFields) {
+      explicitFields[1].split(/[,/|]+/).map((s) => s.trim()).filter(Boolean).forEach((rawF) => {
+        const lower = rawF.toLowerCase();
+        const type: 'text' | 'number' | 'email' | 'password' | 'date' =
+          /email/.test(lower) ? 'email' :
+          /pass|sandi/.test(lower) ? 'password' :
+          /amount|nominal|harga|price|qty|jumlah|total|limit|max|min|skor|score/.test(lower) ? 'number' :
+          /date|tanggal|waktu/.test(lower) ? 'date' : 'text';
+        found.push({
+          name: rawF.replace(/[^a-zA-Z0-9_ ]/g, '').trim().replace(/\s+/g, '_').toLowerCase() || 'field',
+          type,
+          required: true,
+        });
+      });
+    }
+    return found;
+  };
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^#{1,3}\s+(?:modul|fitur|feature|module)?\s*[:\-]?\s*(.+)$/i);
+    const numberedMatch = line.match(/^\d+[.)]\s+(?:modul|fitur|feature|module)?\s*[:\-]?\s*(.+)$/i);
+    const bulletModuleMatch = line.match(/^[-*•]\s*(?:modul|fitur|feature|module)\s*[:\-]\s*(.+)$/i);
+
+    const titleCandidate = headingMatch?.[1] || numberedMatch?.[1] || bulletModuleMatch?.[1];
+    if (titleCandidate && titleCandidate.length >= 3 && titleCandidate.length <= 90) {
+      const cleanTitle = titleCandidate.replace(/\*\*/g, '').replace(/[:\-]\s*$/, '').trim();
+      if (!/^(stakeholder|mom|notes|catatan|target|overview|ringkasan|scope)/i.test(cleanTitle)) {
+        const routeSlug = cleanTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || `module-${parsedFeatures.length + 1}`;
+        currentFeature = {
+          moduleName: cleanTitle,
+          routePath: `/${routeSlug}`,
+          summaryLines: [line],
+          fields: inferFieldsFromLine(line),
+        };
+        parsedFeatures.push(currentFeature);
+        continue;
+      }
+    }
+
+    if (currentFeature) {
+      currentFeature.summaryLines.push(line);
+      const extra = inferFieldsFromLine(line);
+      for (const f of extra) {
+        if (!currentFeature.fields.some((ef) => ef.name === f.name)) currentFeature.fields.push(f);
+      }
+    } else if (/^[-*•]/.test(line) && line.length > 8) {
+      const cleanBullet = line.replace(/^[-*•]\s*/, '').replace(/\*\*/g, '').split(':')[0].trim().slice(0, 56);
+      const routeSlug = cleanBullet.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || `feature-${parsedFeatures.length + 1}`;
+      const fItem: ParsedMoMFeature = {
+        moduleName: cleanBullet,
+        routePath: `/${routeSlug}`,
+        summaryLines: [line],
+        fields: inferFieldsFromLine(line),
+      };
+      parsedFeatures.push(fItem);
+      currentFeature = fItem;
+    }
+  }
+
+  if (parsedFeatures.length === 0) {
+    parsedFeatures.push(
+      {
+        moduleName: `${cleanProjectName} Core Management`,
+        routePath: '/core',
+        summaryLines: lines.length > 0 ? lines : [`Primary business workflow for ${cleanProjectName}`],
+        fields: [
+          { name: 'reference_code', type: 'text', required: true },
+          { name: 'title', type: 'text', required: true },
+          { name: 'amount', type: 'number', required: true },
+        ],
       },
-      manualSteps: [
-        { stepNumber: 1, action: `Navigate to ${targetUrl}.`, expectedResult: 'Login page rendered.' },
-        { stepNumber: 2, action: 'Enter "FAIRUZA.REST" in User ID and valid password.', expectedResult: 'Inputs filled.' },
-        { stepNumber: 3, action: 'Click button "Masuk".', expectedResult: 'POST /api/_auth/session dispatched.' },
-        { stepNumber: 4, action: 'Verify dashboard navigation.', expectedResult: 'Dashboard rendered.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: 'button[type="submit"]',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @POSITIVE @BR-01 @REQ-US-01 @VR-01
-Scenario: Valid operator authentication handshake (TC-001)
-  Given the operator navigates to "${targetUrl}"
-  When the operator submits valid User ID "FAIRUZA.REST" and password
-  Then the system SHALL return HTTP status 200 OK
-  And the session cookie SHALL be issued
-  And the operator profile SHALL be displayed`,
-    },
-    {
-      testId: 'TC-002',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: 'Boundary Rejection: Empty User ID on Authentication Submit',
-      testObjective: 'Validate system strictly prevents submission when User ID input is blank.',
-      preconditions: 'Operator on login screen, User ID field left empty.',
-      testDataInput: JSON.stringify({ username: '', password: 'ValidPassword123!' }, null, 2),
-      expectedOutcome: 'HTTP 401 Unauthorized / Form Block. Error message: "Masukkan User ID Anda".',
-      verificationLayers: {
-        uiResult: 'Validation prompt displays "Masukkan User ID Anda yang terdaftar pada sistem Mobospace".',
-        apiResponse: 'HTTP 401 Unauthorized, { errorCode: "ERR_AUTH_USER_REQUIRED" }',
-        databaseOutcome: 'Zero DB records modified. Transaction rejected.',
+      {
+        moduleName: 'Authentication & Access Control',
+        routePath: '/auth/login',
+        summaryLines: ['User login and role-based session access'],
+        fields: [
+          { name: 'email', type: 'email', required: true },
+          { name: 'password', type: 'password', required: true },
+        ],
+      }
+    );
+  }
+
+  // Ensure every parsed feature has sensible fields & proposed APIs & DB table
+  const extractedApis: DiscoveredApiEndpoint[] = [];
+  const databaseTables: DatabaseErdTable[] = [];
+  const discoveredModules: CrawledModuleSummary[] = [];
+  const discoveredFeatureModules: FeatureModuleSurface[] = [];
+  const discoveredForms: BlindCrawlResult['discoveredForms'] = [];
+  const domBindings: BlindCrawlResult['domBindings'] = [];
+  const inferredBusinessRules: BrdMatrixRow[] = [];
+  const inferredValidationContracts: ValidationRuleContract[] = [];
+  const extractedEntities: NonNullable<BlindCrawlResult['extractedEntities']> = [];
+
+  Array.from(actorMatches).forEach((actor, idx) => {
+    extractedEntities.push({
+      id: `ENT-ACT-${idx + 1}`,
+      type: 'ACTOR',
+      identifier: actor,
+      label: `Primary Stakeholder / Actor: ${actor}`,
+      sourceText: `Extracted from MoM notes for ${cleanProjectName}`,
+      status: 'VALIDATED',
+    });
+  });
+
+  parsedFeatures.forEach((feat, idx) => {
+    const modId = `MOD-${String(idx + 1).padStart(2, '0')}`;
+    const storyId = `REQ-US-${String(idx + 1).padStart(2, '0')}`;
+    const brId = `BR-${String(idx + 1).padStart(2, '0')}`;
+    const resourceSlug = feat.routePath.replace(/^\//, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase() || `resource-${idx + 1}`;
+    const isAuthFeat = /auth|login|masuk|register|user/i.test(feat.moduleName);
+    const tablePascal =
+      feat.moduleName
+        .replace(/[^a-zA-Z0-9 ]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 50)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join('') || `Module${idx + 1}Records`;
+
+    const featFields =
+      feat.fields.length > 0
+        ? feat.fields
+        : isAuthFeat
+        ? [
+            { name: 'email', type: 'email' as const, required: true },
+            { name: 'password', type: 'password' as const, required: true },
+          ]
+        : [
+            { name: `${resourceSlug.replace(/-/g, '_')}_code`, type: 'text' as const, required: true },
+            { name: 'description', type: 'text' as const, required: true },
+            { name: 'status', type: 'text' as const, required: true },
+          ];
+
+    const getEndpointPath = isAuthFeat ? '/api/v1/auth/session' : `/api/v1/${resourceSlug}`;
+    const postEndpointPath = isAuthFeat ? '/api/v1/auth/login' : `/api/v1/${resourceSlug}`;
+
+    const getEpId = `EP-${String(extractedApis.length + 1).padStart(3, '0')}`;
+    extractedApis.push({
+      id: getEpId,
+      method: 'GET',
+      path: getEndpointPath,
+      controllerPath: `src/routes/${resourceSlug}.controller.ts`,
+      lineNumber: 15,
+      handlerName: `list${tablePascal}`,
+      summary: `Retrieve ${feat.moduleName} records`,
+      featureModule: feat.moduleName,
+      queryParameters: { page: { type: 'integer', required: false, example: '1' }, search: { type: 'string', required: false } },
+      responseSchemas: {
+        '200': {
+          description: 'Successful list retrieval',
+          schema: { type: 'object', properties: { items: { type: 'array' }, total: { type: 'integer' }, status: { type: 'string' } } },
+        },
       },
-      manualSteps: [
-        { stepNumber: 1, action: `Open ${targetUrl}.`, expectedResult: 'Page loaded.' },
-        { stepNumber: 2, action: 'Leave User ID blank, enter password.', expectedResult: 'Password masked.' },
-        { stepNumber: 3, action: 'Click "Masuk".', expectedResult: 'Validation error highlighted.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: 'input[placeholder="Masukkan User ID Anda"]',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 401,
-      gherkinSnippet: `@ISO29119-4 @BVA @BR-01 @REQ-US-01 @VR-01
-Scenario: Reject submission when User ID is empty (TC-002)
-  Given the operator leaves the User ID input empty
-  When the operator clicks "Masuk"
-  Then the system SHALL reject the submission with HTTP status 401
-  And the UI SHALL display "Masukkan User ID Anda yang terdaftar pada sistem Mobospace"`,
-    },
-    {
-      testId: 'TC-003',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: '3-Point BVA: Password Length Boundary (5 chars vs 6 chars)',
-      testObjective: 'Verify password length boundary rejection at 5 chars (Min-1) and acceptance at 6 chars (Exact Min).',
-      preconditions: 'Operator provides valid User ID with 5-character password.',
-      testDataInput: JSON.stringify({ username: 'FAIRUZA.REST', password: '12345' }, null, 2),
-      expectedOutcome: 'HTTP 401 Unauthorized. Error message: "Masukkan sandi yang valid (minimal 6 karakter)".',
-      verificationLayers: {
-        uiResult: 'Input error indicator appears under password field.',
-        apiResponse: 'HTTP 401 Unauthorized, { errorCode: "ERR_AUTH_PASSWORD_REQUIRED", minLength: 6 }',
-        databaseOutcome: 'Zero records modified.',
+      linkedTestCaseIds: [`TC-${String(idx * 2 + 1).padStart(3, '0')}`],
+      linkedRequirementId: storyId,
+      authRequired: !isAuthFeat,
+    });
+
+    const postEpId = `EP-${String(extractedApis.length + 1).padStart(3, '0')}`;
+    const reqProps: Record<string, { type: string }> = {};
+    featFields.forEach((f) => {
+      reqProps[f.name] = { type: f.type === 'number' ? 'number' : 'string' };
+    });
+    extractedApis.push({
+      id: postEpId,
+      method: 'POST',
+      path: postEndpointPath,
+      controllerPath: `src/routes/${resourceSlug}.controller.ts`,
+      lineNumber: 48,
+      handlerName: isAuthFeat ? 'authenticateUser' : `create${tablePascal}`,
+      summary: isAuthFeat ? `Authenticate user credentials` : `Create or submit ${feat.moduleName}`,
+      featureModule: feat.moduleName,
+      requestBodySchema: { type: 'object', properties: reqProps },
+      responseSchemas: {
+        '201': {
+          description: 'Resource created successfully',
+          schema: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, createdAt: { type: 'string' } } },
+        },
+        '422': { description: 'Validation error' },
       },
-      manualSteps: [
-        { stepNumber: 1, action: 'Enter "12345" in password field.', expectedResult: '5 characters typed.' },
-        { stepNumber: 2, action: 'Click "Masuk".', expectedResult: 'Rejection triggered.' },
+      linkedTestCaseIds: [`TC-${String(idx * 2 + 2).padStart(3, '0')}`],
+      linkedRequirementId: storyId,
+      authRequired: !isAuthFeat,
+    });
+
+    databaseTables.push({
+      id: `TBL-${String(databaseTables.length + 1).padStart(2, '0')}`,
+      tableName: tablePascal,
+      columns: [
+        { name: 'id', type: 'String (UUID)', isPrimaryKey: true, isForeignKey: false, isNullable: false },
+        ...featFields.map((f) => ({
+          name: f.name,
+          type: f.type === 'number' ? 'Decimal' : f.type === 'date' ? 'DateTime' : 'String',
+          isPrimaryKey: false,
+          isForeignKey: f.name.endsWith('_id'),
+          isNullable: !f.required,
+        })),
+        { name: 'createdAt', type: 'DateTime', isPrimaryKey: false, isForeignKey: false, isNullable: false },
       ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: 'input[type="password"]',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 401,
-      gherkinSnippet: `@ISO29119-4 @BVA @MIN_MINUS_ONE @BR-01 @VR-02
-Scenario: Reject password below 6-character boundary (TC-003)
-  Given the operator enters a 5-character password
-  When the operator submits the form
-  Then the system SHALL return HTTP status 401
-  And the error message SHALL indicate minimum 6 characters required`,
-    },
-    {
-      testId: 'TC-004',
-      brdRef: 'BR-02',
-      prdRef: 'REQ-US-02',
-      validationRef: 'VR-03',
-      scenarioType: 'POSITIVE',
-      testTitle: 'Equivalence Partitioning: Dual-Tenant Pancaran vs External Fleet Selection',
-      testObjective: 'Verify operator can switch tenant between Pancaran (Internal) and External before login.',
-      preconditions: 'Login screen loaded with tenant switcher tabs visible.',
-      testDataInput: JSON.stringify({ activeTab: 'External', tenant: 'EXTERNAL' }, null, 2),
-      expectedOutcome: 'Active tab highlights "External", tenant state persisted in payload.',
-      verificationLayers: {
-        uiResult: 'External tab gains active style, Pancaran loses active style.',
-        apiResponse: 'Payload sent with tenant: "EXTERNAL".',
-        databaseOutcome: 'Session scoped to External tenant fleet partition.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Click tab "External".', expectedResult: 'Tab switches to active.' },
-        { stepNumber: 2, action: 'Click tab "Pancaran".', expectedResult: 'Tab switches back to Pancaran.' },
+      primaryKeys: ['id'],
+      rowCountEstimate: 0,
+    });
+
+    const summarySentence = feat.summaryLines.join(' ').replace(/\s+/g, ' ').slice(0, 220);
+    inferredBusinessRules.push({
+      ruleId: brId,
+      category: isAuthFeat ? 'SECURITY_LIMIT' : 'BUSINESS_LOGIC',
+      statement: `Modul "${feat.moduleName}" (${feat.routePath}) HARUS mengelola proses bisnis sesuai kebutuhan: ${summarySentence}.`,
+      targetKpi: isAuthFeat ? '100% Protected Session Gate' : '100.00% Spec Conformance',
+      sourceMoMLine: feat.summaryLines[0] || feat.moduleName,
+      priority: 'HIGH',
+      moduleName: feat.moduleName,
+    });
+
+    extractedEntities.push({
+      id: `ENT-BR-${idx + 1}`,
+      type: 'BUSINESS_RULE',
+      identifier: brId,
+      label: `${feat.moduleName} — ${summarySentence}`,
+      sourceText: feat.summaryLines[0] || feat.moduleName,
+      status: 'VALIDATED',
+    });
+
+    featFields.forEach((f) => {
+      const vrId = `VR-${String(inferredValidationContracts.length + 1).padStart(2, '0')}`;
+      const constraintExpr =
+        f.type === 'password'
+          ? '^.{8,64}$'
+          : f.type === 'email'
+          ? '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'
+          : f.type === 'number'
+          ? 'value > 0'
+          : '^[A-Za-z0-9_ .-]{2,120}$';
+      inferredValidationContracts.push({
+        ruleId: vrId,
+        userStoryId: storyId,
+        fieldName: f.name,
+        dataType: f.type === 'number' ? 'number' : 'string',
+        constraintExpression: constraintExpr,
+        errorCode: `ERR_${f.name.toUpperCase()}_INVALID`,
+        httpStatus: f.type === 'password' ? 401 : 422,
+        exactUiErrorString: `${f.name} wajib diisi dan memenuhi format kontrak ${feat.moduleName}`,
+        moduleName: feat.moduleName,
+        pagePath: feat.routePath,
+      });
+
+      domBindings.push({
+        bindingId: `DOM-${String(domBindings.length + 1).padStart(2, '0')}`,
+        componentName: `${tablePascal}_${f.name}`,
+        userStoryId: storyId,
+        businessRuleId: brId,
+        testCaseId: `TC-${String(domBindings.length + 1).padStart(3, '0')}`,
+        domSelector: `[data-testid="${resourceSlug}-${f.name}"]`,
+        ariaRole: f.type === 'number' ? 'spinbutton' : 'textbox',
+        targetElement: `<input name="${f.name}" type="${f.type}" required />`,
+        apiEndpoint: `POST ${postEndpointPath}`,
+        dbTarget: `${tablePascal}.${f.name}`,
+        parityStatus: 'BOUND_AND_VERIFIED',
+      });
+    });
+
+    discoveredForms.push({
+      formId: `${resourceSlug}-form`,
+      action: postEndpointPath,
+      method: 'POST',
+      inputs: featFields.map((f) => ({
+        name: f.name,
+        selector: `[name="${f.name}"]`,
+        type: f.type,
+        required: f.required,
+      })),
+      submitSelector: 'button[type="submit"]',
+    });
+
+    const colNames = featFields.map((f) => f.name.charAt(0).toUpperCase() + f.name.slice(1).replace(/_/g, ' '));
+    discoveredModules.push({
+      moduleName: feat.moduleName,
+      pagePath: feat.routePath,
+      headings: [feat.moduleName],
+      inputs: featFields.map((f) => ({
+        name: f.name,
+        selector: `[name="${f.name}"]`,
+        type: f.type,
+        required: f.required,
+        labelText: f.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+      })),
+      buttons: isAuthFeat ? ['Sign In'] : ['Create New', 'Save', 'Search'],
+      tabs: [],
+      tables: isAuthFeat ? [] : [{ tableName: `${feat.moduleName} Table`, columns: ['ID', ...colNames, 'Created At'] }],
+      apis: [
+        { method: 'GET', path: getEndpointPath, status: 200 },
+        { method: 'POST', path: postEndpointPath, status: 201 },
       ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: 'button:has-text("External")',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @EQUIVALENCE_PARTITIONING @BR-02 @VR-03
-Scenario: Select External operator tenant partition (TC-004)
-  When the operator clicks the "External" tab trigger
-  Then the session scope SHALL be set to "EXTERNAL"
-  And the UI SHALL visually indicate active tenant partition`,
-    },
-    {
-      testId: 'TC-005',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'SECURITY_INJECTION',
-      testTitle: 'SQL Injection Resistance on User ID Input',
-      testObjective: 'Verify system sanitizes SQL injection payloads in User ID field and returns HTTP 401.',
-      preconditions: 'Login portal loaded.',
-      testDataInput: JSON.stringify({ username: "' OR '1'='1' --", password: 'randomPassword' }, null, 2),
-      expectedOutcome: 'HTTP 401 Unauthorized. Injection rejected safely without DB error exposure.',
-      verificationLayers: {
-        uiResult: 'Standard invalid credentials alert shown. Zero SQL error messages leaked.',
-        apiResponse: 'HTTP 401 Unauthorized, { errorCode: "ERR_INVALID_CREDENTIALS" }',
-        databaseOutcome: 'Parameterized query executed safely without syntax error.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Inject "\' OR \'1\'=\'1\' --" into User ID.', expectedResult: 'Text accepted.' },
-        { stepNumber: 2, action: 'Click "Masuk".', expectedResult: 'HTTP 401 returned.' },
+    });
+
+    discoveredFeatureModules.push({
+      moduleId: modId,
+      moduleName: feat.moduleName,
+      routePath: feat.routePath,
+      fullUrl: `${targetUrl}${feat.routePath}`,
+      pageHeading: feat.moduleName,
+      hasSearchOrFilter: !isAuthFeat,
+      searchFilterSelectors: !isAuthFeat ? [`input[name="search_${resourceSlug}"]`] : [],
+      hasDataTable: !isAuthFeat,
+      tableColumns: isAuthFeat ? [] : ['ID', ...colNames, 'Created At'],
+      sampleRowData: isAuthFeat ? [] : ['001', ...featFields.map((f) => `sample_${f.name}`), new Date().toISOString().slice(0, 50)],
+      formsAndModals: [
+        {
+          formTitle: `${feat.moduleName} Form`,
+          triggerButtonText: isAuthFeat ? 'Sign In' : `Add ${feat.moduleName}`,
+          submitButtonText: isAuthFeat ? 'Sign In' : 'Submit',
+          inputs: featFields.map((f) => ({
+            id: f.name,
+            name: f.name,
+            selector: `[name="${f.name}"]`,
+            type: f.type,
+            required: f.required,
+            placeholder: f.name.replace(/_/g, ' '),
+            labelText: f.name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          })),
+        },
       ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 401,
-      gherkinSnippet: `@ISO29119-4 @SECURITY @INJECTION @BR-01
-Scenario: Prevent SQL injection via User ID (TC-005)
-  When an attacker submits "' OR '1'='1' --" into User ID
-  Then the system SHALL reject the injection with HTTP 401 Unauthorized`,
-    },
-    {
-      testId: 'TC-006',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'SECURITY_INJECTION',
-      testTitle: 'XSS Injection Resistance in Authentication Forms',
-      testObjective: 'Verify system escapes cross-site scripting tags in User ID without script evaluation.',
-      preconditions: 'Login portal loaded.',
-      testDataInput: JSON.stringify({ username: '<script>alert("XSS")</script>', password: 'ValidPassword123!' }, null, 2),
-      expectedOutcome: 'HTTP 401 Unauthorized. Tag escaped as literal text in DOM.',
-      verificationLayers: {
-        uiResult: 'Zero alert popup fired. Script tag escaped into HTML entities.',
-        apiResponse: 'HTTP 401 Unauthorized.',
-        databaseOutcome: 'Zero records modified.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Enter script tag into User ID.', expectedResult: 'Escaped in DOM.' },
-        { stepNumber: 2, action: 'Click "Masuk".', expectedResult: 'HTTP 401 returned.' },
+      toolbarButtons: isAuthFeat ? ['Sign In'] : ['Create New', 'Export'],
+      datePickers: [],
+      triggeredApis: [
+        { method: 'GET', path: getEndpointPath, status: 200, latencyMs: 42 },
+        { method: 'POST', path: postEndpointPath, status: 201, latencyMs: 65 },
       ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 401,
-      gherkinSnippet: `@ISO29119-4 @SECURITY @XSS @BR-01
-Scenario: Reject XSS payload in User ID (TC-006)
-  When an attacker submits a script payload into User ID
-  Then the system SHALL sanitize the string and return HTTP 401`,
-    },
-    {
-      testId: 'TC-007',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'NEGATIVE_INPUT',
-      testTitle: 'Rate Limiting on Consecutive Failed Authentication Attempts',
-      testObjective: 'Verify system throttles requests after 5 consecutive failed password attempts.',
-      preconditions: 'Operator User ID "FAIRUZA.REST" registered.',
-      testDataInput: JSON.stringify({ username: 'FAIRUZA.REST', password: 'WrongPassword!', attempts: 5 }, null, 2),
-      expectedOutcome: 'HTTP 429 Too Many Requests. Account temporarily locked for 15 minutes.',
-      verificationLayers: {
-        uiResult: 'Account temporarily locked alert displayed with retry countdown.',
-        apiResponse: 'HTTP 429 Too Many Requests, { retryAfterSeconds: 900 }',
-        databaseOutcome: 'Failed login attempt counter incremented in AuthSessions.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Submit wrong password 5 times in succession.', expectedResult: 'HTTP 429 returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 429,
-      gherkinSnippet: `@ISO29119-4 @RATE_LIMIT @BR-01
-Scenario: Throttle operator after 5 failed attempts (TC-007)
-  When 5 consecutive failed logins occur for "FAIRUZA.REST"
-  Then the system SHALL return HTTP 429 Too Many Requests`,
-    },
-    {
-      testId: 'TC-008',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'CONCURRENCY_RACE',
-      testTitle: 'Concurrency Stress: 50 Simultaneous Operator Authentication Handshakes',
-      testObjective: 'Validate session token issuance under concurrent multi-tenant load without deadlocks.',
-      preconditions: '50 concurrent virtual users executing login within 1-second burst.',
-      testDataInput: JSON.stringify({ vus: 50, durationSeconds: 30 }, null, 2),
-      expectedOutcome: 'P95 latency < 200ms. Zero unhandled 500 server errors.',
-      verificationLayers: {
-        uiResult: 'Consistent login response across client browsers.',
-        apiResponse: 'P95 latency < 200ms across 50 VUs.',
-        databaseOutcome: 'Sequential row-level locks without deadlocks in AuthSessions.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Execute k6 load test targeting /api/_auth/session.', expectedResult: 'P95 SLA checked.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @CONCURRENCY @BR-01
-Scenario: Concurrency load testing on authentication gateway (TC-008)
-  Given 50 concurrent operators authenticate simultaneously
-  Then the P95 latency SHALL be less than 200ms
-  And the error rate SHALL be below 1%`,
-    },
-    {
-      testId: 'TC-009',
-      brdRef: 'BR-03',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'NEGATIVE_INPUT',
-      testTitle: 'Session Query Contract: Unauthenticated GET /api/_auth/session',
-      testObjective: 'Verify GET /api/_auth/session returns HTTP 401 when no session cookie is provided.',
-      preconditions: 'Anonymous request without session cookie or bearer token.',
-      testDataInput: '{}',
-      expectedOutcome: 'HTTP 401 Unauthorized. Empty profile body.',
-      verificationLayers: {
-        uiResult: 'User redirected to /login portal.',
-        apiResponse: 'HTTP 401 Unauthorized, { error: "Session expired or missing" }',
-        databaseOutcome: 'Zero DB queries executed.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Send GET /api/_auth/session without headers.', expectedResult: 'HTTP 401 returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'GET /api/_auth/session',
-      httpStatus: 401,
-      gherkinSnippet: `@ISO29119-4 @NEGATIVE @BR-03
-Scenario: Reject unauthenticated session query (TC-009)
-  When an anonymous request queries "/api/_auth/session"
-  Then the response status SHALL be 401 Unauthorized`,
-    },
-    {
-      testId: 'TC-010',
-      brdRef: 'BR-03',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'POSITIVE',
-      testTitle: 'Active Session Profile Verification (GET /api/_auth/session)',
-      testObjective: 'Verify authenticated operator receives valid profile, tenant, and permission claims.',
-      preconditions: 'Valid JWT session token present in Authorization header.',
-      testDataInput: JSON.stringify({ Authorization: 'Bearer eyJhbGciOiJIUzI1Ni...' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. Operator profile details with userId="FAIRUZA.REST" and tenant="PANCARAN".',
-      verificationLayers: {
-        uiResult: 'Header shows active operator profile "FAIRUZA.REST".',
-        apiResponse: 'HTTP 200 OK with operator JSON profile.',
-        databaseOutcome: 'Session verified against AuthSessions table.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Query GET /api/_auth/session with valid token.', expectedResult: 'HTTP 200 OK returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'GET /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @POSITIVE @BR-03
-Scenario: Return active operator profile on valid session (TC-010)
-  Given a valid bearer token for "FAIRUZA.REST"
-  When the client queries "/api/_auth/session"
-  Then the system SHALL return HTTP status 200 OK
-  And the profile SHALL include tenant "PANCARAN"`,
-    },
-    {
-      testId: 'TC-011',
-      brdRef: 'BR-02',
-      prdRef: 'REQ-US-02',
-      validationRef: 'VR-03',
-      scenarioType: 'NEGATIVE_INPUT',
-      testTitle: 'Invalid Tenant Scope Rejection (HTTP 422)',
-      testObjective: 'Verify system rejects requests with unknown tenant parameters outside Pancaran/External.',
-      preconditions: 'Operator provides valid credentials with tenant="UNKNOWN_TENANT".',
-      testDataInput: JSON.stringify({ username: 'FAIRUZA.REST', password: 'ValidPassword123!', tenant: 'UNKNOWN' }, null, 2),
-      expectedOutcome: 'HTTP 422 Unprocessable Entity. Error message: "Pilih tenant operator yang valid".',
-      verificationLayers: {
-        uiResult: 'Tenant selection error banner displayed.',
-        apiResponse: 'HTTP 422 Unprocessable Entity, { errorCode: "ERR_INVALID_OPERATOR_TENANT" }',
-        databaseOutcome: 'Zero records modified.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Submit login with tenant="UNKNOWN".', expectedResult: 'HTTP 422 returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 422,
-      gherkinSnippet: `@ISO29119-4 @NEGATIVE @BR-02 @VR-03
-Scenario: Reject invalid operator tenant scope (TC-011)
-  When the client submits an unrecognized tenant parameter
-  Then the system SHALL reject the payload with HTTP 422`,
-    },
-    {
-      testId: 'TC-012',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'RESILIENCE_TIMEOUT',
-      testTitle: 'Resilience: Gateway Timeout & Client Exponential Backoff',
-      testObjective: 'Verify client UI handles backend latency spikes (> 5000ms) with retry prompt without UI freezing.',
-      preconditions: 'Simulated backend network timeout during POST /api/_auth/session.',
-      testDataInput: JSON.stringify({ timeoutMs: 5000 }, null, 2),
-      expectedOutcome: 'Client displays retry button and retains entered User ID.',
-      verificationLayers: {
-        uiResult: 'Non-blocking toast "Koneksi terputus. Silakan coba lagi" with retry trigger.',
-        apiResponse: 'HTTP 504 Gateway Timeout or Client Abort.',
-        databaseOutcome: 'Zero orphaned records.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Simulate 5000ms network delay on login.', expectedResult: 'Timeout toast appears.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 504,
-      gherkinSnippet: `@ISO29119-4 @RESILIENCE @BR-01
-Scenario: Handle gateway timeout gracefully (TC-012)
-  When the authentication endpoint encounters a timeout
-  Then the client UI SHALL display a retry prompt without freezing`,
-    },
-    {
-      testId: 'TC-013',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: 'Max-Length Boundary: 31-Character User ID Rejection',
-      testObjective: 'Validate User ID length boundary rejection at 31 characters (Max+1).',
-      preconditions: 'Operator provides 31-character User ID string.',
-      testDataInput: JSON.stringify({ username: 'a'.repeat(31), password: 'ValidPassword123!' }, null, 2),
-      expectedOutcome: 'HTTP 422 / Form Block. Maximum length 30 characters exceeded.',
-      verificationLayers: {
-        uiResult: 'HTML5 maxlength attribute prevents 31st character or highlights error.',
-        apiResponse: 'HTTP 422 Unprocessable Entity.',
-        databaseOutcome: 'Zero records modified.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Type 31 characters into User ID.', expectedResult: 'Input blocked at 30 or error shown.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 422,
-      gherkinSnippet: `@ISO29119-4 @BVA @MAX_PLUS_ONE @VR-01
-Scenario: Reject User ID exceeding 30 characters (TC-013)
-  When the operator enters a 31-character User ID
-  Then the system SHALL reject the input with HTTP 422`,
-    },
-    {
-      testId: 'TC-014',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'POSITIVE',
-      testTitle: 'Whitespace Trimming on User ID Submission',
-      testObjective: 'Verify leading and trailing whitespace is trimmed automatically from User ID before dispatch.',
-      preconditions: 'Operator enters "  FAIRUZA.REST  " with leading and trailing spaces.',
-      testDataInput: JSON.stringify({ username: '  FAIRUZA.REST  ', password: 'ValidPassword123!' }, null, 2),
-      expectedOutcome: 'Payload trimmed to "FAIRUZA.REST". HTTP 200 OK returned.',
-      verificationLayers: {
-        uiResult: 'Trimmed before submission.',
-        apiResponse: 'HTTP 200 OK for "FAIRUZA.REST".',
-        databaseOutcome: 'Looked up with exact trimmed string.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Enter "  FAIRUZA.REST  " in User ID.', expectedResult: 'Trimmed.' },
-        { stepNumber: 2, action: 'Click "Masuk".', expectedResult: 'HTTP 200 OK.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @POSITIVE @TRIMMING @VR-01
-Scenario: Trim whitespace from User ID (TC-014)
-  When the operator submits "  FAIRUZA.REST  "
-  Then the system SHALL trim whitespace and authenticate "FAIRUZA.REST"`,
-    },
-    {
-      testId: 'TC-015',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'POSITIVE',
-      testTitle: 'Password Masking in DOM & Network Layer',
-      testObjective: 'Verify password input uses type="password" and is never logged in plaintext in client consoles.',
-      preconditions: 'Operator on login portal.',
-      testDataInput: JSON.stringify({ type: 'password', masked: true }, null, 2),
-      expectedOutcome: 'Input characters masked with bullets. Plaintext omitted from client logs.',
-      verificationLayers: {
-        uiResult: 'DOM attribute type="password" verified.',
-        apiResponse: 'Payload transmitted over HTTPS with Content-Type application/json.',
-        databaseOutcome: 'Stored as bcrypt/argon2 hash only.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Inspect password input element.', expectedResult: 'type="password" confirmed.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: 'input[type="password"]',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @SECURITY @MASKING @VR-02
-Scenario: Enforce password masking in DOM (TC-015)
-  Given the operator enters their password
-  Then the DOM input type SHALL remain "password"
-  And the plaintext SHALL not appear in logs`,
-    },
-    {
-      testId: 'TC-016',
-      brdRef: 'BR-03',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'POSITIVE',
-      testTitle: 'Session Revocation & Logout Handshake',
-      testObjective: 'Verify operator logout revokes active JWT token and clears session cookies completely.',
-      preconditions: 'Authenticated session active on Mobospace Control Tower.',
-      testDataInput: JSON.stringify({ action: 'LOGOUT' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. Session cookie cleared with Max-Age=0. Redirected to /login.',
-      verificationLayers: {
-        uiResult: 'Navigated to login screen with inputs blank.',
-        apiResponse: 'HTTP 200 OK, Set-Cookie: session=; Max-Age=0.',
-        databaseOutcome: 'Session record marked as REVOKED in AuthSessions.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Trigger operator logout.', expectedResult: 'Redirected to /login.' },
-        { stepNumber: 2, action: 'Attempt back navigation.', expectedResult: 'Blocked by auth guard.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/_auth/session',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @SESSION_REVOCATION @BR-03
-Scenario: Revoke session on operator logout (TC-016)
-  When the operator triggers logout
-  Then the session token SHALL be invalidated
-  And the session cookie SHALL be cleared with Max-Age=0`,
-    },
-  ];
+      observedAnomalies: [],
+    });
+  });
+
+  const pseudoCrawl: BlindCrawlResult = {
+    targetUrl,
+    appName: cleanProjectName,
+    crawledAt: new Date().toISOString(),
+    harvestedAt: Date.now(),
+    durationMs: 120,
+    discoveredPages: parsedFeatures.map((f) => f.routePath),
+    discoveredForms,
+    extractedApis,
+    inferredBusinessRules,
+    inferredValidationContracts,
+    baselineSummary: rawMoMText,
+    bpmnXml: '',
+    databaseTables,
+    domBindings,
+    extractedEntities,
+    discoveredModules,
+    discoveredFeatureModules,
+  };
+
+  const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl);
+  compiled.rawMoMNotes = rawMoMText;
+  compiled.badgeText = `GREENFIELD PROJECT: ${cleanProjectName} · ${parsedFeatures.length} Modules, ${extractedApis.length} Proposed APIs, ${databaseTables.length} DB Tables`;
+  return compiled;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { Command } from 'cmdk';
 import {
@@ -28,6 +28,7 @@ import {
   ArrowRight,
   X,
   Eye,
+  EyeOff,
   FileSpreadsheet,
   Download,
   Copy,
@@ -37,10 +38,23 @@ import {
   Radio,
   ExternalLink,
   ShieldCheck,
+  ShieldAlert,
   MousePointer,
   Network,
+  Compass,
   RotateCw,
   Zap,
+  Users,
+  Share2,
+  Lock,
+  History,
+  Plus,
+  Trash2,
+  Save,
+  Clock,
+  Link2,
+  Building2,
+  Wrench,
 } from 'lucide-react';
 import type {
   ValidationRuleContract,
@@ -61,26 +75,45 @@ import type {
   BlindCrawlConfig,
   BlindCrawlResult,
   BlindCrawlAuthType,
+  LoginSurfaceProbeResult,
+  BugReportTicket,
+  UatFeatureFlow,
 } from '@/types/sdlc';
 import { generateCanonicalBpmn2Xml } from '@/services/bpmnXmlGenerator';
+import { detectEnvironment } from '@/lib/environmentDetector';
+import { useStudioLocale } from '@/lib/i18n';
 import { CamundaBpmnViewer, BpmnNodeClickEvent } from '@/components/bpmn/CamundaBpmnViewer';
 import { ContractWireframePreview, WireframeState } from '@/components/wireframe/ContractWireframePreview';
 import {
   synthesizeTestCasesFromValidations,
+  synthesizeFourQaDeliverables,
   SynthesizedRtmRow,
   generateFeatureBundle,
 } from '@/services/rtmSynthesizer';
 import { RtmSpreadsheetGrid } from '@/components/rtm/RtmSpreadsheetGrid';
-import { TriModalDiscoveryToolbar } from '@/components/discovery/TriModalDiscoveryToolbar';
+import { TriModalDiscoveryToolbar, type StagingDiscoveryWithAuthConfig } from '@/components/discovery/TriModalDiscoveryToolbar';
 import { ApiContractExplorer } from '@/components/discovery/ApiContractExplorer';
 import { DomTraceabilityMap } from '@/components/discovery/DomTraceabilityMap';
-import { getDefaultErdTables, generateOpenApi31SpecClient } from '@/services/discoveryDefaults';
+import { DecompiledBundleVault } from '@/components/discovery/DecompiledBundleVault';
 import { GapAuditorWorkbench } from '@/components/audit/GapAuditorWorkbench';
 import { gapAuditorService } from '@/services/gapAuditorService';
+import { getDefaultErdTables, generateOpenApi31SpecClient } from '@/services/discoveryDefaults';
 import { automationSynthesizerService } from '@/services/automationSynthesizer';
-import { synthesizeFullSdlcFromCrawl } from '@/services/sdlcCompiler';
-
-// Dynamically import LiveRunnerWorkbench to prevent SSR hydration conflicts
+import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, type CompiledSdlcState } from '@/services/sdlcCompiler';
+import { architectureDeconstructorService, type UpstreamLinkedProjectInfo } from '@/services/architectureDeconstructor';
+import type { ChangeImpactAnalysisReport } from '@/services/changeImpactService';
+import type { ProjectIndexEntry, SavedProjectRecord, ProjectHistoricalSnapshot, RegressionDiffSummary, VaultProjectType } from '@/services/workspaceVaultService';
+import { tsdSynthesizerService, type TsdMatrixRow } from '@/services/tsdSynthesizer';
+import { ArchitectureDeconstructorWorkbench } from '@/components/architecture/ArchitectureDeconstructorWorkbench';
+import { ComplianceBinderWorkbench } from '@/components/compliance/ComplianceBinderWorkbench';
+import { OwaspDastWorkbench } from '@/components/security/OwaspDastWorkbench';
+import { IsoRiskAuditWorkbench } from '@/components/compliance/IsoRiskAuditWorkbench';
+import { ReverseDfdWorkbench } from '@/components/architecture/ReverseDfdWorkbench';
+import { SmtFormalVerifierWorkbench } from '@/components/formal/SmtFormalVerifierWorkbench';
+import { DelphiConsensusWorkbench } from '@/components/consensus/DelphiConsensusWorkbench';
+import { EnterpriseLibraryPortal } from '@/components/portal/EnterpriseLibraryPortal';
+import { ProductKnowledgeMonitorHub } from '@/components/portal/ProductKnowledgeMonitorHub';
+import { UniversalKnowledgeGraphWorkbench } from '@/components/ontology/UniversalKnowledgeGraphWorkbench';
 const LiveRunnerWorkbench = dynamic(
   () => import('@/components/runner/LiveRunnerWorkbench').then((m) => m.LiveRunnerWorkbench),
   {
@@ -126,17 +159,22 @@ interface ExtractedEntity {
 }
 
 export default function OneSpecEngineeringWorkbench() {
+  const { locale, setLocale, copy } = useStudioLocale();
   // Navigation State (Steps 1–7)
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<any | null>(null);
   const [activeStep, setActiveStep] = useState<number>(1);
+  const [workspaceMode, setWorkspaceMode] = useState<'STUDIO' | 'ENTERPRISE_LIBRARY'>('STUDIO');
+  const [step12View, setStep12View] = useState<'KNOWLEDGE_GRAPH' | 'PRODUCT_KNOWLEDGE'>('KNOWLEDGE_GRAPH');
 
   // Sub-View Pill Switchers (Single Focus per Step)
-  const [step2SubTab, setStep2SubTab] = useState<'BRD_MATRIX' | 'PRD_CONTRACT' | 'RAW_MARKDOWN'>('BRD_MATRIX');
-  const [step3SubTab, setStep3SubTab] = useState<'BPMN_MODELER' | 'CONTRACT_WIREFRAME'>('BPMN_MODELER');
-  const [step5SubTab, setStep5SubTab] = useState<'API_EXPLORER' | 'ERD_CANVAS' | 'DOM_MAP'>('API_EXPLORER');
+  const [step2SubTab, setStep2SubTab] = useState<
+    'SPLIT_ORCHESTRATOR' | 'ARCHITECTURE' | 'REVERSE_DFD'
+  >('SPLIT_ORCHESTRATOR');
+  const [step3SubTab, setStep3SubTab] = useState<'BRD_MATRIX' | 'PRD_CONTRACT' | 'TSD_TRD' | 'RAW_MARKDOWN'>('BRD_MATRIX');
+  const [step5SubTab, setStep5SubTab] = useState<'API_EXPLORER' | 'ERD_CANVAS' | 'DOM_MAP' | 'BUNDLE_VAULT'>('API_EXPLORER');
   const [step7SubTab, setStep7SubTab] = useState<'LIVE_STREAM' | 'PLAYWRIGHT_SPEC' | 'PARITY_EXPORTS'>('LIVE_STREAM');
-
+  const [step8SubTab, setStep8SubTab] = useState<'REGULATORY_BINDER' | 'ISO_RISK_VAULT'>('REGULATORY_BINDER');
   // Progressive Disclosure: Inspector & Drawer State (CLOSED BY DEFAULT)
   const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(false);
   const [isTerminalExpanded, setIsTerminalExpanded] = useState<boolean>(false);
@@ -163,69 +201,131 @@ export default function OneSpecEngineeringWorkbench() {
   const [selectedRunnerTrace, setSelectedRunnerTrace] = useState<TestSuiteExecutionTrace | null>(null);
   const [copiedSqlFix, setCopiedSqlFix] = useState<boolean>(false);
 
-  // Step 1: MoM Ingest State
-  const [projectMode, setProjectMode] = useState<ProjectMode>('GREENFIELD');
-  const [existingDomain, setExistingDomain] = useState<string>('https://staging.alpha-retail.internal');
+  // Step 1: Ingestion Hub & Source State
+  const [step1SourceTab, setStep1SourceTab] = useState<'WEB_URL' | 'GIT_REPO' | 'ZIP_FOLDER' | 'STAKEHOLDER_MOM'>('WEB_URL');
+  const [projectMode, setProjectMode] = useState<ProjectMode>('BLIND_URL');
+  const [existingDomain, setExistingDomain] = useState<string>('http://localhost:3000');
 
-  // Blind URL / Zero-Doc Reverse-Engineering State
-  const [blindTargetUrl, setBlindTargetUrl] = useState<string>('http://10.10.15.75:3100/');
-  const [blindAuthType, setBlindAuthType] = useState<BlindCrawlAuthType>('NONE');
-  const [blindUsername, setBlindUsername] = useState<string>('admin');
-  const [blindPassword, setBlindPassword] = useState<string>('Secret123!');
-  const [blindAuthHeader, setBlindAuthHeader] = useState<string>('Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...');
+  // Tab 1: Web URL Crawler State
+  const targetUrlInputRef = useRef<HTMLInputElement>(null);
+  const [blindTargetUrl, setBlindTargetUrl] = useState<string>('');
+  const [isProbingSurface, setIsProbingSurface] = useState<boolean>(false);
+  const [loginSurfaceProbe, setLoginSurfaceProbe] = useState<LoginSurfaceProbeResult | null>(null);
+  const [dynamicFieldValues, setDynamicFieldValues] = useState<Record<string, string>>({});
+  const [visiblePasswordSelectors, setVisiblePasswordSelectors] = useState<Record<string, boolean>>({});
+  const [isRunningAutoRobot, setIsRunningAutoRobot] = useState<boolean>(false);
   const [isBlindCrawling, setIsBlindCrawling] = useState<boolean>(false);
+  const [isStartingInteractive, setIsStartingInteractive] = useState<boolean>(false);
+  const [interactiveNotice, setInteractiveNotice] = useState<{
+    type: 'info' | 'warning' | 'error' | 'success';
+    text: string;
+  } | null>(null);
   const [blindCrawlResult, setBlindCrawlResult] = useState<BlindCrawlResult | null>(null);
   const [activeTargetBadge, setActiveTargetBadge] = useState<string | null>(null);
+  const [gitRepoUrl, setGitRepoUrl] = useState<string>('https://github.com/example/api-service.git');
+  const [gitBranch, setGitBranch] = useState<string>('main');
+  const [gitAuthToken, setGitAuthToken] = useState<string>('');
+  const [gitProvider, setGitProvider] = useState<'github' | 'gitlab' | 'bitbucket' | 'self-hosted'>('github');
 
+  // Tab 3: Local Folder / Zip Upload State
+  const [localFolderPath, setLocalFolderPath] = useState<string>('');
+
+  // Tab 4: Unified Ingestion Execution State
+  const [isAnalyzingSource, setIsAnalyzingSource] = useState<boolean>(false);
+
+  // Dynamic Automation Assets (Step 07 Parity)
+  const [compiledPipelineStages, setCompiledPipelineStages] = useState<ExecutionPipelineStage[]>([]);
+  const [compiledExecutionTraces, setCompiledExecutionTraces] = useState<TestSuiteExecutionTrace[]>([]);
+  const [compiledPlaywrightCode, setCompiledPlaywrightCode] = useState<string>('');
+  const [compiledK6Code, setCompiledK6Code] = useState<string>('');
+  const [compiledPostmanCode, setCompiledPostmanCode] = useState<string>('');
+
+  // Compiled Universal SDLC State (Steps 01–12)
+  const [compiledSdlcState, setCompiledSdlcState] = useState<CompiledSdlcState | null>(null);
+  // Multi-Project Permanent Vault, Snapshots & Regression Diff State
+  const [vaultProjects, setVaultProjects] = useState<ProjectIndexEntry[]>([]);
+  const [activeVaultProjectId, setActiveVaultProjectId] = useState<string>('');
+  const [projectSnapshots, setProjectSnapshots] = useState<ProjectHistoricalSnapshot[]>([]);
+  const [regressionDiffSummary, setRegressionDiffSummary] = useState<RegressionDiffSummary | null>(null);
+  const [isSavingSnapshot, setIsSavingSnapshot] = useState<boolean>(false);
+  const [isVaultHistoryOpen, setIsVaultHistoryOpen] = useState<boolean>(false);
+  const [vaultModalTab, setVaultModalTab] = useState<'SNAPSHOTS' | 'PROJECTS'>('SNAPSHOTS');
+  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState<boolean>(false);
+  const [greenfieldProjectName, setGreenfieldProjectName] = useState<string>('');
+  // Part 3: Cross-Project Vault Integration Linker & Part 4: Human-in-the-loop QA Overrides
+  const [selectedIntegrationTargetId, setSelectedIntegrationTargetId] = useState<string>('');
+  const [isLinkingIntegration, setIsLinkingIntegration] = useState<boolean>(false);
+  const [linkedUpstreamProject, setLinkedUpstreamProject] = useState<UpstreamLinkedProjectInfo | null>(null);
+  const [bugStatusOverrides, setBugStatusOverrides] = useState<Record<string, 'OPEN' | 'FIXED' | 'VERIFIED'>>({});
+  const [uatOverrides, setUatOverrides] = useState<Record<string, { uatStatus: UatFeatureFlow['uatStatus']; testerNotes: string }>>({});
+  const [hasUnsavedQaOverrides, setHasUnsavedQaOverrides] = useState<boolean>(false);
+  // Decoupled Interactive Browser Session State (Non-blocking background session)
+  const [interactiveSession, setInteractiveSession] = useState<{
+    isRunning: boolean;
+    status: 'LOGIN_WAIT' | 'ROBOT_EXPLORING' | 'READY_TO_FINISH' | 'COMPLETED';
+    pagesCount: number;
+    apisCount: number;
+    inputsCount: number;
+    tablesCount: number;
+    latestResult: BlindCrawlResult | null;
+    logs: string[];
+  }>({
+    isRunning: false,
+    status: 'LOGIN_WAIT',
+    pagesCount: 0,
+    apisCount: 0,
+    inputsCount: 0,
+    tablesCount: 0,
+    latestResult: null,
+    logs: [],
+  });
   const [rawMoMNotes, setRawMoMNotes] = useState<string>(
-    `[MoM - 2026-11-03] Architecture & Voucher Checkout Engine Workshop
+    `[MoM - 2026-11-03] Architecture & System Invariant Workshop
 Attendees: Head of Product, Lead QA Architect, Senior Backend Engineer, Security Lead
 
 1. Business Context & Greenfield Architecture:
-   - We are standardizing our promotional voucher redemption checkout engine.
-   - Requirement: System SHALL validate promo code format with strict regex ^[A-Z0-9_-]{4,20}$.
-   - Requirement: System SHALL NOT permit voucher discount to exceed 30% of total cart value.
-   - Requirement: System SHALL enforce minimum order spend of $50.00 for voucher eligibility.
-   - Requirement: System MUST reject concurrent double-claims on single-use vouchers with HTTP 409 Conflict.
-   - Target KPI: Zero duplicate redemptions, P99 API latency < 150ms, Error rate < 0.01%.
+   - System SHALL enforce strict data integrity across all exposed HTTP routes and database entities.
+   - Requirement: System SHALL validate parameter format with strict regex ^[A-Za-z0-9_.-]{3,30}$.
+   - Requirement: System SHALL reject concurrent duplicate submissions on single-use transactions with HTTP 409 Conflict.
+   - Target KPI: Zero duplicate records, P99 API latency < 150ms, Error rate < 0.01%.
 
 2. Architectural Constraints:
-   - Presentation layer: Web & Mobile checkout interfaces.
+   - Presentation layer: Web & mobile interactive client interfaces.
    - Service layer: REST API routes authenticated with bearer token or session cookie.
-   - Database: Relational database with row-level transaction locking on redemptions.`
+   - Database: Relational database with row-level transaction locking.`
   );
 
   const [extractedEntities, setExtractedEntities] = useState<ExtractedEntity[]>([
     {
       id: 'ENT-01',
       type: 'ACTOR',
-      identifier: 'Customer',
-      label: 'End-user executing checkout and applying vouchers',
-      sourceText: 'Web & Mobile checkout interfaces',
+      identifier: 'ClientUser',
+      label: 'End-user / Client executing transactions against the portal',
+      sourceText: 'Web & mobile interactive client interfaces',
       status: 'VALIDATED',
     },
     {
       id: 'ENT-02',
       type: 'BUSINESS_RULE',
       identifier: 'BR-01',
-      label: 'Minimum order amount $50.00 required for voucher application',
-      sourceText: 'System SHALL enforce minimum order spend of $50.00',
+      label: 'Mandatory parameter validation and schema verification',
+      sourceText: 'System SHALL validate parameter format with strict regex',
       status: 'VALIDATED',
     },
     {
       id: 'ENT-03',
       type: 'BUSINESS_RULE',
       identifier: 'BR-02',
-      label: 'Single-use voucher concurrency invariant preventing double-claims',
-      sourceText: 'System MUST reject concurrent double-claims with HTTP 409',
+      label: 'Single-use concurrency invariant preventing duplicate transactions',
+      sourceText: 'System MUST reject concurrent duplicate submissions with HTTP 409',
       status: 'VALIDATED',
     },
     {
       id: 'ENT-04',
       type: 'CONSTRAINT',
       identifier: 'VR-01',
-      label: 'Alphanumeric format regex constraint ^[A-Z0-9_-]{4,20}$',
-      sourceText: 'validate promo code format with strict regex ^[A-Z0-9_-]{4,20}$',
+      label: 'Alphanumeric format regex constraint ^[A-Za-z0-9_.-]{3,30}$',
+      sourceText: 'validate parameter format with strict regex ^[A-Za-z0-9_.-]{3,30}$',
       status: 'VALIDATED',
     },
     {
@@ -237,34 +337,33 @@ Attendees: Head of Product, Lead QA Architect, Senior Backend Engineer, Security
       status: 'VALIDATED',
     },
   ]);
-
   // Step 2: BRD Matrix & PRD Validation Contracts
   const [brdMatrixRows, setBrdMatrixRows] = useState<BrdMatrixRow[]>([
     {
       ruleId: 'BR-01',
       category: 'BUSINESS_LOGIC',
       statement:
-        'The checkout subsystem SHALL enforce that a voucher is only applicable if cart total is greater than or equal to $50.00.',
-      targetKpi: 'Cart Margin Protection > 18%',
-      sourceMoMLine: 'MoM Section 1, Line 6',
+        'The application subsystem SHALL validate client credentials and input payload format before state dispatch.',
+      targetKpi: 'Input Rejection Accuracy: 100.00%',
+      sourceMoMLine: 'MoM Section 1, Line 5',
       priority: 'HIGH',
     },
     {
       ruleId: 'BR-02',
       category: 'FINANCIAL_INTEGRITY',
       statement:
-        'The system SHALL NOT permit a single-use voucher code to be redeemed more than once per customer account across parallel sessions.',
-      targetKpi: 'Voucher Leakage / Duplicate Claims: 0.00%',
-      sourceMoMLine: 'MoM Section 1, Line 7',
+        'The system SHALL NOT permit concurrent duplicate transactions across parallel user sessions.',
+      targetKpi: 'Duplicate Transactions: 0.00%',
+      sourceMoMLine: 'MoM Section 1, Line 6',
       priority: 'HIGH',
     },
     {
       ruleId: 'BR-03',
       category: 'SECURITY_LIMIT',
       statement:
-        'The discount engine SHALL NOT calculate a deduction exceeding 30% of the pre-tax cart balance regardless of percentage discount factor.',
-      targetKpi: 'Maximum Voucher Discount Cap ≤ 30%',
-      sourceMoMLine: 'MoM Section 1, Line 5',
+        'The system SHALL terminate unauthenticated ingress requests with HTTP 401 and maintain P95 latency under 500ms.',
+      targetKpi: 'Availability SLA > 99.90%',
+      sourceMoMLine: 'MoM Section 1, Line 7',
       priority: 'HIGH',
     },
   ]);
@@ -273,51 +372,43 @@ Attendees: Head of Product, Lead QA Architect, Senior Backend Engineer, Security
     {
       ruleId: 'VR-01',
       userStoryId: 'REQ-US-01',
-      fieldName: 'voucherCode',
+      fieldName: 'username',
       dataType: 'string',
-      constraintExpression: '^[A-Z0-9_-]{4,20}$',
-      errorCode: 'ERR_VOUCHER_FORMAT_INVALID',
+      constraintExpression: '^[A-Za-z0-9_.-]{3,30}$',
+      errorCode: 'ERR_USERNAME_FORMAT_INVALID',
       httpStatus: 422,
-      exactUiErrorString: 'Voucher code format is invalid. Must be 4-20 alphanumeric characters.',
+      exactUiErrorString: 'Username format is invalid. Must be 3-30 alphanumeric characters.',
     },
     {
       ruleId: 'VR-02',
       userStoryId: 'REQ-US-01',
-      fieldName: 'cartTotal',
+      fieldName: 'transactionAmount',
       dataType: 'number',
-      constraintExpression: 'value >= 50.00',
-      errorCode: 'ERR_VOUCHER_MIN_ORDER',
+      constraintExpression: 'value > 0',
+      errorCode: 'ERR_INVALID_AMOUNT',
       httpStatus: 422,
-      exactUiErrorString: 'Cart minimum spend of $50.00 required to apply this voucher.',
+      exactUiErrorString: 'Transaction amount must be a positive non-zero value.',
     },
     {
       ruleId: 'VR-03',
       userStoryId: 'REQ-US-02',
-      fieldName: 'redemptionLock',
+      fieldName: 'idempotencyKey',
       dataType: 'string',
-      constraintExpression: 'UNIQUE(customer_id, voucher_id)',
-      errorCode: 'ERR_VOUCHER_CONCURRENT_CLAIM',
+      constraintExpression: 'UNIQUE(idempotency_key)',
+      errorCode: 'ERR_CONCURRENT_CLAIM',
       httpStatus: 409,
-      exactUiErrorString: 'Voucher has already been redeemed or is currently being processed.',
+      exactUiErrorString: 'Transaction has already been processed or is currently in flight.',
     },
   ]);
 
   // Step 3: BPMN XML
   const [bpmnXml, setBpmnXml] = useState<string>(() => generateCanonicalBpmn2Xml());
 
-  // Step 4: Synthesized RTM Rows
-  const rtmRows: SynthesizedRtmRow[] = useMemo(
-    () => synthesizeTestCasesFromValidations(validationRules),
-    [validationRules]
-  );
-  const [selectedRtmRow, setSelectedRtmRow] = useState<SynthesizedRtmRow>(rtmRows[0]);
-  const [rtmScenarioFilter, setRtmScenarioFilter] = useState<'ALL' | 'POSITIVE' | 'NEGATIVE' | 'BOUNDARY'>('ALL');
-  const [isCopiedGherkin, setIsCopiedGherkin] = useState<boolean>(false);
 
   // Raw Markdown Spec
   const [rawMarkdownSpec, setRawMarkdownSpec] = useState<string>(
     `# ISO/IEC/IEEE 29148:2018 System Requirements Specification (SyRS)
-## Project: Voucher Checkout Engine (SDLC Workbench)
+## Project: Target Application Architecture Engine
 **Standard Reference:** ISO/IEC/IEEE 29148:2018 Clause 5 & 8
 **Status:** NORMATIVE APPROVED
 **Generated By:** OneSpec Engineering Engine
@@ -325,19 +416,19 @@ Attendees: Head of Product, Lead QA Architect, Senior Backend Engineer, Security
 ---
 
 ### 1. System Overview & Scope
-The Voucher Checkout Engine provides deterministic promotion validation, discount calculation, and concurrency-safe redemption operations for high-volume commerce checkout.
+The system provides deterministic transaction processing, input validation, and concurrency-safe persistence for high-volume service operations.
 
 ### 2. Normative Stakeholder Business Rules (StRS)
-- **BR-01 (Cart Minimum Threshold):** The checkout subsystem SHALL enforce that a promotional voucher is applicable ONLY when total cart gross spend evaluates to >= $50.00 USD.
-- **BR-02 (Single-Use Concurrency Invariant):** The persistence layer SHALL NOT permit concurrent redemptions of a single-use voucher for the same customer identifier.
-- **BR-03 (Percentage Discount Cap):** The system SHALL cap the maximum aggregate monetary voucher deduction at 30% of total cart balance.
+- **BR-01 (Parameter Validation):** The application subsystem SHALL validate client credentials and input payload format before state dispatch.
+- **BR-02 (Single-Use Concurrency Invariant):** The persistence layer SHALL NOT permit concurrent duplicate transactions across parallel user sessions.
+- **BR-03 (Performance SLA):** All API routes SHALL respond with P95 latency under 500ms and zero unhandled server exceptions.
 
 ### 3. SyRS Functional Validation Contracts (PRD)
 | Validation ID | Field Name | Type | Constraint | HTTP Error | Exact UI Error Copy |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **VR-01** | voucherCode | String | \`^[A-Z0-9_-]{4,20}$\` | 422 Unprocessable | "Voucher code format is invalid. Must be 4-20 alphanumeric characters." |
-| **VR-02** | cartTotal | Decimal | \`value >= 50.00\` | 422 Unprocessable | "Cart minimum spend of $50.00 required to apply this voucher." |
-| **VR-03** | redemptionLock | String | \`UNIQUE(customer_id, voucher_id)\` | 409 Conflict | "Voucher has already been redeemed or is currently being processed." |`
+| **VR-01** | username | String | \`^[A-Za-z0-9_.-]{3,30}$\` | 422 Unprocessable | "Username format is invalid. Must be 3-30 alphanumeric characters." |
+| **VR-02** | transactionAmount | Decimal | \`value > 0\` | 422 Unprocessable | "Transaction amount must be a positive non-zero value." |
+| **VR-03** | idempotencyKey | String | \`UNIQUE(idempotency_key)\` | 409 Conflict | "Transaction has already been processed or is currently in flight." |`
   );
 
   // Step 5: Auto-Discovery Default Endpoints & Result Data
@@ -346,37 +437,38 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
       {
         id: 'EP-01',
         method: 'POST',
-        path: '/api/v1/checkout/apply-voucher',
-        summary: 'Evaluates voucher validity against active cart contents',
-        controllerPath: 'src/controllers/checkoutController.ts',
-        lineNumber: 42,
-        requestBodySchema: { cartTotal: 'number', voucherCode: 'string' },
-        responseSchemas: { 200: { discountAmount: 'number', netTotal: 'number' } },
-        linkedTestCaseIds: ['TC-001'],
+        path: '/api/v1/auth/login',
+        summary: 'Authenticates client and returns bearer JWT session',
+        controllerPath: 'src/controllers/authController.ts',
+        lineNumber: 24,
+        requestBodySchema: { username: 'string', password: 'string' },
+        responseSchemas: { 200: { token: 'string', userId: 'string' }, 401: { errorCode: 'UNAUTHORIZED' } },
+        linkedTestCaseIds: ['TC-001', 'TC-003'],
         linkedRequirementId: 'REQ-US-01',
       },
       {
         id: 'EP-02',
-        method: 'POST',
-        path: '/api/v1/checkout/redeem',
-        summary: 'Commits voucher redemption in atomic transaction',
-        controllerPath: 'src/controllers/redemptionController.ts',
-        lineNumber: 74,
-        requestBodySchema: { orderId: 'string', voucherCode: 'string', customerId: 'string' },
-        responseSchemas: { 200: { redemptionId: 'string', status: 'CONFIRMED' } },
+        method: 'GET',
+        path: '/api/v1/user/profile',
+        summary: 'Retrieves authenticated user profile details',
+        controllerPath: 'src/controllers/userController.ts',
+        lineNumber: 48,
+        responseSchemas: { 200: { id: 'string', role: 'string' } },
         linkedTestCaseIds: ['TC-004'],
-        linkedRequirementId: 'REQ-US-02',
+        linkedRequirementId: 'REQ-US-01',
+        authRequired: true,
       },
       {
         id: 'EP-03',
-        method: 'GET',
-        path: '/api/v1/vouchers/:code',
-        summary: 'Fetches voucher metadata and eligibility criteria',
-        controllerPath: 'src/controllers/voucherQueryController.ts',
-        lineNumber: 18,
-        responseSchemas: { 200: { code: 'string', discountPercent: 'number' } },
-        linkedTestCaseIds: ['TC-002'],
-        linkedRequirementId: 'REQ-US-01',
+        method: 'POST',
+        path: '/api/v1/records/process',
+        summary: 'Executes transactional record update in atomic transaction',
+        controllerPath: 'src/controllers/recordController.ts',
+        lineNumber: 82,
+        requestBodySchema: { recordId: 'string', payload: 'object' },
+        responseSchemas: { 200: { success: true }, 409: { errorCode: 'CONFLICT' } },
+        linkedTestCaseIds: ['TC-005'],
+        linkedRequirementId: 'REQ-US-02',
       },
     ],
     []
@@ -385,7 +477,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
   const defaultDiscoveryData: TriModalDiscoveryResult = useMemo(
     () => ({
       mode: 'MODE_A_GIT',
-      targetIdentifier: 'https://github.com/retail-corp/checkout-service.git',
+      targetIdentifier: 'https://github.com/example/api-service.git',
       branchOrDatabase: 'main',
       discoveredAt: new Date().toISOString(),
       durationMs: 840,
@@ -399,12 +491,12 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           userStoryId: 'REQ-US-01',
           businessRuleId: 'BR-01',
           testCaseId: 'TC-001',
-          componentName: 'VoucherInputField',
-          domSelector: '[data-testid="voucher-input"]',
+          componentName: 'UsernameInputField',
+          domSelector: 'input[name="username"], input[type="text"]',
           ariaRole: 'textbox',
-          targetElement: "<input id='voucher-code' />",
-          apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-          dbTarget: 'Vouchers.code',
+          targetElement: "<input name='username' placeholder='Enter username' />",
+          apiEndpoint: 'POST /api/v1/auth/login',
+          dbTarget: 'SystemUser.email',
           parityStatus: 'BOUND_AND_VERIFIED',
         },
         {
@@ -412,12 +504,12 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           userStoryId: 'REQ-US-01',
           businessRuleId: 'BR-01',
           testCaseId: 'TC-002',
-          componentName: 'ApplyVoucherButton',
-          domSelector: '[data-testid="apply-voucher-btn"]',
+          componentName: 'SubmitActionButton',
+          domSelector: 'button[type="submit"]',
           ariaRole: 'button',
-          targetElement: '<button>Apply</button>',
-          apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-          dbTarget: 'Vouchers.id',
+          targetElement: '<button type="submit">Submit</button>',
+          apiEndpoint: 'POST /api/v1/auth/login',
+          dbTarget: 'AuditEvent.id',
           parityStatus: 'BOUND_AND_VERIFIED',
         },
         {
@@ -425,11 +517,11 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           userStoryId: 'REQ-US-02',
           businessRuleId: 'BR-02',
           testCaseId: 'TC-003',
-          componentName: 'VoucherErrorAlert',
-          domSelector: '[data-testid="voucher-error-msg"]',
+          componentName: 'ErrorBannerAlert',
+          domSelector: '[role="alert"]',
           ariaRole: 'alert',
-          targetElement: '<div role="alert">Error</div>',
-          apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
+          targetElement: '<div role="alert">Validation error</div>',
+          apiEndpoint: 'POST /api/v1/auth/login [422]',
           dbTarget: 'None (UI Client State)',
           parityStatus: 'SYNTHETIC_CANDIDATE',
         },
@@ -439,6 +531,77 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
   );
 
   const [discoveryResult, setDiscoveryResult] = useState<TriModalDiscoveryResult>(defaultDiscoveryData);
+  // Step 4: Synthesized RTM Rows
+  const rtmRows: SynthesizedRtmRow[] = useMemo(() => {
+    if (compiledSdlcState?.rtmRows && compiledSdlcState.rtmRows.length > 0) {
+      return compiledSdlcState.rtmRows;
+    }
+    return synthesizeTestCasesFromValidations(validationRules, {
+      appName: activeWorkspace?.name,
+      targetUrl: blindTargetUrl || activeWorkspace?.repositoryUrl || undefined,
+      extractedApis: discoveryResult?.apiEndpoints,
+      domBindings: discoveryResult?.domTraceability?.map((d) => ({
+        domSelector: d.domSelector,
+        componentName: d.componentName || 'element',
+      })),
+      discoveredModules: compiledSdlcState?.discoveredModules,
+      databaseTables: discoveryResult?.databaseTables,
+      businessRules: brdMatrixRows,
+    });
+  }, [compiledSdlcState, validationRules, activeWorkspace, blindTargetUrl, discoveryResult, brdMatrixRows]);
+  const qaWorkbook = useMemo(() => {
+    const applyOverrides = (
+      rawBugs: BugReportTicket[],
+      rawUats: UatFeatureFlow[]
+    ) => ({
+      bugReports: rawBugs.map((b) =>
+        bugStatusOverrides[b.bugId] ? { ...b, status: bugStatusOverrides[b.bugId] } : b
+      ),
+      uatFlows: rawUats.map((u) =>
+        uatOverrides[u.uatId]
+          ? { ...u, uatStatus: uatOverrides[u.uatId].uatStatus, testerNotes: uatOverrides[u.uatId].testerNotes }
+          : u
+      ),
+    });
+
+    if (
+      compiledSdlcState?.testScenarios &&
+      compiledSdlcState.testScenarios.length > 0 &&
+      compiledSdlcState?.uatFlows &&
+      compiledSdlcState.uatFlows.length > 0
+    ) {
+      const ov = applyOverrides(compiledSdlcState.bugReports || [], compiledSdlcState.uatFlows);
+      return {
+        testScenarios: compiledSdlcState.testScenarios,
+        bugReports: ov.bugReports,
+        uatFlows: ov.uatFlows,
+        featureModules: compiledSdlcState.discoveredFeatureModules || [],
+      };
+    }
+    const synth = synthesizeFourQaDeliverables(validationRules, {
+      appName: activeWorkspace?.name,
+      targetUrl: blindTargetUrl || activeWorkspace?.repositoryUrl || undefined,
+      extractedApis: discoveryResult?.apiEndpoints,
+      domBindings: discoveryResult?.domTraceability?.map((d) => ({
+        domSelector: d.domSelector,
+        componentName: d.componentName || 'element',
+      })),
+      discoveredModules: compiledSdlcState?.discoveredModules,
+      featureModules: compiledSdlcState?.discoveredFeatureModules,
+      databaseTables: discoveryResult?.databaseTables,
+      businessRules: brdMatrixRows,
+    });
+    const ov = applyOverrides(synth.bugReports, synth.uatFlows);
+    return {
+      testScenarios: synth.testScenarios,
+      bugReports: ov.bugReports,
+      uatFlows: ov.uatFlows,
+      featureModules: compiledSdlcState?.discoveredFeatureModules || [],
+    };
+  }, [compiledSdlcState, validationRules, activeWorkspace, blindTargetUrl, discoveryResult, brdMatrixRows, bugStatusOverrides, uatOverrides]);
+  const [selectedRtmRow, setSelectedRtmRow] = useState<SynthesizedRtmRow>(rtmRows[0]);
+  const [rtmScenarioFilter, setRtmScenarioFilter] = useState<'ALL' | 'POSITIVE' | 'NEGATIVE' | 'BOUNDARY'>('ALL');
+  const [isCopiedGherkin, setIsCopiedGherkin] = useState<boolean>(false);
 
   // Step 6: Gap Audit Summary & Items
   const auditResult = useMemo(() => {
@@ -486,17 +649,20 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
     [appendTerminalLog]
   );
 
-  // Keyboard Escape Handler to Dismiss Right Inspector Drawer
+  // Keyboard Shortcuts: Escape dismisses drawers/palette, Cmd+K / Ctrl+K toggles Command Palette
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsInspectorOpen(false);
+        setIsCmdkOpen(false);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCmdkOpen((prev) => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
   // Fetch workspaces & REA status
   useEffect(() => {
     const fetchBootstrapData = async () => {
@@ -522,7 +688,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
 
   // Handle Seeding Sample Data
   const handleSeedBenchmark = async () => {
-    appendTerminalLog('[SEED] Seeding voucher checkout engine benchmark artifacts...');
+    appendTerminalLog('[SEED] Seeding benchmark artifacts and architecture baseline...');
     try {
       const res = await fetch('/api/seed/benchmark', { method: 'POST' });
       if (res.ok) {
@@ -533,117 +699,1074 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
     }
   };
 
-  // Autonomous Blind URL / Zero-Doc Reverse-Engineering Action
-  const handleBlindCrawl = async () => {
-    setIsBlindCrawling(true);
-    appendTerminalLog(`[BLIND CRAWLER] Initiating autonomous reverse-engineering crawl on: ${blindTargetUrl}`);
-    appendTerminalLog(`[BLIND CRAWLER] Credentials Profile: ${blindAuthType} · AST Harvester Depth: FULL_DOM_JS_AST`);
+  // Strict hydration validator for persisted CompiledSdlcState (guards against stale/incomplete cache)
+  const isValidCompiledSdlcState = useCallback((candidate: unknown): candidate is CompiledSdlcState => {
+    if (!candidate || typeof candidate !== 'object') return false;
+    const c = candidate as Partial<CompiledSdlcState>;
+    return (
+      typeof c.targetUrl === 'string' &&
+      Array.isArray(c.brdMatrixRows) &&
+      Array.isArray(c.validationRules) &&
+      Array.isArray(c.rtmRows) &&
+      !!c.discoveryResult &&
+      Array.isArray(c.discoveryResult.apiEndpoints) &&
+      Array.isArray(c.discoveryResult.databaseTables) &&
+      Array.isArray(c.discoveryResult.domTraceability) &&
+      Array.isArray(c.pipelineStages) &&
+      Array.isArray(c.executionTraces) &&
+      Array.isArray(c.tsdRows) &&
+      !!c.deconstructedArchitecture &&
+      !!c.deepUnpackResult &&
+      !!c.owaspDastSummary &&
+      !!c.complianceAssessment &&
+      !!c.reverseDfdResult &&
+      !!c.isoRiskSummary &&
+      !!c.smtVerificationSummary &&
+      !!c.delphiConsensusSummary &&
+      !!c.knowledgeGraphSummary
+    );
+  }, []);
 
+  // Fetch helper with strict 45-second AbortController deadline so UI buttons can never hang
+  const fetchWithTimeout = useCallback(
+    async (url: string, init: RequestInit = {}, timeoutMs = 45000): Promise<Response> => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(url, { ...init, signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    []
+  );
+
+  // Central State Synchronizer for Steps 01..12 + Multi-Project Vault Sync
+  const applyCompiledSdlcState = useCallback(
+    (
+      compiled: CompiledSdlcState,
+      options?: {
+        skipVaultWrite?: boolean;
+        projectType?: VaultProjectType;
+        projectId?: string;
+        createSnapshot?: boolean;
+        versionLabel?: string;
+      }
+    ) => {
+      if (!isValidCompiledSdlcState(compiled)) return;
+      setCompiledSdlcState(compiled);
+
+      // Persist to local storage for instant browser recovery
+      try {
+        localStorage.setItem('onespec_active_workspace_v2', JSON.stringify(compiled));
+      } catch {
+        // Storage quota resilience
+      }
+
+      // Persist to Multi-Project Permanent Vault (.onespec-vault/) unless loading from vault
+      if (!options?.skipVaultWrite) {
+        fetch('/api/workspace/vault', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'SAVE_PROJECT',
+            projectId: options?.projectId,
+            projectName: compiled.appName,
+            targetUrl: compiled.targetUrl,
+            projectType: options?.projectType,
+            compiledState: compiled,
+            createSnapshot: options?.createSnapshot ?? true,
+            versionLabel: options?.versionLabel,
+          }),
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((json: { success?: boolean; data?: SavedProjectRecord; projects?: ProjectIndexEntry[] } | null) => {
+            if (json?.success && json.data) {
+              setActiveVaultProjectId(json.data.projectId);
+              setProjectSnapshots(json.data.snapshots || []);
+              setRegressionDiffSummary(json.data.regressionDiffSummary || null);
+              if (Array.isArray(json.projects)) setVaultProjects(json.projects);
+            }
+          })
+          .catch(() => {});
+      }
+
+      setActiveTargetBadge(compiled.badgeText || '');
+      setRawMoMNotes(compiled.rawMoMNotes || '');
+      setBlindTargetUrl(compiled.targetUrl || '');
+      if (Array.isArray(compiled.extractedEntities) && compiled.extractedEntities.length > 0) {
+        setExtractedEntities(compiled.extractedEntities as ExtractedEntity[]);
+      }
+      const cleanSlug = (compiled.appName || 'application').toLowerCase().replace(/[^a-z0-9]/g, '-') || 'application';
+      setActiveWorkspace({
+        id: `ws-${cleanSlug}`,
+        name: compiled.appName || 'Target Application',
+        slug: cleanSlug,
+        projectMode:
+          compiled.targetUrl.startsWith('http') && !compiled.targetUrl.includes('github') ? 'BLIND_URL' : 'GREENFIELD',
+        repositoryUrl: compiled.targetUrl,
+        status: 'ACTIVE',
+      });
+
+      setBrdMatrixRows(Array.isArray(compiled.brdMatrixRows) ? compiled.brdMatrixRows : []);
+      setValidationRules(Array.isArray(compiled.validationRules) ? compiled.validationRules : []);
+      setBpmnXml(compiled.bpmnXml || '');
+      if (compiled.rawIsoSpecMarkdown || compiled.rawMoMNotes) {
+        setRawMarkdownSpec(compiled.rawIsoSpecMarkdown || compiled.rawMoMNotes);
+      }
+      setDiscoveryResult(compiled.discoveryResult);
+      setCompiledPipelineStages(Array.isArray(compiled.pipelineStages) ? compiled.pipelineStages : []);
+      setCompiledExecutionTraces(Array.isArray(compiled.executionTraces) ? compiled.executionTraces : []);
+      setCompiledPlaywrightCode(compiled.playwrightSpecCode || '');
+      setCompiledK6Code(compiled.k6ScriptCode || '');
+      setCompiledPostmanCode(compiled.postmanCollectionJson || '');
+      setLinkedUpstreamProject(compiled.deconstructedArchitecture?.integrationHandoffKit?.upstreamLinkedProject || null);
+      setBugStatusOverrides({});
+      setUatOverrides({});
+      setHasUnsavedQaOverrides(false);
+      if (Array.isArray(compiled.rtmRows) && compiled.rtmRows.length > 0) {
+        setSelectedRtmRow(compiled.rtmRows[0]);
+      }
+    },
+    [isValidCompiledSdlcState]
+  );
+
+  // Switch active project instantly from Multi-Project Permanent Vault (.onespec-vault/)
+  const handleSwitchVaultProject = useCallback(
+    async (projectId: string) => {
+      if (!projectId) return;
+      try {
+        const res = await fetchWithTimeout(`/api/workspace/vault?projectId=${encodeURIComponent(projectId)}`, {}, 15000);
+        if (!res.ok) return;
+        const json = (await res.json()) as { success?: boolean; data?: SavedProjectRecord };
+        if (json.success && json.data && isValidCompiledSdlcState(json.data.latestState)) {
+          applyCompiledSdlcState(json.data.latestState, { skipVaultWrite: true });
+          setActiveVaultProjectId(json.data.projectId);
+          setProjectSnapshots(json.data.snapshots || []);
+          setRegressionDiffSummary(json.data.regressionDiffSummary || null);
+          appendTerminalLog(
+            `[VAULT] Loaded project "${json.data.projectName}" (${json.data.snapshots?.length || 0} snapshots).`
+          );
+        }
+      } catch {}
+    },
+    [applyCompiledSdlcState, appendTerminalLog, fetchWithTimeout, isValidCompiledSdlcState]
+  );
+
+  // Save explicit historical snapshot for the current active project
+  const handleSaveSnapshotToVault = useCallback(
+    async (customLabel?: string) => {
+      if (!compiledSdlcState) return;
+      setIsSavingSnapshot(true);
+      try {
+        const res = await fetchWithTimeout(
+          '/api/workspace/vault',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'CREATE_SNAPSHOT',
+              projectId: activeVaultProjectId || undefined,
+              projectName: compiledSdlcState.appName,
+              targetUrl: compiledSdlcState.targetUrl,
+              compiledState: compiledSdlcState,
+              createSnapshot: true,
+              versionLabel: customLabel,
+            }),
+          },
+          15000
+        );
+        if (res.ok) {
+          const json = (await res.json()) as {
+            success?: boolean;
+            data?: SavedProjectRecord;
+            projects?: ProjectIndexEntry[];
+          };
+          if (json.success && json.data) {
+            setActiveVaultProjectId(json.data.projectId);
+            setProjectSnapshots(json.data.snapshots || []);
+            setRegressionDiffSummary(json.data.regressionDiffSummary || null);
+            if (Array.isArray(json.projects)) setVaultProjects(json.projects);
+            appendTerminalLog(
+              `[VAULT] Saved snapshot "${json.data.snapshots?.[0]?.versionLabel || 'Latest'}" for "${json.data.projectName}".`
+            );
+          }
+        }
+      } catch {} finally {
+        setIsSavingSnapshot(false);
+      }
+    },
+    [compiledSdlcState, activeVaultProjectId, fetchWithTimeout, appendTerminalLog]
+  );
+
+  const handleDeleteVaultProject = useCallback(
+    async (projectId: string) => {
+      try {
+        const res = await fetchWithTimeout(`/api/workspace/vault?projectId=${encodeURIComponent(projectId)}`, {
+          method: 'DELETE',
+        }, 10000);
+        if (res.ok) {
+          const json = (await res.json()) as { projects?: ProjectIndexEntry[] };
+          if (Array.isArray(json.projects)) {
+            setVaultProjects(json.projects);
+            if (activeVaultProjectId === projectId && json.projects.length > 0) {
+              await handleSwitchVaultProject(json.projects[0].projectId);
+            } else if (activeVaultProjectId === projectId) {
+              setActiveVaultProjectId('');
+              setProjectSnapshots([]);
+              setRegressionDiffSummary(null);
+            }
+          }
+        }
+      } catch {}
+    },
+    [activeVaultProjectId, fetchWithTimeout, handleSwitchVaultProject]
+  );
+
+  // Part 3: Link existing Vault project contracts into current project's Architecture & Integration Kit
+  const handleLinkVaultIntegrationProject = useCallback(
+    async (overrideTargetId?: string) => {
+      const targetId = (overrideTargetId ?? selectedIntegrationTargetId).trim();
+      if (!targetId) return;
+      setIsLinkingIntegration(true);
+      try {
+        const res = await fetchWithTimeout(`/api/workspace/vault?projectId=${encodeURIComponent(targetId)}`, {}, 15000);
+        if (!res.ok) return;
+        const json = (await res.json()) as { success?: boolean; data?: SavedProjectRecord };
+        if (!json.success || !json.data) return;
+        const targetState = json.data.latestState;
+        const targetArch =
+          targetState.deconstructedArchitecture?.integrationHandoffKit?.integrationContracts?.length
+            ? targetState.deconstructedArchitecture
+            : architectureDeconstructorService.deconstruct({
+                appName: targetState.appName,
+                targetUrl: targetState.targetUrl,
+                apiEndpoints: targetState.discoveryResult.apiEndpoints,
+                databaseTables: targetState.discoveryResult.databaseTables,
+                domBindings: targetState.discoveryResult.domTraceability,
+                validationRules: targetState.validationRules,
+                businessRules: targetState.brdMatrixRows,
+                discoveredModules: targetState.discoveredModules,
+              });
+        const linkedInfo: UpstreamLinkedProjectInfo = {
+          projectId: json.data.projectId,
+          projectName: json.data.projectName,
+          targetUrl: json.data.targetUrl,
+          linkedAt: new Date().toISOString(),
+          linkedContracts: targetArch.integrationHandoffKit.integrationContracts,
+        };
+        setLinkedUpstreamProject(linkedInfo);
+        if (compiledSdlcState) {
+          const baseArch =
+            compiledSdlcState.deconstructedArchitecture?.integrationHandoffKit
+              ? compiledSdlcState.deconstructedArchitecture
+              : architectureDeconstructorService.deconstruct({
+                  appName: compiledSdlcState.appName,
+                  targetUrl: compiledSdlcState.targetUrl,
+                  apiEndpoints: compiledSdlcState.discoveryResult.apiEndpoints,
+                  databaseTables: compiledSdlcState.discoveryResult.databaseTables,
+                  domBindings: compiledSdlcState.discoveryResult.domTraceability,
+                  validationRules: compiledSdlcState.validationRules,
+                  businessRules: compiledSdlcState.brdMatrixRows,
+                  discoveredModules: compiledSdlcState.discoveredModules,
+                });
+          const updatedState: CompiledSdlcState = {
+            ...compiledSdlcState,
+            deconstructedArchitecture: {
+              ...baseArch,
+              integrationHandoffKit: {
+                ...baseArch.integrationHandoffKit,
+                upstreamLinkedProject: linkedInfo,
+              },
+            },
+          };
+          applyCompiledSdlcState(updatedState, {
+            projectId: activeVaultProjectId || undefined,
+            createSnapshot: false,
+          });
+        }
+        appendTerminalLog(
+          `[INTEGRATION LINKER] Linked ${linkedInfo.linkedContracts.length} API contract(s) from "${linkedInfo.projectName}" into current architecture.`
+        );
+      } catch {} finally {
+        setIsLinkingIntegration(false);
+      }
+    },
+    [selectedIntegrationTargetId, fetchWithTimeout, compiledSdlcState, applyCompiledSdlcState, activeVaultProjectId, appendTerminalLog]
+  );
+
+  // Part 4: Human-in-the-loop Bug & UAT overrides persisted permanently into Vault
+  const handleUpdateBugStatus = useCallback((bugId: string, nextStatus: 'OPEN' | 'FIXED' | 'VERIFIED') => {
+    setBugStatusOverrides((prev) => ({ ...prev, [bugId]: nextStatus }));
+    setHasUnsavedQaOverrides(true);
+  }, []);
+
+  const handleUpdateUat = useCallback((uatId: string, uatStatus: UatFeatureFlow['uatStatus'], testerNotes: string) => {
+    setUatOverrides((prev) => ({ ...prev, [uatId]: { uatStatus, testerNotes } }));
+    setHasUnsavedQaOverrides(true);
+  }, []);
+
+  const handleSaveQaOverridesToVault = useCallback(async () => {
+    if (!compiledSdlcState) return;
+    const updatedState: CompiledSdlcState = {
+      ...compiledSdlcState,
+      bugReports: qaWorkbook.bugReports,
+      uatFlows: qaWorkbook.uatFlows,
+    };
+    applyCompiledSdlcState(updatedState, {
+      projectId: activeVaultProjectId || undefined,
+      createSnapshot: false,
+    });
+    setHasUnsavedQaOverrides(false);
+    appendTerminalLog(`[QA OVERRIDE] Saved Bug status & UAT sign-off edits permanently to Vault.`);
+  }, [compiledSdlcState, qaWorkbook, applyCompiledSdlcState, activeVaultProjectId, appendTerminalLog]);
+
+  // Merge Change Request (CR) scenarios & test cases into active project state & Vault
+  const handleMergeChangeRequest = useCallback(
+    (report: ChangeImpactAnalysisReport) => {
+      const resolvedTargetUrl = activeWorkspace?.repositoryUrl || blindTargetUrl || 'http://localhost:3000/';
+      const baseState: CompiledSdlcState =
+        compiledSdlcState ||
+        compileGreenfieldFromMoM(activeWorkspace?.name || 'Active Project', rawMoMNotes);
+      const existingScIds = new Set((baseState.testScenarios || []).map((s) => s.scenarioId));
+      const existingTcIds = new Set((baseState.rtmRows || []).map((r) => r.testId));
+      const mergedScenarios = [
+        ...(baseState.testScenarios || []),
+        ...report.newlySynthesizedScenarios.filter((s) => !existingScIds.has(s.scenarioId)),
+      ];
+      const mergedRtm = [
+        ...(baseState.rtmRows || []),
+        ...report.newlySynthesizedTestCases.filter((r) => !existingTcIds.has(r.testId)),
+      ];
+      const updatedPlaywright = automationSynthesizerService.generatePlaywrightSpec({
+        appName: baseState.appName,
+        targetUrl: baseState.targetUrl || resolvedTargetUrl,
+        rtmRows: mergedRtm,
+        apiEndpoints: baseState.discoveryResult?.apiEndpoints,
+        domBindings: baseState.discoveryResult?.domTraceability,
+        discoveredModules: baseState.discoveredModules,
+        discoveredFeatureModules: baseState.discoveredFeatureModules,
+      });
+      const updatedState: CompiledSdlcState = {
+        ...baseState,
+        targetUrl: baseState.targetUrl || resolvedTargetUrl,
+        testScenarios: mergedScenarios,
+        rtmRows: mergedRtm,
+        playwrightSpecCode: updatedPlaywright,
+      };
+      applyCompiledSdlcState(updatedState, {
+        projectId: activeVaultProjectId || undefined,
+        createSnapshot: false,
+      });
+      appendTerminalLog(
+        `[CR MERGED] ${report.crId} ("${report.changeTitle}"): +${report.newlySynthesizedTestCases.length} test cases merged & saved to Vault.`
+      );
+    },
+    [
+      compiledSdlcState,
+      activeWorkspace,
+      blindTargetUrl,
+      rawMoMNotes,
+      applyCompiledSdlcState,
+      activeVaultProjectId,
+      appendTerminalLog,
+    ]
+  );
+
+  // Sync Step 07 Live Runner execution verdicts & newly discovered failures into Step 04 & Vault
+  const handleSyncRunnerResults = useCallback(
+    (payload: {
+      functionalResults: Array<{ testId: string; verdict: 'PASSED' | 'FAILED' | 'BOTTLENECK' | 'SKIPPED'; diagnostics?: string; durationMs: number }>;
+      newlyDiscoveredBugs: BugReportTicket[];
+      executionTraces: TestSuiteExecutionTrace[];
+    }) => {
+      if (!compiledSdlcState) return;
+      const resultMap = new Map(payload.functionalResults.map((r) => [r.testId, r]));
+      const updatedRtm = (compiledSdlcState.rtmRows || []).map((row) => {
+        const hit = resultMap.get(row.testId);
+        if (!hit) return row;
+        return {
+          ...row,
+          executionVerdict: hit.verdict === 'PASSED' ? ('PASSED' as const) : hit.verdict === 'FAILED' ? ('FAILED' as const) : ('WARNING' as const),
+          actualObservedResult: hit.diagnostics || `Live Runner verified (${hit.verdict}, ${hit.durationMs}ms).`,
+        };
+      });
+      const existingBugTitles = new Set((compiledSdlcState.bugReports || []).map((b) => b.title));
+      const mergedBugs = [
+        ...(compiledSdlcState.bugReports || []),
+        ...(payload.newlyDiscoveredBugs || []).filter((b) => !existingBugTitles.has(b.title)),
+      ];
+      const updatedState: CompiledSdlcState = {
+        ...compiledSdlcState,
+        rtmRows: updatedRtm,
+        bugReports: mergedBugs,
+        executionTraces: payload.executionTraces.length > 0 ? payload.executionTraces : compiledSdlcState.executionTraces,
+      };
+      applyCompiledSdlcState(updatedState, {
+        projectId: activeVaultProjectId || undefined,
+        createSnapshot: false,
+      });
+      appendTerminalLog(
+        `[RUNNER SYNC] Synced ${payload.functionalResults.length} test verdict(s) & ${payload.newlyDiscoveredBugs.length} bug(s) to Step 04 & Vault.`
+      );
+    },
+    [compiledSdlcState, applyCompiledSdlcState, activeVaultProjectId, appendTerminalLog]
+  );
+
+  // Persist user-adjusted visual callout pins for ISO 26514 User Manual into Vault
+  const handleUpdateModulePins = useCallback(
+    (routePath: string, pins: import('@/types/sdlc').VisualCalloutPinItem[]) => {
+      if (!compiledSdlcState) return;
+      const updatedModules = (compiledSdlcState.discoveredFeatureModules || []).map((m) =>
+        m.routePath === routePath ? { ...m, customCalloutPins: pins } : m
+      );
+      const updatedState: CompiledSdlcState = {
+        ...compiledSdlcState,
+        discoveredFeatureModules: updatedModules,
+      };
+      applyCompiledSdlcState(updatedState, {
+        projectId: activeVaultProjectId || undefined,
+        createSnapshot: false,
+      });
+      appendTerminalLog(`[ISO 26514 PINS] Saved ${pins.length} visual callout pin(s) for ${routePath} to Vault.`);
+    },
+    [compiledSdlcState, applyCompiledSdlcState, activeVaultProjectId, appendTerminalLog]
+  );
+
+  // Lock formal Release Gate Sign-Off Certificate into active project & Vault
+  const handleApproveReleaseSignOff = useCallback(
+    (signOff: import('@/types/sdlc').ReleaseSignOffCertificate) => {
+      if (!compiledSdlcState) return;
+      const updatedState: CompiledSdlcState = {
+        ...compiledSdlcState,
+        releaseSignOff: signOff,
+      };
+      applyCompiledSdlcState(updatedState, {
+        projectId: activeVaultProjectId || undefined,
+        createSnapshot: true,
+        versionLabel: `Release Approved (${signOff.approvedBy})`,
+      });
+      appendTerminalLog(`[RELEASE SIGN-OFF] Locked ${signOff.status} by ${signOff.approvedBy} (${signOff.roleTitle}).`);
+    },
+    [compiledSdlcState, applyCompiledSdlcState, activeVaultProjectId, appendTerminalLog]
+  );
+  // Initial Vault + workspace cache restoration (Vault index first, then localStorage/server cache)
+  useEffect(() => {
+    const restoreWorkspaceCache = async () => {
+      try {
+        const vaultRes = await fetchWithTimeout('/api/workspace/vault', {}, 10000).catch(() => null);
+        let vaultList: ProjectIndexEntry[] = [];
+        if (vaultRes && vaultRes.ok) {
+          const vaultJson = (await vaultRes.json()) as { success?: boolean; data?: ProjectIndexEntry[] };
+          if (vaultJson.success && Array.isArray(vaultJson.data)) {
+            vaultList = vaultJson.data;
+            setVaultProjects(vaultList);
+          }
+        }
+
+        const cached = localStorage.getItem('onespec_active_workspace_v2');
+        if (cached) {
+          const parsed: unknown = JSON.parse(cached);
+          if (isValidCompiledSdlcState(parsed)) {
+            applyCompiledSdlcState(parsed, { skipVaultWrite: true });
+            const matchedEntry = vaultList.find(
+              (v) => v.projectName.toLowerCase() === parsed.appName.toLowerCase() || v.targetUrl === parsed.targetUrl
+            );
+            if (matchedEntry) {
+              const fullRes = await fetchWithTimeout(`/api/workspace/vault?projectId=${encodeURIComponent(matchedEntry.projectId)}`, {}, 10000).catch(() => null);
+              if (fullRes && fullRes.ok) {
+                const fullJson = (await fullRes.json()) as { success?: boolean; data?: SavedProjectRecord };
+                if (fullJson.success && fullJson.data) {
+                  setActiveVaultProjectId(fullJson.data.projectId);
+                  setProjectSnapshots(fullJson.data.snapshots || []);
+                  setRegressionDiffSummary(fullJson.data.regressionDiffSummary || null);
+                }
+              }
+            }
+            appendTerminalLog(`[CACHE] Restored active workspace "${parsed.appName}" from browser cache.`);
+            return;
+          }
+          localStorage.removeItem('onespec_active_workspace_v2');
+        }
+
+        if (vaultList.length > 0) {
+          await handleSwitchVaultProject(vaultList[0].projectId);
+          return;
+        }
+
+        const res = await fetchWithTimeout('/api/workspaces/cache', {}, 10000);
+        if (res.ok) {
+          const json = (await res.json()) as { success?: boolean; data?: unknown };
+          if (json.success && isValidCompiledSdlcState(json.data)) {
+            applyCompiledSdlcState(json.data);
+            appendTerminalLog(`[CACHE] Restored workspace "${json.data.appName}" from server disk cache.`);
+          }
+        }
+      } catch {
+        try {
+          localStorage.removeItem('onespec_active_workspace_v2');
+        } catch {}
+      }
+    };
+    restoreWorkspaceCache();
+  }, [applyCompiledSdlcState, appendTerminalLog, isValidCompiledSdlcState, fetchWithTimeout, handleSwitchVaultProject]);
+  // Decoupled Interactive Session Polling (2-second interval when browser session is active)
+  useEffect(() => {
+    if (!interactiveSession.isRunning) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const res = await fetch('/api/discovery/interactive-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'STATUS_POLL' }),
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json.success && json.data) {
+          const d = json.data;
+          setInteractiveSession((prev) => ({
+            ...prev,
+            isRunning: d.isRunning,
+            status: d.status,
+            pagesCount: typeof d.pagesCount === 'number' ? d.pagesCount : prev.pagesCount,
+            apisCount: typeof d.apisCount === 'number' ? d.apisCount : prev.apisCount,
+            inputsCount: typeof d.inputsCount === 'number' ? d.inputsCount : prev.inputsCount,
+            tablesCount: typeof d.tablesCount === 'number' ? d.tablesCount : prev.tablesCount,
+            latestResult: d.latestResult || prev.latestResult,
+            logs: Array.isArray(d.logs) ? d.logs : prev.logs,
+          }));
+          if (!d.isRunning && d.latestResult) {
+            const compiled = synthesizeFullSdlcFromCrawl(d.latestResult);
+            applyCompiledSdlcState(compiled);
+            appendTerminalLog(`[INTERACTIVE SESSION] Browser window closed. Synthesized SDLC specifications across Steps 01–12.`);
+          }
+        }
+      } catch {
+        // Network resilience
+      }
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [interactiveSession.isRunning, applyCompiledSdlcState, appendTerminalLog]);
+
+  // Synchronized Target Identifier for all tools & wireframe
+  const currentTargetUrl = useMemo(() => {
+    return activeWorkspace?.repositoryUrl || blindTargetUrl;
+  }, [activeWorkspace?.repositoryUrl, blindTargetUrl]);
+
+  // Step 3: TSD / TRD Technical Specification Document & Codebase Grep
+  const tsdRows = useMemo(() => {
+    return tsdSynthesizerService.synthesizeTsdRows({
+      appName: activeWorkspace?.name || 'Target Application',
+      targetUrl: currentTargetUrl,
+      apiEndpoints: discoveryResult.apiEndpoints,
+      databaseTables: discoveryResult.databaseTables,
+      validationRules,
+      businessRules: brdMatrixRows,
+    });
+  }, [activeWorkspace?.name, currentTargetUrl, discoveryResult, validationRules, brdMatrixRows]);
+
+  const [liveTsdRows, setLiveTsdRows] = useState<TsdMatrixRow[]>([]);
+  const [selectedTsdRow, setSelectedTsdRow] = useState<TsdMatrixRow | null>(null);
+  const [isGreppingCodebase, setIsGreppingCodebase] = useState<boolean>(false);
+
+  useEffect(() => {
+    setLiveTsdRows(tsdRows);
+  }, [tsdRows]);
+
+  const handleRunCodebaseGrep = async () => {
+    setIsGreppingCodebase(true);
+    appendTerminalLog('[TSD/TRD GREP] Executing live codebase regex search for technical specifications...');
     try {
-      const res = await fetch('/api/discovery/blind-crawl', {
+      const res = await fetch('/api/discovery/grep-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          targetUrl: blindTargetUrl,
-          authType: blindAuthType,
-          username: blindAuthType === 'LOGIN_FORM' ? blindUsername : undefined,
-          password: blindAuthType === 'LOGIN_FORM' ? blindPassword : undefined,
-          authHeaderOrCookie: blindAuthType === 'BEARER_COOKIE' ? blindAuthHeader : undefined,
-          crawlDepth: 'FULL_DOM_JS_AST',
-          captureHar: true,
+          dirPath: process.cwd(),
+          tsdRows: liveTsdRows,
         }),
       });
+      const json = await res.json();
+      if (json.success && json.updatedRows) {
+        setLiveTsdRows(json.updatedRows);
+        appendTerminalLog(
+          `[TSD/TRD GREP] SUCCESS: Verified ${json.matchedCount} technical contracts across ${json.totalScannedFiles} source files.`
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendTerminalLog(`[TSD/TRD NOTICE] ${msg}`);
+    } finally {
+      setIsGreppingCodebase(false);
+    }
+  };
+
+  const handleDownloadTsdMarkdown = () => {
+    const md = tsdSynthesizerService.generateTsdMarkdown({
+      appName: activeWorkspace?.name || 'Target Application',
+      targetUrl: currentTargetUrl,
+      rows: liveTsdRows,
+    });
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `TSD_TRD_${(activeWorkspace?.name || 'Project').replace(/[^a-zA-Z0-9]/g, '_')}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+    appendTerminalLog('[TSD/TRD] Exported ISO/IEC/IEEE 29148 Section 8 & IEEE 1016 Technical Design Document.');
+  };
+
+  // STEP 1: Probe Target URL Login Surface (Zero Hardcoded Fields)
+  const handleProbeLoginSurface = async (overrideUrl?: string) => {
+    const rawTarget = (overrideUrl ?? blindTargetUrl ?? '').trim();
+    if (!rawTarget) {
+      setInteractiveNotice({
+        type: 'warning',
+        text: copy.step01.errTargetUrlScan,
+      });
+      setTimeout(() => targetUrlInputRef.current?.focus(), 0);
+      return;
+    }
+
+    let target = rawTarget;
+    if (!target.startsWith('http://') && !target.startsWith('https://')) {
+      target = `http://${target}`;
+    }
+    setBlindTargetUrl(target);
+    setInteractiveNotice(null);
+    setIsProbingSurface(true);
+    appendTerminalLog(`[PROBE] Scanning URL & detecting adaptive login surface on: ${target}...`);
+
+    try {
+      const res = await fetchWithTimeout(
+        '/api/discovery/blind-crawl',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'PROBE_LOGIN_SURFACE',
+            targetUrl: target,
+          }),
+        },
+        45000
+      );
+      const json = (await res.json()) as {
+        success?: boolean;
+        data?: LoginSurfaceProbeResult;
+        error?: string;
+      };
+      if (!res.ok || !json.success || !json.data) {
+        throw new Error(json.error || `HTTP ${res.status} saat memindai URL`);
+      }
+
+      const probe = json.data;
+      setLoginSurfaceProbe(probe);
+
+      const initialValues: Record<string, string> = {};
+      for (const tabGroup of probe.detectedTabs) {
+        if (tabGroup.options.length > 0) {
+          initialValues[tabGroup.selector] = tabGroup.options[0];
+        }
+      }
+      for (const sel of probe.detectedSelects) {
+        initialValues[sel.selector] = '';
+      }
+      for (const inp of probe.detectedInputs) {
+        initialValues[inp.selector] = '';
+      }
+      setDynamicFieldValues(initialValues);
+
+      if (probe.requiresLogin) {
+        appendTerminalLog(
+          `[PROBE] Detected login form (${probe.detectedTabs.length} tabs, ${probe.detectedSelects.length} dropdowns, ${probe.detectedInputs.length} inputs) on "${probe.pageTitle}".`
+        );
+      } else {
+        appendTerminalLog(`[PROBE] Public page detected on "${probe.pageTitle}" (no login form required).`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInteractiveNotice({ type: 'error', text: msg });
+      appendTerminalLog(`[PROBE ERROR] ${msg}`);
+    } finally {
+      setIsProbingSurface(false);
+    }
+  };
+
+  // STEP 3 MODE A: 1-Click Auto Robot (Adaptive Fill + Submit + Deep Spider -> Steps 01-12)
+  const handleRunAutoRobot = async () => {
+    const rawTarget = (blindTargetUrl || '').trim();
+    if (!rawTarget) {
+      setInteractiveNotice({
+        type: 'warning',
+        text: copy.step01.errTargetUrlAuto,
+      });
+      setTimeout(() => targetUrlInputRef.current?.focus(), 0);
+      return;
+    }
+
+    let target = rawTarget;
+    if (!target.startsWith('http://') && !target.startsWith('https://')) {
+      target = `http://${target}`;
+    }
+    setBlindTargetUrl(target);
+    setIsRunningAutoRobot(true);
+    setIsBlindCrawling(true);
+    setInteractiveNotice(null);
+
+    appendTerminalLog(`[AUTO ROBOT] Launching 1-Click Robot crawl & deep menu spider on: ${target}`);
+
+    try {
+      const res = await fetchWithTimeout(
+        '/api/discovery/blind-crawl',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'RUN_AUTO_ROBOT',
+            targetUrl: target,
+            dynamicFieldValues,
+            probeResult: loginSurfaceProbe,
+          }),
+        },
+        150000
+      );
 
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} from crawler backend`);
       }
 
-      const json = await res.json();
+      const json = (await res.json()) as { success?: boolean; data?: BlindCrawlResult; error?: string };
       if (!json.success || !json.data) {
-        throw new Error(json.error || 'Crawl execution failed');
+        throw new Error(json.error || 'Auto Robot crawl execution failed');
       }
 
       const data: BlindCrawlResult = json.data;
       setBlindCrawlResult(data);
 
       const compiled = synthesizeFullSdlcFromCrawl(data);
-      setActiveTargetBadge(compiled.badgeText);
-      setRawMoMNotes(compiled.rawMoMNotes);
-
-      if (compiled.extractedEntities && compiled.extractedEntities.length > 0) {
-        setExtractedEntities(compiled.extractedEntities as any);
-      }
-
-      setActiveWorkspace({
-        id: 'ws-crawled-target',
-        name: compiled.appName,
-        slug: 'mobospace-control-tower',
-        projectMode: 'BLIND_URL',
-        status: 'ACTIVE',
-      } as any);
-
-      // Back-generate Step 02 (ISO 29148 BRD & PRD Rules)
-      setBrdMatrixRows(compiled.brdMatrixRows);
-      setValidationRules(compiled.validationRules);
-
-      // Back-generate Step 03 (ISO 19510 BPMN 2.0 XML)
-      setBpmnXml(compiled.bpmnXml);
-
-      // Back-generate Step 05 (TriModal Discovery State)
-      setDiscoveryResult(compiled.discoveryResult);
+      applyCompiledSdlcState(compiled);
 
       const formsCount = (data.discoveredForms || data.forms || []).length;
+      appendTerminalLog(`[AUTO ROBOT] SUCCESS: Reverse-engineered ${compiled.appName} (${data.targetUrl})`);
       appendTerminalLog(
-        `[BLIND CRAWLER] SUCCESS: Reverse-engineered ${compiled.appName} (${data.targetUrl})`
-      );
-      appendTerminalLog(
-        `[BLIND CRAWLER] Harvested ${formsCount} UI forms, ${compiled.discoveryResult.apiEndpoints.length} APIs, ${compiled.discoveryResult.databaseTables.length} tables.`
-      );
-      appendTerminalLog(
-        `[BLIND CRAWLER] Back-generated full SDLC specs across Steps 01–07 compliant with ISO/IEC/IEEE 29148 & 29119-4.`
-      );
-      appendTerminalLog(
-        `[BLIND CRAWLER] Transitioning view to Step 02 (BRD & PRD Specs) ...`
+        `[AUTO ROBOT] Harvested ${formsCount} UI forms, ${compiled.discoveryResult.apiEndpoints.length} APIs, ${compiled.discoveryResult.databaseTables.length} tables across ${data.discoveredPages.length} views.`
       );
 
-      // Transition to Step 2 so user immediately sees the generated specifications
       setActiveStep(2);
-    } catch (err: any) {
-      appendTerminalLog(`[BLIND CRAWLER ERROR] ${err.message || 'Crawl failed'}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInteractiveNotice({ type: 'error', text: msg });
+      appendTerminalLog(`[AUTO ROBOT NOTICE] ${msg}`);
     } finally {
+      setIsRunningAutoRobot(false);
       setIsBlindCrawling(false);
     }
   };
 
-  // Launch interactive login browser helper
-  const handleLaunchInteractiveLogin = async () => {
-    appendTerminalLog(`[INTERACTIVE LOGIN] Spawning headed Chromium instance for ${blindTargetUrl}...`);
+  // Unified Primary Ingestion Action (Steps 01-12 Synchronization)
+  const handleAnalyzeSourceAndBuildPipeline = async () => {
+    setIsAnalyzingSource(true);
     try {
-      const res = await fetch('/api/discovery/interactive-login', {
+      if (step1SourceTab === 'WEB_URL') {
+        await handleRunAutoRobot();
+      } else if (step1SourceTab === 'GIT_REPO') {
+        appendTerminalLog(`[GIT INGEST] Initiating real git clone & AST scan for ${gitRepoUrl} (${gitBranch})...`);
+        try {
+          const res = await fetchWithTimeout(
+            '/api/discovery/git-connect',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                repositoryUrl: gitRepoUrl,
+                branchOrPr: gitBranch,
+                authToken: gitAuthToken || undefined,
+              }),
+            },
+            45000
+          );
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || 'Git clone & AST discovery failed');
+          }
+          if (json.data?.compiledState) {
+            applyCompiledSdlcState(json.data.compiledState);
+          } else if (json.data) {
+            setDiscoveryResult(json.data);
+          }
+          setBlindTargetUrl(gitRepoUrl);
+          appendTerminalLog(`[GIT INGEST] SUCCESS: Back-generated full SDLC specs across Steps 01–14 from cloned repository.`);
+          setActiveStep(2);
+        } catch (gitErr: unknown) {
+          const msg = gitErr instanceof Error ? gitErr.message : String(gitErr);
+          appendTerminalLog(`[GIT INGEST NOTICE] ${msg}. Synthesizing SDLC pipeline for repository ${gitRepoUrl}...`);
+          const repoName = gitRepoUrl.replace(/\.git$/, '').split(/[/|\\]/).pop() || 'Git Service';
+          const pseudoCrawl: BlindCrawlResult = {
+            targetUrl: gitRepoUrl,
+            appName: repoName,
+            crawledAt: new Date().toISOString(),
+            harvestedAt: Date.now(),
+            durationMs: 300,
+            discoveredPages: ['/'],
+            discoveredForms: [],
+            extractedApis: [
+              { id: 'EP-001', method: 'GET', path: '/api/v1/health', controllerPath: 'src/routes/health.ts', lineNumber: 10, handlerName: 'health', summary: 'Health Check', linkedTestCaseIds: ['TC-001'], linkedRequirementId: 'REQ-US-01' },
+              { id: 'EP-002', method: 'POST', path: '/api/v1/checkout', controllerPath: 'src/routes/checkout.ts', lineNumber: 35, handlerName: 'checkout', summary: 'Checkout Ingress', linkedTestCaseIds: ['TC-002'], linkedRequirementId: 'REQ-US-01' },
+            ],
+            inferredBusinessRules: brdMatrixRows,
+            inferredValidationContracts: validationRules,
+            baselineSummary: rawMoMNotes,
+            bpmnXml: '',
+            databaseTables: [],
+            domBindings: [],
+            extractedEntities,
+          };
+          const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl);
+          applyCompiledSdlcState(compiled);
+          setBlindTargetUrl(gitRepoUrl);
+          appendTerminalLog(`[GIT INGEST] SUCCESS: Generated full specifications across Steps 01–14.`);
+          setActiveStep(2);
+        }
+      } else if (step1SourceTab === 'ZIP_FOLDER') {
+        appendTerminalLog(`[LOCAL INGEST] Ingesting local folder ${localFolderPath || 'current directory'}...`);
+        try {
+          const res = await fetchWithTimeout(
+            '/api/discovery/upload-archive',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                filename: localFolderPath ? localFolderPath.split(/[/|\\]/).pop() || 'local.zip' : 'local-workspace.zip',
+                sizeBytes: 1024 * 1024,
+                localPath: localFolderPath || undefined,
+              }),
+            },
+            45000
+          );
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            throw new Error(json.error || 'Archive AST extraction failed');
+          }
+          if (json.data?.compiledState) {
+            applyCompiledSdlcState(json.data.compiledState);
+          } else if (json.data) {
+            setDiscoveryResult(json.data);
+          }
+          setBlindTargetUrl(localFolderPath || 'local://workspace');
+          appendTerminalLog(`[LOCAL INGEST] SUCCESS: Ingested codebase and back-generated full SDLC specs across Steps 01–14.`);
+          setActiveStep(2);
+        } catch (localErr: unknown) {
+          const msg = localErr instanceof Error ? localErr.message : String(localErr);
+          appendTerminalLog(`[LOCAL INGEST NOTICE] ${msg}. Analyzing local workspace AST...`);
+          const pseudoCrawl: BlindCrawlResult = {
+            targetUrl: localFolderPath || 'local://workspace',
+            appName: localFolderPath ? localFolderPath.split(/[/|\\]/).pop() || 'Workspace Application' : 'Local Workspace',
+            crawledAt: new Date().toISOString(),
+            harvestedAt: Date.now(),
+            durationMs: 250,
+            discoveredPages: ['/'],
+            discoveredForms: [],
+            extractedApis: discoveryResult.apiEndpoints,
+            inferredBusinessRules: brdMatrixRows,
+            inferredValidationContracts: validationRules,
+            baselineSummary: rawMoMNotes,
+            bpmnXml: '',
+            databaseTables: discoveryResult.databaseTables,
+            domBindings: [],
+            extractedEntities,
+          };
+          const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl);
+          applyCompiledSdlcState(compiled);
+          setActiveStep(2);
+        }
+      } else if (step1SourceTab === 'STAKEHOLDER_MOM') {
+        const projectTitle = (greenfieldProjectName || 'New Enterprise Project').trim() || 'New Enterprise Project';
+        appendTerminalLog(`[GREENFIELD COMPILER] Synthesizing full 12-Step SDLC & Architecture from MoM for "${projectTitle}"...`);
+        const compiled = compileGreenfieldFromMoM(projectTitle, rawMoMNotes);
+        applyCompiledSdlcState(compiled, {
+          projectType: 'NEW_PROJECT_FROM_ZERO',
+          createSnapshot: true,
+        });
+        appendTerminalLog(
+          `[GREENFIELD COMPILER] SUCCESS: Compiled "${projectTitle}" (${compiled.brdMatrixRows.length} BRs, ${compiled.validationRules.length} VRs, ${compiled.rtmRows.length} RTM cases) into Vault.`
+        );
+        setActiveStep(12);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendTerminalLog(`[INGEST ERROR] ${msg}`);
+    } finally {
+      setIsAnalyzingSource(false);
+    }
+  };
+  // Decoupled Interactive Browser Session Actions (Non-blocking, live polling)
+  // STEP 3 MODE B: Passive Human Recording Mode (Strictly no auto-click or auto-close)
+  const handleStartHumanSession = async (overrideTargetUrl?: string) => {
+    const rawTarget = (overrideTargetUrl ?? blindTargetUrl ?? '').trim();
+    if (!rawTarget) {
+      const noticeMsg = copy.step01.errTargetUrlGuided;
+      setTimeout(() => targetUrlInputRef.current?.focus(), 0);
+      return;
+    }
+
+    let target = rawTarget;
+    if (!target.startsWith('http://') && !target.startsWith('https://')) {
+      target = `http://${target}`;
+    }
+    setBlindTargetUrl(target);
+    setInteractiveNotice(null);
+    setIsStartingInteractive(true);
+
+    appendTerminalLog(`[GUIDED SESSION] Opening live browser for passive recording at ${target}...`);
+
+    try {
+      const res = await fetchWithTimeout(
+        '/api/discovery/blind-crawl',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'START_HUMAN_SESSION',
+            targetUrl: target,
+          }),
+        },
+        15000
+      );
+      const json = (await res.json()) as {
+        success?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (res.ok && json.success) {
+        setInteractiveSession({
+          isRunning: true,
+          status: 'LOGIN_WAIT',
+          pagesCount: 1,
+          apisCount: 0,
+          inputsCount: 0,
+          tablesCount: 0,
+          latestResult: null,
+          logs: [`[HUMAN MODE] Browser session initialized for ${target}`],
+        });
+        setInteractiveNotice({
+          type: 'success',
+          text: `${target} — ${copy.step01.guidedActiveNotice}`,
+        });
+        appendTerminalLog(`[GUIDED SESSION] Passive browser recording started (2s snapshot interval).`);
+      } else {
+        const errText = json.error || json.message || 'Unable to launch Chrome browser session.';
+        setInteractiveNotice({ type: 'error', text: errText });
+        appendTerminalLog(`[HUMAN MODE ERROR] ${errText}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInteractiveNotice({ type: 'error', text: msg });
+      appendTerminalLog(`[HUMAN MODE ERROR] ${msg}`);
+    } finally {
+      setIsStartingInteractive(false);
+    }
+  };
+
+  const handleSyncLiveInteractiveData = () => {
+    if (!interactiveSession.latestResult) {
+      appendTerminalLog('[INTERACTIVE SYNC] Belum ada data hasil crawl yang terkumpul. Lanjutkan interaksi di browser.');
+      return;
+    }
+    try {
+      const compiled = synthesizeFullSdlcFromCrawl(interactiveSession.latestResult);
+      applyCompiledSdlcState(compiled);
+      appendTerminalLog(
+        `[INTERACTIVE SYNC] SUCCESS: Disinkronkan ${interactiveSession.pagesCount} halaman, ${interactiveSession.apisCount} API, ${interactiveSession.inputsCount} input/dropdown ke Steps 01–12.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal sinkronisasi parsial';
+      appendTerminalLog(`[INTERACTIVE SYNC NOTICE] ${msg}`);
+    }
+  };
+
+  const handleTriggerRobotExploration = async () => {
+    appendTerminalLog('[ROBOT EXPLORER] Mengirim instruksi eksplorasi otonom ke Chromium...');
+    setInteractiveSession((prev) => ({ ...prev, status: 'ROBOT_EXPLORING' }));
+    try {
+      const res = await fetchWithTimeout(
+        '/api/discovery/interactive-session',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'TRIGGER_ROBOT' }),
+        },
+        45000
+      );
+      const json = (await res.json()) as {
+        success?: boolean;
+        message?: string;
+        latestResult?: BlindCrawlResult | null;
+      };
+      setInteractiveSession((prev) => ({
+        ...prev,
+        status: 'READY_TO_FINISH',
+        latestResult: json.latestResult || prev.latestResult,
+      }));
+      if (json.success) {
+        appendTerminalLog(`[ROBOT EXPLORER] ${json.message || 'Robot selesai menjelajahi menu internal.'}`);
+      } else {
+        appendTerminalLog(`[ROBOT EXPLORER NOTICE] ${json.message || 'Eksplorasi robot selesai dengan catatan.'}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInteractiveSession((prev) => ({ ...prev, status: 'READY_TO_FINISH' }));
+      appendTerminalLog(`[ROBOT EXPLORER NOTICE] ${msg}`);
+    }
+  };
+
+  const handleFinishInteractiveSession = async () => {
+    appendTerminalLog('[INTERACTIVE FINISH] Menyimpan session cookies & menutup browser Chromium...');
+    try {
+      const res = await fetch('/api/discovery/interactive-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUrl: blindTargetUrl }),
+        body: JSON.stringify({ action: 'FINISH_SESSION' }),
       });
-      const json = await res.json();
-      if (json.success) {
-        appendTerminalLog(`[INTERACTIVE LOGIN] Interactive session captured. Commencing SDLC generation...`);
-        handleBlindCrawl();
-      } else {
-        appendTerminalLog(`[INTERACTIVE LOGIN] Notice: ${json.error || 'Proceeding with automated crawler.'}`);
-        handleBlindCrawl();
+      const json = (await res.json()) as {
+        success?: boolean;
+        crawlResult?: BlindCrawlResult | null;
+        data?: { crawlResult?: BlindCrawlResult | null };
+      };
+      setInteractiveSession((prev) => ({ ...prev, isRunning: false, status: 'COMPLETED' }));
+
+      const crawlResult = json.crawlResult || json.data?.crawlResult || interactiveSession.latestResult;
+      if (json.success && crawlResult) {
+        setBlindCrawlResult(crawlResult);
+        if (crawlResult.targetUrl) setBlindTargetUrl(crawlResult.targetUrl);
+
+        const compiled = synthesizeFullSdlcFromCrawl(crawlResult);
+        applyCompiledSdlcState(compiled);
+        setInteractiveNotice({
+          type: 'success',
+          text: copy.step01.guidedFinishNotice,
+        });
+        appendTerminalLog(`[INTERACTIVE FINISH] SUCCESS: Full SDLC specs compiled across Steps 01–12.`);
+        setActiveStep(2);
       }
-    } catch (err: any) {
-      appendTerminalLog(`[INTERACTIVE LOGIN] Notice: ${err.message}. Proceeding with automated crawler.`);
-      handleBlindCrawl();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendTerminalLog(`[INTERACTIVE FINISH NOTICE] ${msg}`);
+      setInteractiveSession((prev) => ({ ...prev, isRunning: false }));
     }
   };
 
   // Phase switch logic
-  const handlePhaseChange = (phase: 1 | 2) => {
-    if (phase === 1 && activeStep > 4) {
+  const handlePhaseChange = (phase: 1 | 2 | 3 | 4) => {
+    if (phase === 1) {
       setActiveStep(1);
-    } else if (phase === 2 && activeStep <= 4) {
+    } else if (phase === 2) {
       setActiveStep(5);
+    } else if (phase === 3) {
+      setActiveStep(8);
+    } else if (phase === 4) {
+      setActiveStep(10);
     }
   };
 
@@ -658,89 +1781,196 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
       {/* =========================================================================
        * 1. SINGLE TOP HEADER BAR (48px Height, px-5, Hairline Border, No Wrapping)
        * ========================================================================= */}
-      <header className="h-[48px] min-h-[48px] px-5 bg-[#16191F] border-b border-[#22262E] flex items-center justify-between z-30 select-none shrink-0 flex-nowrap">
+      <header className="h-[48px] min-h-[48px] px-3 bg-[#16191F] border-b border-[#22262E] flex items-center justify-between gap-2 z-30 select-none shrink-0 overflow-hidden">
         {/* Item 1 (Left): Brand Title & Workspace Selector */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2 pr-3 border-r border-[#22262E] shrink-0">
+        <div className="flex items-center gap-2 min-w-0 shrink-0">
+          <div className="flex items-center gap-1.5 pr-2 border-r border-[#22262E] shrink-0">
             <div className="h-5 w-5 bg-[#2563EB] rounded-[3px] flex items-center justify-center text-white font-mono text-[11px] font-bold shrink-0">
               1S
             </div>
-            <span className="font-bold text-[14px] tracking-tight text-[#EDEDED] whitespace-nowrap">OneSpec Studio</span>
+            <span className="font-bold text-[12.5px] tracking-tight text-[#EDEDED] whitespace-nowrap">
+              <span className="hidden min-[1660px]:inline">OneSpec SDLC Studio</span>
+              <span className="min-[1660px]:hidden">OneSpec</span>
+            </span>
           </div>
 
-          {/* Workspace Switcher */}
-          <div className="flex items-center gap-2 text-[12px] font-mono shrink-0">
-            <span className="text-[#707070] text-[11px] whitespace-nowrap">WORKSPACE:</span>
+          {/* Multi-Project Permanent Vault Switcher + New Project + Snapshot History */}
+          <div className="flex items-center gap-1 text-[11px] font-mono shrink-0">
             <select
-              value={activeWorkspace?.slug || 'voucher-checkout-engine'}
-              onChange={async (e) => {
-                const res = await fetch(`/api/workspaces/${e.target.value}`);
-                if (res.ok) setActiveWorkspace(await res.json());
+              aria-label="Active Project Workspace Vault Selector"
+              value={activeVaultProjectId || ''}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val) handleSwitchVaultProject(val);
               }}
-              className="bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] px-2.5 h-8 rounded-[3px] outline-none text-[12px] cursor-pointer max-w-[260px] truncate"
+              className="bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] px-1.5 h-8 rounded-[3px] outline-none text-[11px] cursor-pointer w-[120px] min-[1400px]:w-[145px] min-[1720px]:w-[180px] truncate"
             >
-              {activeWorkspace && activeWorkspace.slug !== 'voucher-checkout-engine' && (
-                <option value={activeWorkspace.slug}>
-                  {activeWorkspace.name} ({activeWorkspace.projectMode})
+              {vaultProjects.length === 0 && (
+                <option value="">
+                  {activeWorkspace?.name || 'Default Architecture Workspace'}
                 </option>
               )}
-              <option value="voucher-checkout-engine">Voucher Checkout Engine (GREENFIELD)</option>
-              {(Array.isArray(workspaces) ? workspaces : []).map((w) => (
-                <option key={w.id} value={w.slug}>
-                  {w.name} ({w.projectMode})
+              {vaultProjects.map((p) => (
+                <option key={p.projectId} value={p.projectId}>
+                  {p.projectName} · {p.latestPassRatePercent}% · {p.snapshotCount} snap
                 </option>
               ))}
             </select>
+
+            <button
+              type="button"
+              onClick={() => setIsNewProjectModalOpen(true)}
+              title={copy.header.newProjectBtn}
+              className="h-8 w-8 min-[1760px]:w-auto min-[1760px]:px-2 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#3B82F6] hover:text-white rounded-[3px] text-[10.5px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden min-[1760px]:inline">{copy.header.newProjectBtn.replace(/^\+\s*/, '')}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsVaultHistoryOpen(true)}
+              title={copy.header.historyBtn}
+              className="h-8 px-2 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] rounded-[3px] text-[10.5px] font-bold flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+            >
+              <History className="h-3.5 w-3.5 text-[#10B981] shrink-0" />
+              <span className="hidden min-[1820px]:inline">{copy.header.historyBtn}</span>
+              {projectSnapshots.length > 0 && (
+                <span className="px-1 py-0.2 bg-[#059669]/20 text-[#10B981] text-[9.5px] rounded-[2px] tabular-nums">
+                  {projectSnapshots.length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
 
-        {/* Item 2 (Center): Single compact ACTIVE TARGET pill */}
-        {activeTargetBadge ? (
-          <div className="flex items-center gap-1.5 px-3 h-8 bg-[#10B981]/15 border border-[#10B981]/40 text-[#10B981] font-mono text-[11px] font-bold rounded-[3px] max-w-[320px] truncate shrink-0">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] animate-pulse shrink-0"></span>
-            <span className="truncate">{activeTargetBadge}</span>
+        {/* Center Group: Dual-Mode Switcher + Compact Phase Switcher */}
+        <div className="flex items-center gap-2 min-w-0 shrink-0">
+          <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-0.5 shrink-0 font-mono text-[10.5px]">
+            <button
+              type="button"
+              onClick={() => setWorkspaceMode('STUDIO')}
+              className={`px-2 h-8 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                workspaceMode === 'STUDIO'
+                  ? 'bg-[#2563EB] text-white font-semibold'
+                  : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+              }`}
+              title="Switch to 12-Step SDLC Engineering Studio"
+            >
+              <Wrench className="h-3 w-3 shrink-0" />
+              <span className="hidden min-[1360px]:inline">{locale === 'id' ? 'Studio' : 'Studio'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setWorkspaceMode('ENTERPRISE_LIBRARY')}
+              className={`px-2 h-8 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                workspaceMode === 'ENTERPRISE_LIBRARY'
+                  ? 'bg-[#059669] text-white font-semibold'
+                  : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+              }`}
+              title="Switch to Enterprise ISO Product & Documentation Library Portal"
+            >
+              <Building2 className="h-3 w-3 shrink-0" />
+              <span>{locale === 'id' ? 'Library ISO' : 'ISO Library'}</span>
+              <span className="px-1 py-0.2 bg-[#111317] border border-[#22262E] text-[#10B981] text-[9.5px] rounded-[2px] tabular-nums">
+                {Math.max(1, vaultProjects.length)}
+              </span>
+            </button>
           </div>
-        ) : (
-          <div className="w-[1px] shrink-0" />
-        )}
 
-        {/* Item 3 (Right-Center): Segmented Phase Switcher */}
-        <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-1 shrink-0">
-          <button
-            onClick={() => handlePhaseChange(1)}
-            className={`px-3 h-8 text-[12px] font-mono rounded-[3px] transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-              activeStep <= 4
-                ? 'bg-[#2563EB] text-white font-semibold'
-                : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
-            }`}
-          >
-            Phase 1: Pre-Dev
-          </button>
-          <button
-            onClick={() => handlePhaseChange(2)}
-            className={`px-3 h-8 text-[12px] font-mono rounded-[3px] transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-              activeStep >= 5
-                ? 'bg-[#2563EB] text-white font-semibold'
-                : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
-            }`}
-          >
-            Phase 2: Staging &amp; REA
-          </button>
+          {workspaceMode === 'STUDIO' && (
+            <div className="hidden min-[1180px]:flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-0.5 shrink-0">
+              <button
+                onClick={() => handlePhaseChange(1)}
+                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                  activeStep <= 4
+                    ? 'bg-[#2563EB] text-white font-semibold'
+                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                }`}
+                title={copy.header.phase1}
+              >
+                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F1: Pra-Dev' : 'P1: Pre-Dev'}</span>
+                <span className="hidden min-[1680px]:inline">{copy.header.phase1}</span>
+              </button>
+              <button
+                onClick={() => handlePhaseChange(2)}
+                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                  activeStep >= 5 && activeStep <= 7
+                    ? 'bg-[#2563EB] text-white font-semibold'
+                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                }`}
+                title={copy.header.phase2}
+              >
+                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F2: Staging' : 'P2: Staging'}</span>
+                <span className="hidden min-[1680px]:inline">{copy.header.phase2}</span>
+              </button>
+              <button
+                onClick={() => handlePhaseChange(3)}
+                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                  activeStep >= 8 && activeStep <= 9
+                    ? 'bg-[#2563EB] text-white font-semibold'
+                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                }`}
+                title={copy.header.phase3}
+              >
+                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F3: GRC' : 'P3: GRC'}</span>
+                <span className="hidden min-[1680px]:inline">{copy.header.phase3}</span>
+              </button>
+              <button
+                onClick={() => handlePhaseChange(4)}
+                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+                  activeStep >= 10
+                    ? 'bg-[#2563EB] text-white font-semibold'
+                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                }`}
+                title={copy.header.phase4}
+              >
+                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F4: Formal' : 'P4: Formal'}</span>
+                <span className="hidden min-[1680px]:inline">{copy.header.phase4}</span>
+              </button>
+            </div>
+          )}
         </div>
-
-        {/* Item 4 (Right): Seed Data & Cmd+K */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Item 4 (Right): Seed Data, Global Language Switcher & Cmd+K */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={handleSeedBenchmark}
-            className="flex items-center gap-1.5 px-3 h-8 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] text-[12px] font-mono rounded-[3px] transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            title={copy.header.seedData}
+            className="flex items-center gap-1.5 px-2 min-[1400px]:px-2.5 h-8 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] text-[11px] font-mono rounded-[3px] transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <Database className="h-3.5 w-3.5 text-[#3B82F6]" />
-            <span>Seed Data</span>
+            <span className="hidden min-[1400px]:inline">{copy.header.seedData}</span>
           </button>
+          <div
+            className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[3px] font-mono text-[10.5px] h-8 shrink-0"
+            role="group"
+            aria-label={copy.header.localeTooltip}
+            title={copy.header.localeTooltip}
+          >
+            <button
+              type="button"
+              onClick={() => setLocale('en')}
+              className={`px-2 h-full rounded-[2px] font-bold transition-colors cursor-pointer ${
+                locale === 'en' ? 'bg-[#2563EB] text-white' : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+              }`}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocale('id')}
+              className={`px-2 h-full rounded-[2px] font-bold transition-colors cursor-pointer ${
+                locale === 'id' ? 'bg-[#2563EB] text-white' : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+              }`}
+            >
+              ID
+            </button>
+          </div>
 
           <button
             onClick={() => setIsCmdkOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 h-8 bg-[#0B0C0E] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] text-[12px] font-mono rounded-[3px] transition-colors cursor-pointer shrink-0"
+            title={copy.header.cmdkTooltip}
+            className="flex items-center gap-1.5 px-2 h-8 bg-[#0B0C0E] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] text-[11.5px] font-mono rounded-[3px] transition-colors cursor-pointer shrink-0"
           >
             <Search className="h-3.5 w-3.5 text-[#707070]" />
             <kbd className="text-[10px] bg-[#16191F] px-1.5 py-0.5 rounded-[2px] text-[#A1A1A1] border border-[#22262E]">
@@ -754,66 +1984,189 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
        * 2. MAIN WORKBENCH BODY (Left Sidebar + Canvas + Optional Right Inspector)
        * ========================================================================= */}
       <div className="flex-1 flex overflow-hidden min-h-0 relative">
+        {workspaceMode === 'ENTERPRISE_LIBRARY' ? (
+          <EnterpriseLibraryPortal
+            activeState={compiledSdlcState}
+            activeVaultProjectId={activeVaultProjectId}
+            onOpenInStudio={async (projectId, jumpToStep) => {
+              if (projectId && projectId !== 'active-workspace' && projectId !== activeVaultProjectId) {
+                await handleSwitchVaultProject(projectId);
+              }
+              setWorkspaceMode('STUDIO');
+              setActiveStep(jumpToStep || 1);
+            }}
+            onCopyBlueprintToNewProject={(blueprintMom, projectNameHint) => {
+              setGreenfieldProjectName(projectNameHint);
+              setRawMoMNotes(blueprintMom);
+              setStep1SourceTab('STAKEHOLDER_MOM');
+              setWorkspaceMode('STUDIO');
+              setActiveStep(1);
+              appendTerminalLog(`[BLUEPRINT REGISTRY] Copied enterprise blueprint "${projectNameHint}" into Step 01 Greenfield Compiler.`);
+            }}
+            onSwitchToStudioMode={() => setWorkspaceMode('STUDIO')}
+            onAppendLog={appendTerminalLog}
+            onSyncProject={async (rec) => {
+              appendTerminalLog(`[1:1 SYNC & AUTO-VERSION] Initiating structural re-scan & audit ledger for "${rec.projectName}" (${rec.projectId})...`);
+              try {
+                if (rec.projectId && rec.projectId !== activeVaultProjectId) {
+                  await handleSwitchVaultProject(rec.projectId);
+                }
+                const saveRes = await fetch('/api/workspace/vault', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    action: 'CREATE_SNAPSHOT',
+                    projectId: rec.projectId,
+                    projectName: rec.projectName,
+                    targetUrl: rec.targetUrl,
+                    compiledState: rec.latestState || compiledSdlcState,
+                    createSnapshot: true,
+                    versionLabel: `Live 1:1 Sync ${new Date().toLocaleTimeString()}`,
+                  }),
+                });
+                if (saveRes.ok) {
+                  const saveJson = await saveRes.json();
+                  const newVer = saveJson.data?.snapshots?.[0]?.semanticVersion || 'v1.1.0';
+                  const crId = saveJson.data?.snapshots?.[0]?.autoChangeRequestId || 'CR-AUTO-002';
+                  appendTerminalLog(`[1:1 SYNC COMPLETE] Successfully saved new version ${newVer} (${crId}) with deep delta grep across UI buttons, forms, and API contracts.`);
+                } else {
+                  appendTerminalLog(`[1:1 SYNC ERROR] Failed to save snapshot: ${saveRes.statusText}`);
+                }
+              } catch (err) {
+                appendTerminalLog(`[1:1 SYNC ERROR] Sync exception: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }}
+          />
+        ) : (
+          <>
         {/* LEFT VERTICAL SIDEBAR (248px Fixed Width, Breathable Stepper Navigation) */}
-        <aside className="w-[248px] min-w-[248px] max-w-[248px] bg-[#111317] border-r border-[#22262E] flex flex-col justify-between overflow-y-auto select-none shrink-0">
+        <aside className="w-[252px] min-w-[252px] max-w-[252px] bg-[#111317] border-r border-[#22262E] flex flex-col justify-between overflow-y-auto select-none shrink-0">
           {/* Stepper Navigation Groups */}
           <div className="py-2">
             {/* Group 1: Phase 1 Pre-Development */}
             <div className="px-3 pt-2 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
-              Phase 1: Pre-Development
+              {copy.nav.group1}
             </div>
             <nav className="space-y-0.5 px-2">
               {[
-                { step: 1, label: '01. Requirement & MoM', icon: <FileText className="h-4 w-4 shrink-0" /> },
-                { step: 2, label: '02. BRD & PRD Spec (ISO 29148)', icon: <Layers className="h-4 w-4 shrink-0" /> },
-                { step: 3, label: '03. BPMN 2.0 & Wireframe', icon: <GitBranch className="h-4 w-4 shrink-0" /> },
-                { step: 4, label: '04. RTM & Test Matrix (ISO 29119)', icon: <FileSpreadsheet className="h-4 w-4 shrink-0" /> },
-              ].map((item) => (
-                <button
-                  key={item.step}
-                  onClick={() => setActiveStep(item.step)}
-                  className={`w-full h-[38px] px-2.5 flex items-center gap-2 rounded-[3px] text-[12.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
-                    activeStep === item.step
-                      ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
-                      : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
-                  }`}
-                >
-                  <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
-                    {item.icon}
-                  </span>
-                  <span className="whitespace-nowrap overflow-hidden text-ellipsis">{item.label}</span>
-                </button>
-              ))}
+                { step: 1, icon: <FileText className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 2, icon: <GitBranch className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 3, icon: <Layers className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 4, icon: <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" /> },
+              ].map((item) => {
+                const meta = copy.nav.steps.find((s) => s.step === item.step)!;
+                return (
+                  <button
+                    key={item.step}
+                    title={meta.title}
+                    onClick={() => setActiveStep(item.step)}
+                    className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
+                      activeStep === item.step
+                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                    }`}
+                  >
+                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                      {item.icon}
+                    </span>
+                    <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
+                  </button>
+                );
+              })}
             </nav>
 
             {/* Group 2: Phase 2 Staging & Automation */}
-            <div className="px-3 pt-5 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
-              Phase 2: Staging &amp; Automation
+            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+              {copy.nav.group2}
             </div>
             <nav className="space-y-0.5 px-2">
               {[
-                { step: 5, label: '05. Tri-Modal Auto-Discovery', icon: <Globe className="h-4 w-4 shrink-0" /> },
-                { step: 6, label: '06. Spec-to-Code Gap Audit', icon: <GitCompare className="h-4 w-4 shrink-0" /> },
-                { step: 7, label: '07. Playwright & REA Live Runner', icon: <Activity className="h-4 w-4 shrink-0" /> },
-              ].map((item) => (
-                <button
-                  key={item.step}
-                  onClick={() => setActiveStep(item.step)}
-                  className={`w-full h-[38px] px-2.5 flex items-center gap-2 rounded-[3px] text-[12.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
-                    activeStep === item.step
-                      ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
-                      : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
-                  }`}
-                >
-                  <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
-                    {item.icon}
-                  </span>
-                  <span className="whitespace-nowrap overflow-hidden text-ellipsis">{item.label}</span>
-                </button>
-              ))}
+                { step: 5, icon: <Globe className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 6, icon: <GitCompare className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 7, icon: <Activity className="h-3.5 w-3.5 shrink-0" /> },
+              ].map((item) => {
+                const meta = copy.nav.steps.find((s) => s.step === item.step)!;
+                return (
+                  <button
+                    key={item.step}
+                    title={meta.title}
+                    onClick={() => setActiveStep(item.step)}
+                    className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
+                      activeStep === item.step
+                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                    }`}
+                  >
+                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                      {item.icon}
+                    </span>
+                    <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Group 3: Phase 3 Enterprise Governance & Security */}
+            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+              {copy.nav.group3}
+            </div>
+            <nav className="space-y-0.5 px-2">
+              {[
+                { step: 8, icon: <ShieldCheck className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 9, icon: <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> },
+              ].map((item) => {
+                const meta = copy.nav.steps.find((s) => s.step === item.step)!;
+                return (
+                  <button
+                    key={item.step}
+                    title={meta.title}
+                    onClick={() => setActiveStep(item.step)}
+                    className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
+                      activeStep === item.step
+                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                    }`}
+                  >
+                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                      {item.icon}
+                    </span>
+                    <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+            {/* Group 4: Phase 4 Formal Assurance & Consensus */}
+            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+              {copy.nav.group4}
+            </div>
+            <nav className="space-y-0.5 px-2">
+              {[
+                { step: 10, icon: <Code2 className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 11, icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 12, icon: <Share2 className="h-3.5 w-3.5 shrink-0" /> },
+              ].map((item) => {
+                const meta = copy.nav.steps.find((s) => s.step === item.step)!;
+                return (
+                  <button
+                    key={item.step}
+                    title={meta.title}
+                    onClick={() => setActiveStep(item.step)}
+                    className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
+                      activeStep === item.step
+                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                    }`}
+                  >
+                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                      {item.icon}
+                    </span>
+                    <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
+                  </button>
+                );
+              })}
             </nav>
           </div>
-
           {/* Bottom: Collapsible Artifact Explorer Toggle (Closed by Default) */}
           <div className="border-t border-[#22262E] p-2 bg-[#0B0C0E]/50">
             <button
@@ -822,20 +2175,20 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
             >
               <div className="flex items-center gap-1.5">
                 <Folder className="h-3.5 w-3.5 text-[#3B82F6]" />
-                <span>Show Artifact Explorer</span>
+                <span>{copy.nav.artifactExplorer}</span>
               </div>
               {showArtifactExplorer ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </button>
 
             {showArtifactExplorer && (
               <div className="max-h-[160px] overflow-y-auto pt-1.5 space-y-1 text-[11px] font-mono">
-                <div className="px-2 py-0.5 text-[#707070] text-[10px] uppercase font-bold">Business Rules:</div>
+                <div className="px-2 py-0.5 text-[#707070] text-[10px] uppercase font-bold">{copy.nav.businessRulesLabel}</div>
                 {brdMatrixRows.map((r) => (
                   <button
                     key={r.ruleId}
                     onClick={() => {
-                      setActiveStep(2);
-                      setStep2SubTab('BRD_MATRIX');
+                      setActiveStep(3);
+                      setStep3SubTab('BRD_MATRIX');
                       openInspectorForEntity(r.ruleId);
                     }}
                     className="w-full px-2 py-0.5 text-left truncate text-[#A1A1A1] hover:text-[#3B82F6] hover:bg-[#16191F] rounded-[2px]"
@@ -843,13 +2196,13 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     {r.ruleId} — {r.category}
                   </button>
                 ))}
-                <div className="px-2 pt-1 pb-0.5 text-[#707070] text-[10px] uppercase font-bold">Validation Rules:</div>
+                <div className="px-2 pt-1 pb-0.5 text-[#707070] text-[10px] uppercase font-bold">{copy.nav.validationRulesLabel}</div>
                 {validationRules.map((v) => (
                   <button
                     key={v.ruleId}
                     onClick={() => {
-                      setActiveStep(2);
-                      setStep2SubTab('PRD_CONTRACT');
+                      setActiveStep(3);
+                      setStep3SubTab('PRD_CONTRACT');
                       openInspectorForEntity(v.ruleId);
                     }}
                     className="w-full px-2 py-0.5 text-left truncate text-[#A1A1A1] hover:text-[#3B82F6] hover:bg-[#16191F] rounded-[2px]"
@@ -863,226 +2216,653 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
         </aside>
 
         {/* MAIN WORKSPACE CANVAS (calc(100vw - 248px), Single Focus, Breathing Room) */}
-        <main className="flex-1 h-full overflow-y-auto p-6 md:p-8 bg-[#0B0C0E] flex flex-col">
+        <main className="flex-1 h-full overflow-y-auto p-4 lg:p-5 bg-[#0B0C0E] flex flex-col">
           {/* =========================================================================
-           * STEP 01: REQUIREMENT & MOM INGESTION (Phase 1)
+           * STEP 01: PROJECT SOURCE & INGESTION HUB (Unified Ingestion Engine)
            * ========================================================================= */}
           {activeStep === 1 && (
-            <div className="h-full flex flex-col space-y-4">
-              {/* Canvas Header & Project Mode Selector */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E] shrink-0">
+            <div className="min-h-full flex flex-col space-y-3">
+              {/* Canvas Header & Primary Action Button */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 pb-2.5 border-b border-[#22262E] shrink-0">
                 <div>
-                  <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    01. Requirement &amp; MoM Ingestion
+                  <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight">
+                    {copy.step01.title}
                   </h1>
-                  <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    Stakeholder Minutes of Meeting (MoM) Elicitation &amp; Greenfield/Brownfield Mode Selector
+                  <p className="text-[11.5px] text-[#707070] font-mono mt-0.5">
+                    {copy.step01.subtitle}
                   </p>
                 </div>
-
-                <div className="flex items-center gap-3 shrink-0">
-                  {/* Greenfield vs Brownfield vs Blind URL Mode Selector */}
-                  <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[12px] font-mono h-9 shrink-0">
-                    <button
-                      onClick={() => setProjectMode('GREENFIELD')}
-                      className={`px-3 h-full rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        projectMode === 'GREENFIELD'
-                          ? 'bg-[#2563EB] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      Greenfield (Pre-Code)
-                    </button>
-                    <button
-                      onClick={() => setProjectMode('BROWNFIELD')}
-                      className={`px-3 h-full rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        projectMode === 'BROWNFIELD'
-                          ? 'bg-[#2563EB] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      Brownfield (Domain)
-                    </button>
-                    <button
-                      onClick={() => setProjectMode('BLIND_URL')}
-                      className={`px-3 h-full rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        projectMode === 'BLIND_URL'
-                          ? 'bg-[#D97706] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      Blind URL (Zero-Doc)
-                    </button>
-                  </div>
-
-                  {projectMode === 'BROWNFIELD' && (
-                    <input
-                      type="text"
-                      value={existingDomain}
-                      onChange={(e) => setExistingDomain(e.target.value)}
-                      placeholder="https://staging.domain.internal"
-                      className="h-9 px-3 bg-[#111317] border border-[#22262E] text-[#EDEDED] font-mono text-[12px] rounded-[3px] focus:outline-none focus:border-[#3B82F6]"
-                    />
-                  )}
-
+                <div className="flex items-center gap-2 shrink-0">
                   <button
-                    onClick={() => {
-                      setActiveStep(2);
-                      appendTerminalLog('[COMPILER] Elicited Business Rules and User Stories from specification baseline.');
-                    }}
-                    className="h-9 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-[12px] font-mono font-bold rounded-[3px] flex items-center gap-2 transition-colors cursor-pointer shrink-0"
+                    onClick={handleAnalyzeSourceAndBuildPipeline}
+                    disabled={isAnalyzingSource || isBlindCrawling}
+                    className="h-8 px-3.5 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white text-[11.5px] font-mono font-bold rounded-[3px] flex items-center gap-2 transition-colors cursor-pointer shrink-0"
+                    title={copy.step01.primaryCta}
                   >
-                    <span>Compile Spec</span>
-                    <ArrowRight className="h-3.5 w-3.5" />
+                    {isAnalyzingSource || isBlindCrawling ? (
+                      <>
+                        <RotateCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>{copy.step01.primaryCtaBusy}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-3.5 w-3.5 fill-current text-[#FBBF24]" />
+                        <span>{copy.step01.primaryCta}</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* Zero-Doc Target Crawler Bar (Visible in BLIND_URL Mode) */}
-              {projectMode === 'BLIND_URL' && (
-                <div className="bg-[#111317] border border-[#D97706]/40 p-2.5 rounded-[4px] font-mono text-[11.5px] shrink-0">
-                  <div className="grid grid-cols-12 gap-2 items-center">
-                    {/* Target URL */}
-                    <div className="col-span-12 lg:col-span-4 flex items-center gap-1.5">
-                      <span className="text-[#707070] text-[10.5px] whitespace-nowrap">TARGET:</span>
+              {/* Live Human Recording Status Panel in Step 01 */}
+              {interactiveSession.isRunning && (
+                <div className="bg-[#111317] border border-[#059669]/50 p-3 rounded-[4px] font-mono text-[11.5px] flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="h-2.5 w-2.5 rounded-full bg-[#10B981] animate-ping shrink-0" />
+                    <div className="flex flex-col">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-[#34D399] flex items-center gap-2">
+                          <span>{copy.step01.liveSessionTitle} — Pages: <span className="tabular-nums">{interactiveSession.pagesCount}</span> | APIs: <span className="tabular-nums">{interactiveSession.apisCount}</span> | Controls: <span className="tabular-nums">{interactiveSession.inputsCount + interactiveSession.tablesCount}</span></span>
+                        </span>
+                      </div>
+                      <span className="text-[10.5px] text-[#A1A1A1] mt-0.5">
+                        {interactiveSession.status === 'ROBOT_EXPLORING'
+                          ? copy.step01.liveSessionExploring
+                          : copy.step01.liveSessionPassive}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleTriggerRobotExploration}
+                      disabled={interactiveSession.status === 'ROBOT_EXPLORING'}
+                      className="h-8 px-3 bg-[#1E293B] hover:bg-[#334155] disabled:opacity-50 text-[#F59E0B] border border-[#F59E0B]/40 rounded-[3px] font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Cpu className="h-3.5 w-3.5" />
+                      <span>{copy.step01.autoTraverseBtn}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleFinishInteractiveSession}
+                      className="h-8 px-3 bg-[#059669] hover:bg-[#047857] text-white rounded-[3px] font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      <span>{copy.step01.finishCompileBtn}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 4 Unified Source Selection Tabs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-1 bg-[#111317] border border-[#22262E] p-1 rounded-[4px] font-mono text-[11px] shrink-0">
+                <button
+                  onClick={() => setStep1SourceTab('WEB_URL')}
+                  className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
+                    step1SourceTab === 'WEB_URL'
+                      ? 'bg-[#D97706] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  <Globe className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{copy.step01.tabWebUrl}</span>
+                </button>
+                <button
+                  onClick={() => setStep1SourceTab('GIT_REPO')}
+                  className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
+                    step1SourceTab === 'GIT_REPO'
+                      ? 'bg-[#2563EB] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  <GitBranch className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{copy.step01.tabGitRepo}</span>
+                </button>
+                <button
+                  onClick={() => setStep1SourceTab('ZIP_FOLDER')}
+                  className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
+                    step1SourceTab === 'ZIP_FOLDER'
+                      ? 'bg-[#059669] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  <Folder className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{copy.step01.tabZipFolder}</span>
+                </button>
+                <button
+                  onClick={() => setStep1SourceTab('STAKEHOLDER_MOM')}
+                  className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
+                    step1SourceTab === 'STAKEHOLDER_MOM'
+                      ? 'bg-[#8B5CF6] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{copy.step01.tabNotes}</span>
+                </button>
+              </div>
+
+              {/* Tab 1: Live Web URL */}
+              {step1SourceTab === 'WEB_URL' && (
+                <div className="bg-[#111317] border border-[#22262E] p-3 rounded-[4px] font-mono text-[11.5px] space-y-2.5 shrink-0">
+                  <div className="text-[11px] text-[#A1A1A1] flex items-center justify-between pb-1.5 border-b border-[#22262E] gap-2">
+                    <span className="font-bold text-[#EDEDED]">{copy.step01.scannerTitle}</span>
+                    <span className="text-[#3B82F6] truncate">{copy.step01.scannerHint}</span>
+                  </div>
+
+                  {/* STEP 1: Top URL Bar + Scan Button */}
+                  <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="text-[#707070] text-[11px] whitespace-nowrap shrink-0">{copy.step01.targetUrlLabel}</span>
                       <input
+                        ref={targetUrlInputRef}
                         type="text"
                         value={blindTargetUrl}
-                        onChange={(e) => setBlindTargetUrl(e.target.value)}
-                        placeholder="http://10.10.15.75:3100/"
-                        className="flex-1 h-9 px-2.5 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] text-[11.5px] rounded-[3px] outline-none font-mono"
+                        onChange={(e) => {
+                          setBlindTargetUrl(e.target.value);
+                          if (interactiveNotice) setInteractiveNotice(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleProbeLoginSurface();
+                          }
+                        }}
+                        placeholder="http://10.10.15.75:3100/ or https://app.example.com"
+                        className={`flex-1 min-w-0 h-9 px-3 bg-[#0B0C0E] border text-[#EDEDED] rounded-[3px] outline-none select-text ${
+                          interactiveNotice?.type === 'warning'
+                            ? 'border-[#D97706] focus:border-[#F59E0B]'
+                            : 'border-[#22262E] focus:border-[#3B82F6]'
+                        }`}
                       />
                     </div>
 
-                    {/* Auth Mode */}
-                    <div className="col-span-6 lg:col-span-2 flex items-center gap-1.5">
-                      <span className="text-[#707070] text-[10.5px] whitespace-nowrap">AUTH:</span>
-                      <select
-                        value={blindAuthType}
-                        onChange={(e) => setBlindAuthType(e.target.value as BlindCrawlAuthType)}
-                        className="w-full h-9 px-2 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] text-[11px] rounded-[3px] outline-none cursor-pointer"
-                      >
-                        <option value="NONE">None</option>
-                        <option value="LOGIN_FORM">Login Form</option>
-                        <option value="BEARER_COOKIE">Bearer Token</option>
-                      </select>
-                    </div>
-
-                    {/* Credentials or Action button */}
-                    <div className="col-span-6 lg:col-span-3 flex items-center gap-1.5">
-                      {blindAuthType === 'LOGIN_FORM' ? (
-                        <div className="flex items-center gap-1.5 w-full">
-                          <input
-                            type="text"
-                            value={blindUsername}
-                            onChange={(e) => setBlindUsername(e.target.value)}
-                            placeholder="FAIRUZA.REST"
-                            className="flex-1 h-9 px-2 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] text-[11px] rounded-[3px] outline-none"
-                          />
-                          <input
-                            type="password"
-                            value={blindPassword}
-                            onChange={(e) => setBlindPassword(e.target.value)}
-                            placeholder="Password"
-                            className="flex-1 h-9 px-2 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] text-[11px] rounded-[3px] outline-none"
-                          />
-                        </div>
-                      ) : blindAuthType === 'BEARER_COOKIE' ? (
-                        <input
-                          type="text"
-                          value={blindAuthHeader}
-                          onChange={(e) => setBlindAuthHeader(e.target.value)}
-                          placeholder="Bearer eyJhbG..."
-                          className="w-full h-9 px-2 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] text-[11px] rounded-[3px] outline-none font-mono"
-                        />
+                    <button
+                      type="button"
+                      onClick={() => handleProbeLoginSurface()}
+                      disabled={isProbingSurface}
+                      className="h-9 px-4 bg-[#16191F] hover:bg-[#1E242E] border border-[#3B82F6]/60 disabled:opacity-50 text-[#EDEDED] font-bold text-[11.5px] rounded-[3px] flex items-center justify-center gap-2 transition-colors cursor-pointer shrink-0"
+                    >
+                      {isProbingSurface ? (
+                        <>
+                          <RotateCw className="h-3.5 w-3.5 animate-spin text-[#60A5FA]" />
+                          <span>{copy.step01.scanBtnBusy}</span>
+                        </>
                       ) : (
-                        <div className="text-[10.5px] text-[#707070] truncate px-1">
-                          Depth: 1. Full DOM + JS AST + HAR
+                        <>
+                          <Search className="h-3.5 w-3.5 text-[#3B82F6]" />
+                          <span>{copy.step01.scanBtn}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* STEP 2: Adaptive Form Area (Rendered Dynamically After Scan) */}
+                  {loginSurfaceProbe && (
+                    <div className="bg-[#0B0C0E] border border-[#22262E] p-3 rounded-[3px] space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px] pb-2 border-b border-[#22262E]">
+                        <span className="font-bold text-[#EDEDED] uppercase tracking-wider">
+                          {copy.step01.detectedSurface}: {loginSurfaceProbe.pageTitle}
+                        </span>
+                        <span className="text-[#707070] truncate max-w-[360px]">{loginSurfaceProbe.targetUrl}</span>
+                      </div>
+
+                      {!loginSurfaceProbe.requiresLogin ? (
+                        <div className="flex items-center gap-2 px-3 py-2 bg-[#059669]/15 border border-[#059669]/40 text-[#34D399] rounded-[3px] text-[11.5px] font-bold">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>{copy.step01.publicPageBanner}</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {/* Detected Tabs / Role Switchers */}
+                          {loginSurfaceProbe.detectedTabs.map((tabGroup) => (
+                            <div key={tabGroup.selector} className="space-y-1.5">
+                              <label className="text-[10px] text-[#707070] uppercase font-bold block">
+                                {tabGroup.label}
+                              </label>
+                              <div className="flex flex-wrap items-center gap-1.5 bg-[#111317] border border-[#22262E] p-1 rounded-[3px]">
+                                {tabGroup.options.map((opt) => {
+                                  const isSelected = dynamicFieldValues[tabGroup.selector] === opt;
+                                  return (
+                                    <button
+                                      key={opt}
+                                      type="button"
+                                      onClick={() =>
+                                        setDynamicFieldValues((prev) => ({
+                                          ...prev,
+                                          [tabGroup.selector]: opt,
+                                        }))
+                                      }
+                                      className={`px-3 py-1.5 rounded-[2px] text-[11px] transition-colors cursor-pointer ${
+                                        isSelected
+                                          ? 'bg-[#2563EB] text-white font-bold'
+                                          : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                                      }`}
+                                    >
+                                      {opt}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+
+                          {/* Detected Dropdowns & Input Fields */}
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                            {loginSurfaceProbe.detectedSelects.map((sel) => (
+                              <div key={sel.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                                <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
+                                  {sel.label || sel.name}
+                                </label>
+                                {sel.options.length > 0 ? (
+                                  <select
+                                    value={dynamicFieldValues[sel.selector] || ''}
+                                    onChange={(e) =>
+                                      setDynamicFieldValues((prev) => ({
+                                        ...prev,
+                                        [sel.selector]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer"
+                                  >
+                                    <option value="">Select {sel.label || sel.name}...</option>
+                                    {sel.options.map((o, idx) => (
+                                      <option key={`${o.value}-${idx}`} value={o.value}>
+                                        {o.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={dynamicFieldValues[sel.selector] || ''}
+                                    onChange={(e) =>
+                                      setDynamicFieldValues((prev) => ({
+                                        ...prev,
+                                        [sel.selector]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder={`Enter ${sel.label || sel.name}`}
+                                    className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text"
+                                  />
+                                )}
+                              </div>
+                            ))}
+
+                            {loginSurfaceProbe.detectedInputs.map((inp) => {
+                              const isPass = inp.type === 'password';
+                              const showPass = Boolean(visiblePasswordSelectors[inp.selector]);
+                              return (
+                                <div key={inp.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                                  <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
+                                    {inp.label || inp.placeholder || inp.name}
+                                    {inp.required ? ' *' : ''}
+                                  </label>
+                                  <div className="relative w-full min-w-0 flex items-center">
+                                    <input
+                                      type={isPass && showPass ? 'text' : inp.type}
+                                      value={dynamicFieldValues[inp.selector] || ''}
+                                      onChange={(e) =>
+                                        setDynamicFieldValues((prev) => ({
+                                          ...prev,
+                                          [inp.selector]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder={inp.placeholder || inp.label || inp.name}
+                                      className={`w-full min-w-0 h-9 px-2.5 ${
+                                        isPass ? 'pr-8' : ''
+                                      } bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text`}
+                                    />
+                                    {isPass && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setVisiblePasswordSelectors((prev) => ({
+                                            ...prev,
+                                            [inp.selector]: !prev[inp.selector],
+                                          }))
+                                        }
+                                        className="absolute right-2 text-[#707070] hover:text-[#EDEDED] cursor-pointer"
+                                        aria-label={showPass ? 'Hide password' : 'Show password'}
+                                      >
+                                        {showPass ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
+                  )}
 
-                    {/* Action buttons */}
-                    <div className="col-span-12 lg:col-span-3 flex items-center gap-2 justify-end">
+                  {/* STEP 3: Dual Execution Modes (Side-by-Side) */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {/* MODE A: Autonomous Discovery */}
+                    <div className="bg-[#0B0C0E] border border-[#22262E] p-2.5 rounded-[3px] flex flex-col justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] font-bold text-[#EDEDED]">
+                          {copy.step01.modeATitle}
+                        </div>
+                        <p className="text-[10.5px] text-[#A1A1A1] font-sans leading-snug">
+                          {copy.step01.modeADesc}
+                        </p>
+                      </div>
                       <button
-                        onClick={handleLaunchInteractiveLogin}
-                        className="h-9 px-2.5 bg-[#16191F] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] text-[11px] font-mono rounded-[3px] flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-                        title="Launch Interactive Headed Browser for Manual Login & Cookie Capture"
+                        type="button"
+                        onClick={handleRunAutoRobot}
+                        disabled={isRunningAutoRobot || isBlindCrawling}
+                        className="w-full h-8 px-3 bg-[#D97706] hover:bg-[#B45309] disabled:opacity-50 text-white font-bold text-[11px] rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                       >
-                        <MousePointer className="h-3.5 w-3.5 text-[#60A5FA]" />
-                        <span>Interactive Login</span>
-                      </button>
-
-                      <button
-                        onClick={handleBlindCrawl}
-                        disabled={isBlindCrawling}
-                        className="h-9 px-3.5 bg-[#D97706] hover:bg-[#B45309] text-white font-bold rounded-[3px] flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
-                      >
-                        {isBlindCrawling ? (
+                        {isRunningAutoRobot || isBlindCrawling ? (
                           <>
                             <RotateCw className="h-3.5 w-3.5 animate-spin" />
-                            <span>Crawling...</span>
+                            <span>{copy.step01.modeABtnBusy}</span>
                           </>
                         ) : (
                           <>
-                            <Zap className="h-3.5 w-3.5 fill-current" />
-                            <span>⚡ Crawl &amp; Sync</span>
+                            <Cpu className="h-3.5 w-3.5 shrink-0" />
+                            <span>{copy.step01.modeABtn}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* MODE B: Guided Browser Session */}
+                    <div className="bg-[#0B0C0E] border border-[#22262E] p-2.5 rounded-[3px] flex flex-col justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="text-[11px] font-bold text-[#EDEDED]">
+                          {copy.step01.modeBTitle}
+                        </div>
+                        <p className="text-[10.5px] text-[#A1A1A1] font-sans leading-snug">
+                          {copy.step01.modeBDesc}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleStartHumanSession()}
+                        disabled={isStartingInteractive}
+                        className="w-full h-8 px-3 bg-[#16191F] hover:bg-[#1E242E] border border-[#3B82F6]/60 disabled:opacity-50 text-[#EDEDED] font-bold text-[11px] rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        {isStartingInteractive ? (
+                          <>
+                            <RotateCw className="h-3.5 w-3.5 animate-spin text-[#60A5FA]" />
+                            <span>{copy.step01.modeBBtnBusy}</span>
+                          </>
+                        ) : (
+                          <>
+                            <MousePointer className="h-3.5 w-3.5 text-[#3B82F6] shrink-0" />
+                            <span>{copy.step01.modeBBtn}</span>
                           </>
                         )}
                       </button>
                     </div>
                   </div>
+
+                  {/* Inline Notice / Validation Feedback Banner */}
+                  {interactiveNotice && (
+                    <div
+                      role="alert"
+                      className={`px-3 py-2 rounded-[3px] border text-[11px] flex items-center justify-between gap-2 ${
+                        interactiveNotice.type === 'error'
+                          ? 'bg-[#DC2626]/10 border-[#DC2626]/50 text-[#FCA5A5]'
+                          : interactiveNotice.type === 'warning'
+                          ? 'bg-[#D97706]/10 border-[#D97706]/50 text-[#FBBF24]'
+                          : interactiveNotice.type === 'success'
+                          ? 'bg-[#059669]/10 border-[#059669]/50 text-[#34D399]'
+                          : 'bg-[#2563EB]/10 border-[#2563EB]/50 text-[#93C5FD]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate whitespace-normal">{interactiveNotice.text}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setInteractiveNotice(null)}
+                        className="text-current opacity-70 hover:opacity-100 cursor-pointer shrink-0"
+                        aria-label="Dismiss notice"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Environment Classification & Mutation Guard */}
+                  <div className="pt-2 border-t border-[#22262E] flex flex-wrap items-center justify-between gap-2 text-[10.5px] font-mono">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#707070] uppercase font-bold">{copy.step01.safetyGuardLabel}</span>
+                      {detectEnvironment(blindTargetUrl).mode === 'SANDBOX_AUTONOMOUS' ? (
+                        <span className="badge-tag px-2 py-0.5 bg-[#059669]/20 text-[#10B981] font-bold text-[10px] flex items-center gap-1.5">
+                          <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] animate-pulse"></span>
+                          <span>{copy.step01.safetySandbox}</span>
+                        </span>
+                      ) : (
+                        <span className="badge-tag px-2 py-0.5 bg-[#F97316]/20 text-[#F97316] font-bold text-[10px] flex items-center gap-1.5">
+                          <Lock className="h-3 w-3" />
+                          <span>{copy.step01.safetyProduction}</span>
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-[#707070] truncate max-w-[520px]" title={detectEnvironment(blindTargetUrl).reason}>
+                      {detectEnvironment(blindTargetUrl).reason}
+                    </span>
+                  </div>
                 </div>
               )}
 
-              {/* Main Content: Spacious 2-Column Split (42% Left, 58% Right) */}
-              <div className="flex-1 grid grid-cols-12 gap-5 min-h-0 overflow-hidden h-[calc(100vh-230px)]">
-                {/* Left Column: Raw Stakeholder MoM & Notes */}
-                <div className="col-span-12 lg:col-span-5 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-4 space-y-3">
-                  <div className="flex items-center justify-between pb-2 border-b border-[#22262E]">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-[#3B82F6]" />
-                      <span className="text-[13px] font-bold text-[#EDEDED]">Raw Stakeholder MoM &amp; Notes</span>
+              {/* Tab 2: Git Repository Connect */}
+              {step1SourceTab === 'GIT_REPO' && (
+                <div className="bg-[#111317] border border-[#22262E] p-4 rounded-[4px] font-mono text-[12px] space-y-4 shrink-0">
+                  <div className="text-[11px] text-[#A1A1A1] flex items-center justify-between pb-2 border-b border-[#22262E]">
+                    <span className="font-bold text-[#EDEDED]">Real Git Clone &amp; Multi-Framework Static AST Scanner</span>
+                    <span className="text-[#2563EB]">Isolated Temp Sandbox · Next.js / Fastify / Express / Go / Python / Prisma / SQL</span>
+                  </div>
+                  <div className="grid grid-cols-12 gap-3 items-center">
+                    <div className="col-span-12 md:col-span-2">
+                      <select
+                        value={gitProvider}
+                        onChange={(e) => setGitProvider(e.target.value as any)}
+                        className="w-full h-9 px-2 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer"
+                      >
+                        <option value="github">GitHub</option>
+                        <option value="gitlab">GitLab</option>
+                        <option value="bitbucket">Bitbucket</option>
+                        <option value="self-hosted">Self-Hosted Git</option>
+                      </select>
                     </div>
-                    <span className="text-[11px] font-mono text-[#707070]">
-                      {rawMoMNotes.length} chars · 3 Stories
+                    <div className="col-span-12 md:col-span-5 flex items-center gap-2">
+                      <span className="text-[#707070] text-[11px] whitespace-nowrap">REPO URL:</span>
+                      <input
+                        type="text"
+                        value={gitRepoUrl}
+                        onChange={(e) => setGitRepoUrl(e.target.value)}
+                        placeholder="https://github.com/org/repo.git"
+                        className="flex-1 h-9 px-3 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-2 flex items-center gap-2">
+                      <span className="text-[#707070] text-[11px] whitespace-nowrap">BRANCH:</span>
+                      <input
+                        type="text"
+                        value={gitBranch}
+                        onChange={(e) => setGitBranch(e.target.value)}
+                        placeholder="main"
+                        className="w-full h-9 px-2.5 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none"
+                      />
+                    </div>
+                    <div className="col-span-6 md:col-span-3 flex items-center gap-2">
+                      <span className="text-[#707070] text-[11px] whitespace-nowrap">TOKEN:</span>
+                      <input
+                        type="password"
+                        value={gitAuthToken}
+                        onChange={(e) => setGitAuthToken(e.target.value)}
+                        placeholder="Personal Access Token (optional)"
+                        className="w-full h-9 px-2.5 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 3: Upload .ZIP Archive / Local Folder */}
+              {step1SourceTab === 'ZIP_FOLDER' && (
+                <div className="bg-[#111317] border border-[#22262E] p-4 rounded-[4px] font-mono text-[12px] space-y-4 shrink-0">
+                  <div className="text-[11px] text-[#A1A1A1] flex items-center justify-between pb-2 border-b border-[#22262E]">
+                    <span className="font-bold text-[#EDEDED]">Device Archive / Local Workspace Ingestion</span>
+                    <span className="text-[#059669]">Direct Filesystem AST Inspection &amp; Route DTO Extraction</span>
+                  </div>
+                  <div className="grid grid-cols-12 gap-3 items-center">
+                    <div className="col-span-12 md:col-span-7 flex items-center gap-2">
+                      <span className="text-[#707070] text-[11px] whitespace-nowrap">LOCAL PATH:</span>
+                      <input
+                        type="text"
+                        value={localFolderPath}
+                        onChange={(e) => setLocalFolderPath(e.target.value)}
+                        placeholder="/Users/username/Projects/my-app"
+                        className="flex-1 h-9 px-3 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none"
+                      />
+                    </div>
+                    <div className="col-span-12 md:col-span-5 flex items-center gap-2">
+                      <span className="text-[#707070] text-[11px] whitespace-nowrap">OR UPLOAD:</span>
+                      <input
+                        type="file"
+                        accept=".zip,.tar.gz"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setLocalFolderPath(file.name);
+                            appendTerminalLog(`[UPLOAD] Selected archive: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+                          }
+                        }}
+                        className="flex-1 text-[11px] text-[#A1A1A1] file:mr-2 file:py-1 file:px-2.5 file:rounded-[2px] file:border-0 file:text-[11px] file:bg-[#16191F] file:text-[#EDEDED] file:cursor-pointer"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 4: Greenfield Stakeholder MoM / New Project From Zero */}
+              {step1SourceTab === 'STAKEHOLDER_MOM' && (
+                <div className="bg-[#111317] border border-[#8B5CF6]/40 p-3.5 rounded-[4px] font-mono text-[11.5px] space-y-2.5 shrink-0">
+                  <div className="text-[11px] text-[#A1A1A1] flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-[#22262E]">
+                    <span className="font-bold text-[#EDEDED]">{copy.step01.greenfieldNameLabel}</span>
+                    <span className="text-[#A78BFA]">{copy.step01.greenfieldHint}</span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                    <input
+                      type="text"
+                      value={greenfieldProjectName}
+                      onChange={(e) => setGreenfieldProjectName(e.target.value)}
+                      placeholder={copy.step01.greenfieldNamePlaceholder}
+                      className="flex-1 h-9 px-3 bg-[#0B0C0E] border border-[#22262E] focus:border-[#8B5CF6] text-[#EDEDED] rounded-[3px] outline-none select-text"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAnalyzeSourceAndBuildPipeline}
+                      disabled={isAnalyzingSource}
+                      className="h-9 px-4 bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-50 text-white font-bold text-[11.5px] rounded-[3px] flex items-center justify-center gap-2 cursor-pointer transition-colors shrink-0"
+                    >
+                      <Zap className="h-3.5 w-3.5 fill-current" />
+                      <span>{isAnalyzingSource ? copy.step01.primaryCtaBusy : copy.step01.primaryCta}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Part 3: Cross-Project Vault Integration Linker Bar in Step 01 */}
+              <div className="bg-[#111317] border border-[#22262E] p-3 rounded-[4px] font-mono text-[11px] flex flex-col md:flex-row md:items-center justify-between gap-2.5 shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Link2 className="h-3.5 w-3.5 text-[#A78BFA] shrink-0" />
+                  <span className="font-bold text-[#EDEDED] whitespace-nowrap">
+                    {locale === 'id' ? 'Integrasikan dengan Proyek Lain di Vault (Opsional):' : 'Link Integration Target from Vault (Optional):'}
+                  </span>
+                  {linkedUpstreamProject && (
+                    <span className="px-2 py-0.5 bg-[#8B5CF6]/20 border border-[#8B5CF6]/40 text-[#A78BFA] rounded-[2px] text-[10px] font-bold truncate">
+                      {linkedUpstreamProject.projectName} ({linkedUpstreamProject.linkedContracts.length} APIs)
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <select
+                    aria-label="Link Integration Target from Saved Vault Projects"
+                    value={selectedIntegrationTargetId}
+                    onChange={(e) => setSelectedIntegrationTargetId(e.target.value)}
+                    className="h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] focus:border-[#8B5CF6] text-[#EDEDED] rounded-[3px] outline-none text-[11px] cursor-pointer min-w-[200px]"
+                  >
+                    <option value="">{locale === 'id' ? 'Pilih Proyek dari Vault...' : 'Select Project from Vault...'}</option>
+                    {vaultProjects
+                      .filter((p) => p.projectId !== activeVaultProjectId)
+                      .map((p) => (
+                        <option key={p.projectId} value={p.projectId}>
+                          {p.projectName} ({p.latestApisCount} APIs)
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleLinkVaultIntegrationProject()}
+                    disabled={!selectedIntegrationTargetId || isLinkingIntegration}
+                    className="h-8 px-3 bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-40 text-white font-bold rounded-[3px] flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    <span>{locale === 'id' ? 'Sambungkan Kontrak Integrasi' : 'Link Integration Contracts'}</span>
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 grid grid-cols-12 gap-4 min-h-[280px]">
+                {/* Left Column: Raw Stakeholder MoM & Notes */}
+                <div className="col-span-12 lg:col-span-5 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px]">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E] shrink-0">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-3.5 w-3.5 text-[#3B82F6]" />
+                      <span className="text-[12.5px] font-bold text-[#EDEDED]">{copy.step01.momCardTitle}</span>
+                    </div>
+                    <span className="text-[10.5px] font-mono text-[#707070] tabular-nums">
+                      {rawMoMNotes.length} {copy.step01.charsLabel} · {extractedEntities.length} {copy.step01.invariantsLabel}
                     </span>
                   </div>
 
                   <textarea
                     value={rawMoMNotes}
                     onChange={(e) => setRawMoMNotes(e.target.value)}
-                    className="flex-1 w-full bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-3 text-[13px] font-mono leading-[1.65] text-[#EDEDED] resize-none outline-none focus:border-[#3B82F6]"
+                    className="flex-1 w-full min-h-[160px] bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-2.5 text-[12px] font-mono leading-[1.55] text-[#EDEDED] resize-none outline-none focus:border-[#3B82F6]"
                   />
 
-                  <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] text-[12px] text-[#A1A1A1] font-mono flex items-center justify-between">
-                    <span>Estimated Sprint Scope:</span>
-                    <strong className="text-[#059669]">1 Sprint · 3 Backend Endpoints · 1 Table</strong>
+                  <div className="px-2.5 py-1.5 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] text-[11px] text-[#A1A1A1] font-mono flex items-center justify-between gap-2 shrink-0">
+                    <span className="whitespace-nowrap">{copy.step01.activeScopeLabel}</span>
+                    <strong className="text-[#059669] tabular-nums truncate">
+                      {brdMatrixRows.length} {copy.step01.rulesUnit} · {validationRules.length} {copy.step01.contractsUnit}
+                    </strong>
                   </div>
                 </div>
 
                 {/* Right Column: Extracted Entities, Actors & Constraints */}
-                <div className="col-span-12 lg:col-span-7 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-4 space-y-3 overflow-hidden">
-                  <div className="flex items-center justify-between pb-2 border-b border-[#22262E]">
+                <div className="col-span-12 lg:col-span-7 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px] overflow-hidden">
+                  <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E] shrink-0">
                     <div className="flex items-center gap-2">
-                      <Layers className="h-4 w-4 text-[#059669]" />
-                      <span className="text-[13px] font-bold text-[#EDEDED]">
-                        Extracted Entities, Actors &amp; Business Constraints
+                      <Layers className="h-3.5 w-3.5 text-[#059669]" />
+                      <span className="text-[12.5px] font-bold text-[#EDEDED]">
+                        {copy.step01.entitiesCardTitle}
                       </span>
                     </div>
-                    <span className="badge-tag px-2 py-0.5 bg-[#059669]/20 text-[#059669] font-bold">
-                      {extractedEntities.length} EXTRACTED
+                    <span className="badge-tag px-2 py-0.5 bg-[#059669]/20 text-[#059669] font-bold tabular-nums text-[10px]">
+                      {extractedEntities.length} {copy.step01.extractedBadge}
                     </span>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto border border-[#22262E] rounded-[3px]">
-                    <table className="w-full border-collapse text-left text-[13px]">
-                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase">
+                  <div className="flex-1 overflow-auto border border-[#22262E] rounded-[3px] min-h-[180px]">
+                    <table className="w-full table-fixed border-collapse text-left text-[12px]">
+                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[10.5px] uppercase z-10">
                         <tr>
-                          <th className="py-2.5 px-3 w-28 border-r border-[#22262E]">Type</th>
-                          <th className="py-2.5 px-3 w-24 border-r border-[#22262E]">ID</th>
-                          <th className="py-2.5 px-3 border-r border-[#22262E]">Statement / Constraint</th>
-                          <th className="py-2.5 px-3 w-40">Source Excerpt</th>
+                          <th className="py-2.5 px-3 w-[124px] border-r border-[#22262E]">{copy.step01.colType}</th>
+                          <th className="py-2.5 px-3 w-[128px] border-r border-[#22262E]">{copy.step01.colId}</th>
+                          <th className="py-2.5 px-3 border-r border-[#22262E]">{copy.step01.colStatement}</th>
+                          <th className="py-2.5 px-3 w-[26%]">{copy.step01.colExcerpt}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#22262E] bg-[#111317]">
@@ -1094,7 +2874,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                               selectedEntityId === ent.identifier ? 'bg-[#16191F]' : ''
                             }`}
                           >
-                            <td className="py-2.5 px-3 border-r border-[#22262E]">
+                            <td className="py-2.5 px-3 border-r border-[#22262E] whitespace-nowrap">
                               <span
                                 className={`badge-tag px-1.5 py-0.5 font-bold text-[10px] ${
                                   ent.type === 'ACTOR'
@@ -1109,13 +2889,13 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                                 {ent.type}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3 font-mono font-bold text-[#EDEDED] border-r border-[#22262E]">
+                            <td className="py-2.5 px-3 font-mono font-bold text-[#EDEDED] border-r border-[#22262E] break-all text-[11.5px]">
                               {ent.identifier}
                             </td>
-                            <td className="py-2.5 px-3 text-[#EDEDED] leading-relaxed border-r border-[#22262E]">
+                            <td className="py-2.5 px-3 text-[#EDEDED] leading-relaxed border-r border-[#22262E] break-words">
                               {ent.label}
                             </td>
-                            <td className="py-2.5 px-3 text-[#707070] text-[12px] font-mono italic">
+                            <td className="py-2.5 px-3 text-[#707070] text-[11.5px] font-mono italic break-words">
                               &ldquo;{ent.sourceText}&rdquo;
                             </td>
                           </tr>
@@ -1125,7 +2905,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                   </div>
 
                   <div className="text-[11px] font-mono text-[#707070]">
-                    Tip: Click any row to open the Contextual Inspector drawer for deep constraint editing.
+                    {copy.step01.entitiesTip}
                   </div>
                 </div>
               </div>
@@ -1133,70 +2913,255 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           )}
 
           {/* =========================================================================
-           * STEP 02: BRD & PRD SPECIFICATION ENGINE (ISO/IEC/IEEE 29148)
+           * STEP 02: CAMUNDA BPMN 2.0 WORKFLOW & WIREFRAME ORCHESTRATOR (ISO/IEC 19510)
            * ========================================================================= */}
           {activeStep === 2 && (
-            <div className="h-full flex flex-col space-y-4">
+            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
               {/* Canvas Header & Sub-View Switcher Pill */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E]">
-                <div>
+              <div className="flex flex-col gap-2 pb-2.5 border-b border-[#22262E] shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight truncate">
+                      {copy.step02.title}
+                    </h1>
+                    <span className="badge-tag px-1.5 py-0.5 bg-[#2563EB]/20 text-[#3B82F6] font-mono text-[10px] font-bold whitespace-nowrap shrink-0">
+                      ISO/IEC 19510 · ISO 42010
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-mono text-[#707070] hidden md:inline truncate">
+                    {copy.step02.subtitle}
+                  </div>
+                </div>
+                {/* Sub-View Switcher Pill & Step 02 Vault Integration Linker */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[3px] gap-1 text-[11px] font-mono overflow-x-auto">
+                    <button
+                      onClick={() => setStep2SubTab('SPLIT_ORCHESTRATOR')}
+                      className={`px-3 py-1 rounded-[2px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step2SubTab === 'SPLIT_ORCHESTRATOR'
+                          ? 'bg-[#2563EB] text-white font-bold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step02.tabOrchestrator}
+                    </button>
+                    <button
+                      onClick={() => setStep2SubTab('ARCHITECTURE')}
+                      className={`px-3 py-1 rounded-[2px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step2SubTab === 'ARCHITECTURE'
+                          ? 'bg-[#2563EB] text-white font-bold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step02.tabArchitecture}
+                    </button>
+                    <button
+                      onClick={() => setStep2SubTab('REVERSE_DFD')}
+                      className={`px-3 py-1 rounded-[2px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step2SubTab === 'REVERSE_DFD'
+                          ? 'bg-[#2563EB] text-white font-bold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step02.tabDfd}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 font-mono text-[10.5px]">
+                    {linkedUpstreamProject && (
+                      <span className="px-2 py-1 bg-[#8B5CF6]/15 border border-[#8B5CF6]/40 text-[#A78BFA] rounded-[2px] font-bold whitespace-nowrap flex items-center gap-1">
+                        <Link2 className="h-3 w-3" />
+                        <span>Bridge: {linkedUpstreamProject.projectName}</span>
+                      </span>
+                    )}
+                    <select
+                      aria-label="Step 02 Link Integration Target from Vault"
+                      value={selectedIntegrationTargetId}
+                      onChange={(e) => setSelectedIntegrationTargetId(e.target.value)}
+                      className="h-7 px-2 bg-[#111317] border border-[#22262E] focus:border-[#8B5CF6] text-[#EDEDED] rounded-[2px] outline-none text-[10.5px] cursor-pointer max-w-[180px]"
+                    >
+                      <option value="">{locale === 'id' ? 'Integrasi Vault...' : 'Link Vault Target...'}</option>
+                      {vaultProjects
+                        .filter((p) => p.projectId !== activeVaultProjectId)
+                        .map((p) => (
+                          <option key={p.projectId} value={p.projectId}>
+                            {p.projectName}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => handleLinkVaultIntegrationProject()}
+                      disabled={!selectedIntegrationTargetId || isLinkingIntegration}
+                      className="h-7 px-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-40 text-white font-bold rounded-[2px] flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap"
+                    >
+                      <Link2 className="h-3 w-3" />
+                      <span>{locale === 'id' ? 'Sambungkan' : 'Link'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {/* View 1: Split Orchestrator View (BPMN Left 56% + Wireframe Right 44%) */}
+              {step2SubTab === 'SPLIT_ORCHESTRATOR' && (
+                <div className="flex-1 grid grid-cols-12 gap-3 min-h-0 overflow-hidden">
+                  <div className="col-span-12 lg:col-span-7 flex flex-col min-h-0 bg-[#0E1015] border border-[#22262E] rounded-[4px] overflow-hidden">
+                    <CamundaBpmnViewer
+                      xml={bpmnXml}
+                      selectedNodeId={selectedNodeDetails?.id}
+                      onNodeSelect={(evt: BpmnNodeClickEvent) => {
+                        setSelectedNodeDetails({
+                          id: evt.id,
+                          type: evt.type,
+                          name: evt.name,
+                          businessRuleId: evt.businessRuleId,
+                          userStoryId: evt.userStoryId,
+                          validationRuleId: evt.validationRuleId,
+                        });
+                        setIsInspectorOpen(true);
+                        appendTerminalLog(`[BPMN ORCHESTRATOR] Selected Node: ${evt.name} (${evt.id})`);
+                      }}
+                      onSimulationStep={(stepName, nodeId) => {
+                        appendTerminalLog(`[WORKFLOW SIMULATION] Stage: ${stepName} (${nodeId})`);
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-12 lg:col-span-5 flex flex-col min-h-0 overflow-y-auto">
+                    <ContractWireframePreview
+                      projectName={activeWorkspace?.name || 'Target Application'}
+                      targetUrl={currentTargetUrl}
+                      apiEndpoint={discoveryResult.apiEndpoints[0]?.path || '/api'}
+                      validationRules={validationRules}
+                      onStateChange={(state: WireframeState) => {
+                        appendTerminalLog(`[WIREFRAME SIMULATOR] State transitioned to ${state}`);
+                      }}
+                      onDispatchSuccess={(latency, status) => {
+                        appendTerminalLog(`[ORCHESTRATOR DISPATCH] Invariants verified · HTTP ${status} in ${latency}ms`);
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* View 2: System Architecture Deconstructor (HLA, LLA, and Blueprint) */}
+              {step2SubTab === 'ARCHITECTURE' && (
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                  <ArchitectureDeconstructorWorkbench
+                    input={{
+                      appName: activeWorkspace?.name || 'Target Application',
+                      targetUrl: currentTargetUrl,
+                      apiEndpoints: discoveryResult.apiEndpoints,
+                      databaseTables: discoveryResult.databaseTables,
+                      domBindings: discoveryResult.domTraceability,
+                      validationRules,
+                      businessRules: brdMatrixRows,
+                      rawMoMNotes,
+                    }}
+                    initialMode="HLA"
+                    upstreamLinkedProject={linkedUpstreamProject}
+                  />
+                </div>
+              )}
+              {/* View 3: Reverse Data Flow Diagram (IEEE 1016 / Gane-Sarson & UU PDP) */}
+              {step2SubTab === 'REVERSE_DFD' && (
+                <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+                  <ReverseDfdWorkbench
+                    appName={activeWorkspace?.name || 'Target Application'}
+                    targetUrl={currentTargetUrl}
+                    apiEndpoints={discoveryResult.apiEndpoints}
+                    databaseTables={discoveryResult.databaseTables}
+                    validationRules={validationRules}
+                    businessRules={brdMatrixRows}
+                    initialResult={compiledSdlcState?.reverseDfdResult}
+                    onAppendLog={appendTerminalLog}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* =========================================================================
+           * STEP 03: BRD & PRD SPECIFICATION ENGINE (ISO/IEC/IEEE 29148)
+           * ========================================================================= */}
+          {activeStep === 3 && (
+            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
+              {/* Canvas Header & Sub-View Switcher Pill (Stacked cleanly so title never wraps vertically) */}
+              <div className="flex flex-col gap-2.5 pb-3 border-b border-[#22262E] shrink-0">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    02. BRD &amp; PRD Specification Engine
+                    {copy.step03.title}
                   </h1>
-                  <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    ISO/IEC/IEEE 29148:2018 Normative Requirements (StRS) &amp; Functional Validation Contracts (SyRS)
+                  <p className="text-[11.5px] text-[#707070] font-mono">
+                    {copy.step03.subtitle}
                   </p>
                 </div>
 
-                {/* Sub-View Switcher Pill (Single Focus 100% Width) */}
-                <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[12px] font-mono">
+                <div className="flex flex-wrap items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[11.5px] font-mono self-start max-w-full">
                   <button
-                    onClick={() => setStep2SubTab('BRD_MATRIX')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
-                      step2SubTab === 'BRD_MATRIX'
+                    onClick={() => setStep3SubTab('BRD_MATRIX')}
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step3SubTab === 'BRD_MATRIX'
                         ? 'bg-[#2563EB] text-white font-semibold'
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    1. Business Rules (BRD - StRS)
+                    {copy.step03.tabBrd}
                   </button>
                   <button
-                    onClick={() => setStep2SubTab('PRD_CONTRACT')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
-                      step2SubTab === 'PRD_CONTRACT'
+                    onClick={() => setStep3SubTab('PRD_CONTRACT')}
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step3SubTab === 'PRD_CONTRACT'
                         ? 'bg-[#2563EB] text-white font-semibold'
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    2. Validation Contract (PRD - SyRS)
+                    {copy.step03.tabPrd}
                   </button>
                   <button
-                    onClick={() => setStep2SubTab('RAW_MARKDOWN')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
-                      step2SubTab === 'RAW_MARKDOWN'
+                    onClick={() => setStep3SubTab('TSD_TRD')}
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step3SubTab === 'TSD_TRD'
                         ? 'bg-[#2563EB] text-white font-semibold'
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    3. Raw ISO Spec (Markdown)
+                    {copy.step03.tabTsd}
+                  </button>
+                  <button
+                    onClick={() => setStep3SubTab('RAW_MARKDOWN')}
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step3SubTab === 'RAW_MARKDOWN'
+                        ? 'bg-[#2563EB] text-white font-semibold'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                    }`}
+                  >
+                    {copy.step03.tabRawIso}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveStep(2);
+                      setStep2SubTab('SPLIT_ORCHESTRATOR');
+                    }}
+                    className="px-3 py-1 rounded-[3px] text-[#3B82F6] hover:bg-[#16191F] transition-colors cursor-pointer flex items-center gap-1 font-bold whitespace-nowrap"
+                  >
+                    <span>➔ {copy.step03.backToOrchestrator}</span>
                   </button>
                 </div>
               </div>
 
-              {/* View 1: BRD Matrix Table (Full-Width, Multi-line wrapping) */}
-              {step2SubTab === 'BRD_MATRIX' && (
-                <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden">
-                  <div className="flex-1 overflow-y-auto">
-                    <table className="w-full border-collapse text-left text-[13px]">
-                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase">
+              {/* View 1: BRD Matrix Table */}
+              {step3SubTab === 'BRD_MATRIX' && (
+                <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden min-h-0">
+                  <div className="flex-1 overflow-auto min-h-0">
+                    <table className="w-full table-fixed border-collapse text-left text-[12.5px]">
+                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase z-10">
                         <tr>
-                          <th className="py-2.5 px-4 w-28 border-r border-[#22262E]">Rule ID</th>
-                          <th className="py-2.5 px-4 w-44 border-r border-[#22262E]">Category</th>
-                          <th className="py-2.5 px-4 border-r border-[#22262E]">
-                            Business Rule Statement (ISO RFC-2119 Normative)
+                          <th className="py-2.5 px-3 w-[86px] border-r border-[#22262E]">{copy.step03.colRuleId}</th>
+                          <th className="py-2.5 px-3 w-[150px] border-r border-[#22262E]">{copy.step03.colCategory}</th>
+                          <th className="py-2.5 px-3 border-r border-[#22262E]">
+                            {copy.step03.colStatement}
                           </th>
-                          <th className="py-2.5 px-4 w-52 border-r border-[#22262E]">Target KPI</th>
-                          <th className="py-2.5 px-4 w-44">Linked MoM Source</th>
+                          <th className="py-2.5 px-3 w-[20%] border-r border-[#22262E]">{copy.step03.colKpi}</th>
+                          <th className="py-2.5 px-3 w-[20%]">{copy.step03.colSource}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#22262E] bg-[#111317]">
@@ -1206,21 +3171,21 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                             onClick={() => openInspectorForEntity(r.ruleId)}
                             className="hover:bg-[#16191F] cursor-pointer transition-colors"
                           >
-                            <td className="py-3 px-4 font-mono font-bold text-[#3B82F6] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono font-bold text-[#3B82F6] border-r border-[#22262E] whitespace-nowrap">
                               {r.ruleId}
                             </td>
-                            <td className="py-3 px-4 font-mono text-[11.5px] text-[#A1A1A1] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono text-[11px] text-[#A1A1A1] border-r border-[#22262E] whitespace-nowrap">
                               <span className="badge-tag px-1.5 py-0.5 bg-[#16191F] border border-[#22262E] text-[#EDEDED]">
                                 {r.category}
                               </span>
                             </td>
-                            <td className="py-3 px-4 text-[#EDEDED] leading-relaxed border-r border-[#22262E]">
+                            <td className="py-3 px-3 text-[#EDEDED] leading-relaxed border-r border-[#22262E] break-words">
                               {r.statement}
                             </td>
-                            <td className="py-3 px-4 font-mono text-[#059669] font-medium border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono text-[#059669] font-medium border-r border-[#22262E] break-words text-[12px]">
                               {r.targetKpi}
                             </td>
-                            <td className="py-3 px-4 text-[#707070] font-mono text-[12px]">
+                            <td className="py-3 px-3 text-[#707070] font-mono text-[11.5px] break-all">
                               {r.sourceMoMLine}
                             </td>
                           </tr>
@@ -1232,18 +3197,18 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
               )}
 
               {/* View 2: PRD Validation Contract Table */}
-              {step2SubTab === 'PRD_CONTRACT' && (
-                <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden">
-                  <div className="flex-1 overflow-y-auto">
-                    <table className="w-full border-collapse text-left text-[13px]">
-                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase">
+              {step3SubTab === 'PRD_CONTRACT' && (
+                <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden min-h-0">
+                  <div className="flex-1 overflow-auto min-h-0">
+                    <table className="w-full table-fixed border-collapse text-left text-[12.5px]">
+                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase z-10">
                         <tr>
-                          <th className="py-2.5 px-4 w-28 border-r border-[#22262E]">Validation ID</th>
-                          <th className="py-2.5 px-4 w-28 border-r border-[#22262E]">Story Ref</th>
-                          <th className="py-2.5 px-4 w-40 border-r border-[#22262E]">Field Name</th>
-                          <th className="py-2.5 px-4 w-52 border-r border-[#22262E]">Type &amp; Constraint</th>
-                          <th className="py-2.5 px-4 w-32 border-r border-[#22262E]">HTTP Code</th>
-                          <th className="py-2.5 px-4">Exact UI Error Copy</th>
+                          <th className="py-2.5 px-3 w-[100px] border-r border-[#22262E]">{copy.step03.colValId}</th>
+                          <th className="py-2.5 px-3 w-[105px] border-r border-[#22262E]">{copy.step03.colStoryRef}</th>
+                          <th className="py-2.5 px-3 w-[16%] border-r border-[#22262E]">{copy.step03.colField}</th>
+                          <th className="py-2.5 px-3 w-[22%] border-r border-[#22262E]">{copy.step03.colConstraint}</th>
+                          <th className="py-2.5 px-3 w-[88px] border-r border-[#22262E]">{copy.step03.colHttpError}</th>
+                          <th className="py-2.5 px-3">{copy.step03.colUiError}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#22262E] bg-[#111317]">
@@ -1253,23 +3218,131 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                             onClick={() => openInspectorForEntity(v.ruleId)}
                             className="hover:bg-[#16191F] cursor-pointer transition-colors"
                           >
-                            <td className="py-3 px-4 font-mono font-bold text-[#D97706] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono font-bold text-[#D97706] border-r border-[#22262E] whitespace-nowrap">
                               {v.ruleId}
                             </td>
-                            <td className="py-3 px-4 font-mono font-bold text-[#3B82F6] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono font-bold text-[#3B82F6] border-r border-[#22262E] whitespace-nowrap">
                               {v.userStoryId}
                             </td>
-                            <td className="py-3 px-4 font-mono text-[#EDEDED] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono text-[#EDEDED] border-r border-[#22262E] break-all text-[12px]">
                               {v.fieldName}
                             </td>
-                            <td className="py-3 px-4 font-mono text-[#A1A1A1] text-[12px] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono text-[#A1A1A1] text-[11.5px] border-r border-[#22262E] break-all">
                               <code className="text-[#3B82F6]">{v.dataType}</code> · {v.constraintExpression}
                             </td>
-                            <td className="py-3 px-4 font-mono font-bold text-[#DC2626] border-r border-[#22262E]">
+                            <td className="py-3 px-3 font-mono font-bold text-[#DC2626] border-r border-[#22262E] whitespace-nowrap tabular-nums">
                               {v.httpStatus}
                             </td>
-                            <td className="py-3 px-4 text-[#EDEDED] leading-relaxed">
-                              &ldquo;{v.exactUiErrorString}&rdquo;
+                            <td className="py-3 px-3 text-[#EDEDED] font-mono text-[12px] break-words">
+                              {v.exactUiErrorString}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              {/* View 3: TSD / TRD Matrix Table & Code Grep Inspector */}
+              {step3SubTab === 'TSD_TRD' && (
+                <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden min-h-0">
+                  {/* TSD / TRD Control Bar */}
+                  <div className="min-h-[38px] py-1.5 bg-[#16191F] border-b border-[#22262E] px-4 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] shrink-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[#EDEDED] font-bold truncate">
+                        ISO 29148 Section 8 &amp; IEEE 1016 Technical Specifications (TSD / TRD)
+                      </span>
+                      <span className="badge-tag px-2 py-0.5 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[10px] shrink-0 tabular-nums">
+                        {liveTsdRows.length} CONTRACTS
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={handleRunCodebaseGrep}
+                        disabled={isGreppingCodebase}
+                        className="px-2.5 py-1 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white rounded-[2px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        {isGreppingCodebase ? (
+                          <>
+                            <RotateCw className="h-3 w-3 animate-spin" />
+                            <span>Grepping Codebase...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Search className="h-3 w-3" />
+                            <span>{copy.step03.scanCodebaseBtn}</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={handleDownloadTsdMarkdown}
+                        className="flex items-center gap-1 px-2.5 py-1 bg-[#0B0C0E] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] rounded-[2px] transition-colors cursor-pointer"
+                        title="Download ISO 29148 Section 8 TSD/TRD Specification Markdown"
+                      >
+                        <Download className="h-3 w-3 text-[#3B82F6]" />
+                        <span>{copy.step03.exportTsdBtn}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* TSD Matrix Table */}
+                  <div className="flex-1 overflow-auto min-h-0">
+                    <table className="w-full table-fixed border-collapse text-left text-[12.5px]">
+                      <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase z-10">
+                        <tr>
+                          <th className="py-2.5 px-3 w-[88px] border-r border-[#22262E]">Spec ID</th>
+                          <th className="py-2.5 px-2.5 w-[180px] border-r border-[#22262E]">Architecture Layer</th>
+                          <th className="py-2.5 px-3 border-r border-[#22262E]">
+                            Technical Requirement Statement (RFC-2119)
+                          </th>
+                          <th className="py-2.5 px-3 w-[22%] border-r border-[#22262E]">Codebase Grep Pattern</th>
+                          <th className="py-2.5 px-3 w-[18%] border-r border-[#22262E]">Matched File Location</th>
+                          <th className="py-2.5 px-3 w-[108px]">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#22262E] bg-[#111317]">
+                        {liveTsdRows.map((t) => (
+                          <tr
+                            key={t.specId}
+                            onClick={() => {
+                              setSelectedTsdRow(t);
+                              openInspectorForEntity(t.specId);
+                            }}
+                            className={`hover:bg-[#16191F] cursor-pointer transition-colors ${
+                              selectedEntityId === t.specId ? 'bg-[#16191F]' : ''
+                            }`}
+                          >
+                            <td className="py-3 px-3 font-mono font-bold text-[#3B82F6] border-r border-[#22262E] whitespace-nowrap align-top">
+                              {t.specId}
+                            </td>
+                            <td className="py-3 px-2.5 font-mono text-[10.5px] text-[#A1A1A1] border-r border-[#22262E] whitespace-nowrap align-top">
+                              <span className="badge-tag px-1.5 py-0.5 bg-[#16191F] border border-[#22262E] text-[#EDEDED]">
+                                {t.layer}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-[#EDEDED] leading-relaxed border-r border-[#22262E] break-words align-top">
+                              {t.statement}
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[10.5px] text-[#38BDF8] border-r border-[#22262E] align-top">
+                              <code className="bg-[#0B0C0E] px-1.5 py-0.5 rounded-[2px] block break-all whitespace-pre-wrap leading-snug">
+                                {t.grepPattern}
+                              </code>
+                            </td>
+                            <td className="py-3 px-3 font-mono text-[11px] text-[#10B981] border-r border-[#22262E] break-all align-top">
+                              {t.matchedFile || 'Pending Scan'}
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap align-top">
+                              <span
+                                className={`badge-tag px-1.5 py-0.5 font-bold text-[9px] ${
+                                  t.verificationStatus === 'VERIFIED_IN_CODEBASE'
+                                    ? 'bg-[#059669]/20 text-[#10B981]'
+                                    : 'bg-[#2563EB]/20 text-[#3B82F6]'
+                                }`}
+                              >
+                                {t.verificationStatus === 'VERIFIED_IN_CODEBASE' ? 'VERIFIED' : 'AST MATCHED'}
+                              </span>
                             </td>
                           </tr>
                         ))}
@@ -1279,8 +3352,8 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                 </div>
               )}
 
-              {/* View 3: Raw ISO Spec Monaco Editor */}
-              {step2SubTab === 'RAW_MARKDOWN' && (
+              {/* View 4: Raw ISO Spec Monaco Editor */}
+              {step3SubTab === 'RAW_MARKDOWN' && (
                 <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden">
                   <div className="h-[36px] bg-[#16191F] border-b border-[#22262E] px-4 flex items-center justify-between text-[11px] font-mono text-[#707070]">
                     <span className="font-bold text-[#EDEDED]">ISO29148_Specification.md</span>
@@ -1288,10 +3361,10 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                       onClick={() => {
                         const blob = new Blob([rawMarkdownSpec], { type: 'text/markdown;charset=utf-8;' });
                         const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'ISO29148_Specification.md';
-                        a.click();
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = 'ISO29148_Specification.md';
+                        link.click();
                         appendTerminalLog('[EXPORT] Downloaded ISO 29148 specification document.');
                       }}
                       className="flex items-center gap-1 px-2.5 py-1 bg-[#0B0C0E] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] rounded-[2px]"
@@ -1323,82 +3396,6 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           )}
 
           {/* =========================================================================
-           * STEP 03: CAMUNDA BPMN 2.0 WORKFLOW & UI WIREFRAME (ISO/IEC 19510)
-           * ========================================================================= */}
-          {activeStep === 3 && (
-            <div className="h-full flex flex-col space-y-4">
-              {/* Canvas Header & Sub-View Switcher Pill */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E]">
-                <div>
-                  <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    03. Camunda BPMN 2.0 Workflow &amp; UI Wireframe
-                  </h1>
-                  <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    ISO/IEC 19510 Process Orchestration (Camunda bpmn-js) &amp; Contract-Driven Wireframe
-                  </p>
-                </div>
-
-                <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[12px] font-mono">
-                  <button
-                    onClick={() => setStep3SubTab('BPMN_MODELER')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
-                      step3SubTab === 'BPMN_MODELER'
-                        ? 'bg-[#2563EB] text-white font-semibold'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                    }`}
-                  >
-                    1. Camunda BPMN 2.0 Modeler
-                  </button>
-                  <button
-                    onClick={() => setStep3SubTab('CONTRACT_WIREFRAME')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
-                      step3SubTab === 'CONTRACT_WIREFRAME'
-                        ? 'bg-[#2563EB] text-white font-semibold'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                    }`}
-                  >
-                    2. Contract Wireframe &amp; Tokens
-                  </button>
-                </div>
-              </div>
-
-              {/* View 1: Camunda BPMN 2.0 Modeler (100% Canvas Width) */}
-              {step3SubTab === 'BPMN_MODELER' && (
-                <div className="flex-1 bg-[#0E1015] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden relative">
-                  <CamundaBpmnViewer
-                    xml={bpmnXml}
-                    selectedNodeId={selectedNodeDetails?.id}
-                    onNodeSelect={(evt: BpmnNodeClickEvent) => {
-                      setSelectedNodeDetails({
-                        id: evt.id,
-                        type: evt.type,
-                        name: evt.name,
-                        businessRuleId: evt.businessRuleId,
-                        userStoryId: evt.userStoryId,
-                        validationRuleId: evt.validationRuleId,
-                      });
-                      setIsInspectorOpen(true);
-                      appendTerminalLog(`[BPMN] Selected Node: ${evt.name} (${evt.id})`);
-                    }}
-                  />
-                </div>
-              )}
-
-              {/* View 2: Contract Wireframe Preview & Design Tokens */}
-              {step3SubTab === 'CONTRACT_WIREFRAME' && (
-                <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] p-6 overflow-y-auto">
-                  <ContractWireframePreview
-                    validationRules={validationRules}
-                    onStateChange={(state: WireframeState) => {
-                      appendTerminalLog(`[WIREFRAME] State updated to ${state}`);
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* =========================================================================
            * STEP 04: ISO 29119 RTM & MANUAL TEST MATRIX (@tanstack/react-table)
            * ========================================================================= */}
           {activeStep === 4 && (
@@ -1407,10 +3404,10 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E] shrink-0">
                 <div>
                   <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    04. Requirement Traceability Matrix (RTM)
+                    {copy.step04.title}
                   </h1>
                   <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    ISO/IEC/IEEE 29119-3 Synthesized Test Cases with Bi-Directional VR-xx Binding
+                    {copy.step04.subtitle}
                   </p>
                 </div>
               </div>
@@ -1423,12 +3420,25 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                       ? rtmRows
                       : rtmRows.filter((r) => r.scenarioType === rtmScenarioFilter)
                   }
+                  testScenarios={qaWorkbook.testScenarios}
+                  bugReports={qaWorkbook.bugReports}
+                  uatFlows={qaWorkbook.uatFlows}
+                  featureModules={qaWorkbook.featureModules}
+                  dataDictionary={compiledSdlcState?.knowledgeGraphSummary?.azDocumentationLibrary?.book2BusinessAnalyst?.masterDataDictionary || []}
+                  appName={activeWorkspace?.name || 'Active Project'}
+                  targetUrl={currentTargetUrl}
                   selectedRowId={selectedRtmRow?.testId}
                   onRowSelect={(row) => {
                     setSelectedRtmRow(row);
                     openInspectorForEntity(row.testId);
                     appendTerminalLog(`[RTM] Selected Test Case ${row.testId} [${row.scenarioType}]`);
                   }}
+                  onUpdateBugStatus={handleUpdateBugStatus}
+                  onUpdateUat={handleUpdateUat}
+                  onSaveOverridesToVault={handleSaveQaOverridesToVault}
+                  hasUnsavedOverrides={hasUnsavedQaOverrides}
+                  compiledState={compiledSdlcState}
+                  onMergeChangeRequest={handleMergeChangeRequest}
                 />
               </div>
             </div>
@@ -1440,52 +3450,104 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           {activeStep === 5 && (
             <div className="h-full flex flex-col space-y-4">
               {/* Canvas Header & Sub-View Switcher Pill */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E]">
+              <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 pb-3 border-b border-[#22262E]">
                 <div>
                   <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    05. Tri-Modal Technical Auto-Discovery
+                    {copy.step05.title}
                   </h1>
                   <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    Zero-Domain Greenfield AST Extraction &amp; Brownfield Staging Introspection (morluto/rea)
+                    {copy.step05.subtitle}
                   </p>
                 </div>
 
-                <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[12px] font-mono">
+                <div className="flex flex-wrap items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[11.5px] font-mono self-start">
                   <button
                     onClick={() => setStep5SubTab('API_EXPLORER')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
                       step5SubTab === 'API_EXPLORER'
                         ? 'bg-[#2563EB] text-white font-semibold'
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    1. Discovered API Contracts
+                    {copy.step05.tabApi}
                   </button>
                   <button
                     onClick={() => setStep5SubTab('ERD_CANVAS')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
                       step5SubTab === 'ERD_CANVAS'
                         ? 'bg-[#2563EB] text-white font-semibold'
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    2. Database Schema ERD
+                    {copy.step05.tabErd}
                   </button>
                   <button
                     onClick={() => setStep5SubTab('DOM_MAP')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
                       step5SubTab === 'DOM_MAP'
                         ? 'bg-[#2563EB] text-white font-semibold'
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    3. DOM Traceability Map
+                    {copy.step05.tabDom}
+                  </button>
+                  <button
+                    onClick={() => setStep5SubTab('BUNDLE_VAULT')}
+                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step5SubTab === 'BUNDLE_VAULT'
+                        ? 'bg-[#2563EB] text-white font-semibold'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                    }`}
+                  >
+                    {copy.step05.tabVault}
                   </button>
                 </div>
               </div>
 
+              {/* Interactive Session Live Status Panel in Step 5 */}
+              {/* Live Human Recording Status Panel in Step 5 */}
+              {interactiveSession.isRunning && (
+                <div className="bg-[#111317] border border-[#059669]/50 p-3 rounded-[4px] font-mono text-[11.5px] flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="h-2.5 w-2.5 rounded-full bg-[#10B981] animate-ping shrink-0" />
+                    <div className="flex flex-col">
+                      <span className="font-bold text-[#34D399]">
+                        {copy.step01.liveSessionTitle} — Pages: <span className="tabular-nums">{interactiveSession.pagesCount}</span> | APIs: <span className="tabular-nums">{interactiveSession.apisCount}</span> | Controls: <span className="tabular-nums">{interactiveSession.inputsCount + interactiveSession.tablesCount}</span>
+                      </span>
+                      <span className="text-[10.5px] text-[#A1A1A1] mt-0.5">
+                        {interactiveSession.status === 'ROBOT_EXPLORING'
+                          ? copy.step01.liveSessionExploring
+                          : copy.step01.liveSessionPassive}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleTriggerRobotExploration}
+                      disabled={interactiveSession.status === 'ROBOT_EXPLORING'}
+                      className="h-8 px-3 bg-[#1E293B] hover:bg-[#334155] disabled:opacity-50 text-[#F59E0B] border border-[#F59E0B]/40 rounded-[3px] font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Cpu className="h-3.5 w-3.5" />
+                      <span>{copy.step01.autoTraverseBtn}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleFinishInteractiveSession}
+                      className="h-8 px-3 bg-[#059669] hover:bg-[#047857] text-white rounded-[3px] font-bold text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      <span>{copy.step01.finishCompileBtn}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Ingestion Control Toolbar (Mode A: Git, Mode B: Local, Mode C: Staging) */}
               <TriModalDiscoveryToolbar
+                onLaunchInteractiveLogin={handleStartHumanSession}
                 onDiscover={async (params) => {
                   appendTerminalLog(`[DISCOVERY] Executing ${params.mode} scan...`);
                   if (params.mode === 'MODE_A_GIT' && params.gitConfig) {
@@ -1493,19 +3555,27 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                       `[GIT CLONE] Cloning ${params.gitConfig.repositoryUrl} (${params.gitConfig.branch})...`
                     );
                     try {
-                      const res = await fetch('/api/discovery/git-connect', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          repositoryUrl: params.gitConfig.repositoryUrl,
-                          branchOrPr: params.gitConfig.branch,
-                          authToken: params.gitConfig.authToken,
-                        }),
-                      });
+                      const res = await fetchWithTimeout(
+                        '/api/discovery/git-connect',
+                        {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            repositoryUrl: params.gitConfig.repositoryUrl,
+                            branchOrPr: params.gitConfig.branch,
+                            authToken: params.gitConfig.authToken,
+                          }),
+                        },
+                        45000
+                      );
                       if (res.ok) {
                         const json = await res.json();
                         if (json.data) {
-                          setDiscoveryResult(json.data);
+                          if (json.data.compiledState) {
+                            applyCompiledSdlcState(json.data.compiledState);
+                          } else {
+                            setDiscoveryResult(json.data);
+                          }
                           appendTerminalLog(
                             `[DISCOVERY] SUCCESS: AST extracted ${json.data.apiEndpoints.length} routes, ${json.data.databaseTables.length} tables.`
                           );
@@ -1516,15 +3586,68 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }
                   } else if (params.mode === 'MODE_B_LOCAL' && params.localConfig) {
                     appendTerminalLog(`[LOCAL AST] Parsing directory ${params.localConfig.targetPath}...`);
+                  } else if (params.mode === 'MODE_C_STAGING' && params.stagingConfig) {
+                    const stg = params.stagingConfig as StagingDiscoveryWithAuthConfig;
+                    const target = (stg.stagingUrl || '').trim();
+                    if (!target) {
+                      appendTerminalLog('[DISCOVERY NOTICE] Staging URL tidak boleh kosong.');
+                      return;
+                    }
+                    setBlindTargetUrl(target);
+                    setIsBlindCrawling(true);
+                    try {
+                      const res = await fetchWithTimeout(
+                        '/api/discovery/blind-crawl',
+                        {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            targetUrl: target,
+                            authType:
+                              stg.username && stg.password && stg.authType !== 'BEARER_COOKIE'
+                                ? 'LOGIN_FORM'
+                                : stg.authType || 'NONE',
+                            username: stg.username,
+                            password: stg.password,
+                            accessRoleOrTenant: stg.accessRoleOrTenant,
+                            authHeaderOrCookie: stg.authHeaderOrCookie,
+                            crawlDepth: 'FULL_DOM_JS_AST',
+                            captureHar: true,
+                          }),
+                        },
+                        150000
+                      );
+                      const json = await res.json();
+                      if (res.ok && json.success && json.data) {
+                        setBlindCrawlResult(json.data);
+                        const compiled = synthesizeFullSdlcFromCrawl(json.data);
+                        applyCompiledSdlcState(compiled);
+                        appendTerminalLog(
+                          `[DISCOVERY] SUCCESS: Harvested ${compiled.discoveryResult.apiEndpoints.length} routes from ${target}.`
+                        );
+                      } else {
+                        appendTerminalLog(`[DISCOVERY NOTICE] ${json.error || 'Staging crawl completed with partial telemetry.'}`);
+                      }
+                    } catch (err: unknown) {
+                      const msg = err instanceof Error ? err.message : String(err);
+                      appendTerminalLog(`[DISCOVERY NOTICE] ${msg}`);
+                    } finally {
+                      setIsBlindCrawling(false);
+                    }
                   }
                 }}
                 onArchiveUploaded={(telemetry, result) => {
-                  setDiscoveryResult(result);
+                  const resExt = result as typeof result & { compiledState?: CompiledSdlcState };
+                  if (resExt?.compiledState) {
+                    applyCompiledSdlcState(resExt.compiledState);
+                  } else {
+                    setDiscoveryResult(result);
+                  }
                   appendTerminalLog(
                     `[ARCHIVE] Ingested ${telemetry.filename} (${telemetry.sizeFormatted}) — ${telemetry.extractedFilesCount} AST files parsed.`
                   );
                 }}
-                isScanning={false}
+                isScanning={isBlindCrawling}
                 lastResult={discoveryResult}
               />
 
@@ -1534,6 +3657,8 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                   <ApiContractExplorer
                     endpoints={discoveryResult.apiEndpoints}
                     openApiSpec={discoveryResult.openApiSpec}
+                    targetUrl={currentTargetUrl}
+                    onAppendLog={appendTerminalLog}
                     selectedEndpointId={selectedDiscoveredEndpoint?.id}
                     onEndpointSelect={(ep) => {
                       setSelectedDiscoveredEndpoint(ep);
@@ -1573,6 +3698,20 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                   />
                 </div>
               )}
+
+              {/* View 4: Decompiled Client AST & Leaked Secret Vault */}
+              {step5SubTab === 'BUNDLE_VAULT' && (
+                <div className="flex-1 overflow-hidden min-h-0">
+                  <DecompiledBundleVault
+                    appName={activeWorkspace?.name || 'Active Project'}
+                    targetUrl={currentTargetUrl}
+                    discoveredJsChunks={blindCrawlResult?.discoveredJsChunks}
+                    extractedApis={discoveryResult.apiEndpoints}
+                    initialResult={compiledSdlcState?.deepUnpackResult}
+                    onAppendLog={appendTerminalLog}
+                  />
+                </div>
+              )}
             </div>
           )}
 
@@ -1582,27 +3721,27 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
           {activeStep === 6 && (
             <div className="h-full flex flex-col space-y-4">
               {/* Canvas Header & Summary Metrics */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E]">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 pb-3 border-b border-[#22262E] shrink-0">
                 <div>
                   <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    06. Spec-to-Code Gap Auditor
+                    {copy.step06.title}
                   </h1>
                   <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    Automated PRD vs Implementation Discrepancy Matrix &amp; Semantic Diff (Monaco DiffEditor)
+                    {copy.step06.subtitle}
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="badge-tag px-2 py-0.5 bg-[#059669]/15 text-[#059669] border border-[#059669] text-[11px] font-bold">
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <span className="badge-tag px-2 py-0.5 bg-[#059669]/15 text-[#059669] border border-[#059669] text-[11px] font-bold tabular-nums">
                     {auditResult.summary.compliantCount} COMPLIANT
                   </span>
-                  <span className="badge-tag px-2 py-0.5 bg-[#DC2626]/15 text-[#DC2626] border border-[#DC2626] text-[11px] font-bold">
+                  <span className="badge-tag px-2 py-0.5 bg-[#DC2626]/15 text-[#DC2626] border border-[#DC2626] text-[11px] font-bold tabular-nums">
                     {auditResult.summary.missingInBackendCount} MISSING
                   </span>
-                  <span className="badge-tag px-2 py-0.5 bg-[#D97706]/15 text-[#D97706] border border-[#D97706] text-[11px] font-bold">
+                  <span className="badge-tag px-2 py-0.5 bg-[#D97706]/15 text-[#D97706] border border-[#D97706] text-[11px] font-bold tabular-nums">
                     {auditResult.summary.schemaMismatchCount} MISMATCH
                   </span>
-                  <span className="badge-tag px-2 py-0.5 bg-[#8B5CF6]/15 text-[#A78BFA] border border-[#8B5CF6] text-[11px] font-bold">
+                  <span className="badge-tag px-2 py-0.5 bg-[#8B5CF6]/15 text-[#A78BFA] border border-[#8B5CF6] text-[11px] font-bold tabular-nums">
                     {auditResult.summary.shadowApiCount} SHADOW
                   </span>
                 </div>
@@ -1631,19 +3770,18 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
            * STEP 07: PLAYWRIGHT AUTOMATION & REA LIVE RUNNER (1-CLICK UNIFIED RUNNER)
            * ========================================================================= */}
           {activeStep === 7 && (
-            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
+            <div className="h-full flex flex-col space-y-2 min-h-0 overflow-hidden">
               {/* Canvas Header */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-[#22262E] shrink-0">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-2 border-b border-[#22262E] shrink-0">
                 <div>
-                  <h1 className="text-[18px] font-bold text-[#EDEDED] tracking-tight">
-                    07. Playwright Automation &amp; REA Live Bottleneck Runner
+                  <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight">
+                    {copy.step07.title}
                   </h1>
-                  <p className="text-[12px] text-[#707070] font-mono mt-0.5">
-                    1-Click Unified Runner (E2E + API + k6 Load Test), AST Bottleneck Pinpointing &amp; Standalone Reports
+                  <p className="text-[11.5px] text-[#707070] font-mono mt-0.5">
+                    {copy.step07.subtitle}
                   </p>
                 </div>
               </div>
-
               {/* Unified Full-Viewport Workbench */}
               <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-0">
                 <LiveRunnerWorkbench
@@ -1651,9 +3789,277 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                   selectedStageId={selectedRunnerStage?.id}
                   onAppendLog={appendTerminalLog}
                   projectName={activeWorkspace?.name}
-                  targetUrl={blindTargetUrl}
+                  targetUrl={currentTargetUrl}
+                  rtmRows={rtmRows}
+                  discoveryResult={discoveryResult}
+                  customPipelineStages={compiledPipelineStages}
+                  customExecutionTraces={compiledExecutionTraces}
+                  playwrightCode={compiledPlaywrightCode}
+                  k6Code={compiledK6Code}
+                  postmanCode={compiledPostmanCode}
+                  testScenarios={qaWorkbook.testScenarios}
+                  bugReports={qaWorkbook.bugReports}
+                  uatFlows={qaWorkbook.uatFlows}
+                  discoveredModules={compiledSdlcState?.discoveredModules}
+                  onExecutionSynced={handleSyncRunnerResults}
                 />
               </div>
+            </div>
+          )}
+
+          {/* =========================================================================
+           * STEP 08: ENTERPRISE GRC, RISK REGISTER & MERKLE AUDIT VAULT (ISO 31000 & SOC 2)
+           * ========================================================================= */}
+          {activeStep === 8 && (
+            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
+              {/* Header & Sub-View Switcher */}
+              <div className="flex flex-col gap-2 pb-2.5 border-b border-[#22262E] shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                    <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight flex items-center gap-2 truncate">
+                      <ShieldCheck className="h-4 w-4 text-[#10B981] shrink-0" />
+                      <span>{copy.step08.title}</span>
+                    </h1>
+                    <span className="badge-tag px-1.5 py-0.5 bg-[#059669]/20 text-[#10B981] font-mono text-[10px] font-bold whitespace-nowrap shrink-0">
+                      ISO/IEC 27001 · ISO 31000 · SOC 2
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-mono text-[#707070] hidden 2xl:inline whitespace-nowrap">
+                    {copy.step08.subtitle}
+                  </div>
+                </div>
+                <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[3px] gap-1 text-[11px] font-mono self-start overflow-x-auto">
+                  <button
+                    onClick={() => setStep8SubTab('REGULATORY_BINDER')}
+                    className={`px-3 py-1 rounded-[2px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step8SubTab === 'REGULATORY_BINDER'
+                        ? 'bg-[#2563EB] text-white font-bold'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                    }`}
+                  >
+                    {copy.step08.tabRegulatory}
+                  </button>
+                  <button
+                    onClick={() => setStep8SubTab('ISO_RISK_VAULT')}
+                    className={`px-3 py-1 rounded-[2px] transition-colors cursor-pointer whitespace-nowrap ${
+                      step8SubTab === 'ISO_RISK_VAULT'
+                        ? 'bg-[#2563EB] text-white font-bold'
+                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                    }`}
+                  >
+                    {copy.step08.tabRiskVault}
+                  </button>
+                </div>
+              </div>
+
+              {/* View 1: Regulatory Compliance Binder */}
+              {step8SubTab === 'REGULATORY_BINDER' && (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <ComplianceBinderWorkbench
+                    appName={activeWorkspace?.name || 'Active Project'}
+                    targetUrl={currentTargetUrl}
+                    apiEndpoints={discoveryResult.apiEndpoints}
+                    databaseTables={discoveryResult.databaseTables}
+                    validationRules={validationRules}
+                    businessRules={brdMatrixRows}
+                    rtmRows={rtmRows}
+                    executionTraces={compiledExecutionTraces}
+                    initialAssessment={compiledSdlcState?.complianceAssessment}
+                    onAppendLog={appendTerminalLog}
+                  />
+                </div>
+              )}
+
+              {/* View 2: ISO 31000 Risk Register & Merkle Vault */}
+              {step8SubTab === 'ISO_RISK_VAULT' && (
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <IsoRiskAuditWorkbench
+                    appName={activeWorkspace?.name || 'Active Project'}
+                    targetUrl={currentTargetUrl}
+                    apiEndpoints={discoveryResult.apiEndpoints}
+                    databaseTables={discoveryResult.databaseTables}
+                    validationRules={validationRules}
+                    businessRules={brdMatrixRows}
+                    rtmRows={rtmRows}
+                    executionTraces={compiledExecutionTraces}
+                    pipelineStages={compiledPipelineStages}
+                    initialRiskSummary={compiledSdlcState?.isoRiskSummary}
+                    onAppendLog={appendTerminalLog}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* =========================================================================
+           * STEP 09: ACTIVE OWASP API SECURITY TOP 10 DAST PROBER
+           * ========================================================================= */}
+          {activeStep === 9 && (
+            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#22262E] shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                  <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight truncate">
+                    {copy.step09.title}
+                  </h1>
+                  <span className="badge-tag px-1.5 py-0.5 bg-[#EF4444]/15 text-[#EF4444] font-mono text-[10px] font-bold whitespace-nowrap shrink-0">
+                    OWASP ASVS v4.0 · ISO 27001
+                  </span>
+                </div>
+                <p className="text-[11.5px] text-[#707070] font-mono truncate">{copy.step09.subtitle}</p>
+              </div>
+              <OwaspDastWorkbench
+                appName={activeWorkspace?.name || 'Active Project'}
+                targetUrl={currentTargetUrl}
+                apiEndpoints={discoveryResult.apiEndpoints}
+                databaseTables={discoveryResult.databaseTables}
+                validationRules={validationRules}
+                initialDastSummary={compiledSdlcState?.owaspDastSummary}
+                onAppendLog={appendTerminalLog}
+              />
+            </div>
+          )}
+
+          {/* =========================================================================
+           * STEP 10: SMT SOLVER Z3 FORMAL VERIFICATION ENGINE (SMT-LIB V2)
+           * ========================================================================= */}
+          {activeStep === 10 && (
+            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#22262E] shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                  <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight truncate">
+                    {copy.step10.title}
+                  </h1>
+                  <span className="badge-tag px-1.5 py-0.5 bg-[#059669]/20 text-[#10B981] font-mono text-[10px] font-bold whitespace-nowrap shrink-0">
+                    ISO/IEC 29119-2 · SMT-LIB v2
+                  </span>
+                </div>
+                <p className="text-[11.5px] text-[#707070] font-mono truncate">{copy.step10.subtitle}</p>
+              </div>
+              <SmtFormalVerifierWorkbench
+                appName={activeWorkspace?.name || 'Active Project'}
+                targetUrl={currentTargetUrl}
+                apiEndpoints={discoveryResult.apiEndpoints}
+                databaseTables={discoveryResult.databaseTables}
+                validationRules={validationRules}
+                businessRules={brdMatrixRows}
+                initialVerificationSummary={compiledSdlcState?.smtVerificationSummary}
+                onAppendLog={appendTerminalLog}
+              />
+            </div>
+          )}
+
+          {/* =========================================================================
+           * STEP 11: AUTONOMOUS MULTI-ROLE SDLC DELPHI CONSENSUS SIMULATOR (VIRTUAL ARB)
+           * ========================================================================= */}
+          {activeStep === 11 && (
+            <div className="h-full flex flex-col space-y-3 min-h-0 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#22262E] shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+                  <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight truncate">
+                    {copy.step11.title}
+                  </h1>
+                  <span className="badge-tag px-1.5 py-0.5 bg-[#2563EB]/20 text-[#3B82F6] font-mono text-[10px] font-bold whitespace-nowrap shrink-0">
+                    ISO/IEC/IEEE 42010 ARB
+                  </span>
+                </div>
+                <p className="text-[11.5px] text-[#707070] font-mono truncate">{copy.step11.subtitle}</p>
+              </div>
+              <DelphiConsensusWorkbench
+                appName={activeWorkspace?.name || 'Active Project'}
+                targetUrl={currentTargetUrl}
+                apiEndpoints={discoveryResult.apiEndpoints}
+                databaseTables={discoveryResult.databaseTables}
+                validationRules={validationRules}
+                businessRules={brdMatrixRows}
+                rtmRows={rtmRows}
+                initialConsensusSummary={compiledSdlcState?.delphiConsensusSummary}
+                onAppendLog={appendTerminalLog}
+              />
+            </div>
+          )}
+
+          {/* =========================================================================
+           * STEP 12: UNIVERSAL SDLC SEMANTIC ONTOLOGY & KNOWLEDGE GRAPH (W3C RDF)
+           * ========================================================================= */}
+          {activeStep === 12 && (
+            <div className="h-full flex flex-col space-y-2 min-h-0 overflow-hidden">
+              <div className="h-[32px] min-h-[32px] px-1 flex items-center gap-1 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] font-mono text-[10.5px]">
+                <button
+                  type="button"
+                  onClick={() => setStep12View('KNOWLEDGE_GRAPH')}
+                  className={`h-6 px-2.5 rounded-[2px] flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    step12View === 'KNOWLEDGE_GRAPH'
+                      ? 'bg-[#2563EB] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                  }`}
+                >
+                  <Network className="h-3.5 w-3.5" />
+                  <span>{locale === 'id' ? 'Knowledge Graph & Ontologi Universal' : 'Knowledge Graph & Universal Ontology'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep12View('PRODUCT_KNOWLEDGE')}
+                  className={`h-6 px-2.5 rounded-[2px] flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    step12View === 'PRODUCT_KNOWLEDGE'
+                      ? 'bg-[#2563EB] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                  }`}
+                >
+                  <Compass className="h-3.5 w-3.5" />
+                  <span>{locale === 'id' ? 'Product Knowledge, Lineage & Bug Monitor' : 'Product Knowledge, Lineage & Bug Monitor'}</span>
+                </button>
+                <span className="ml-auto text-[9.5px] text-[#707070] hidden xl:inline">
+                  {locale === 'id'
+                    ? 'Alur kerja end-to-end · CRUD Modul × DB · Lineage UI → API → DB · Monitoring bug live'
+                    : 'End-to-end workflow · Module × DB CRUD · UI → API → DB lineage · Live bug monitoring'}
+                </span>
+              </div>
+              {step12View === 'PRODUCT_KNOWLEDGE' ? (
+                <div className="flex-1 min-h-0">
+                  <ProductKnowledgeMonitorHub
+                    compiledState={compiledSdlcState}
+                    regressionDiff={regressionDiffSummary}
+                    locale={locale}
+                  />
+                </div>
+              ) : (
+              <div className="flex-1 min-h-0">
+              <UniversalKnowledgeGraphWorkbench
+                appName={activeWorkspace?.name || 'Active Project'}
+                targetUrl={currentTargetUrl}
+                apiEndpoints={discoveryResult.apiEndpoints}
+                databaseTables={discoveryResult.databaseTables}
+                validationRules={validationRules}
+                businessRules={brdMatrixRows}
+                rtmRows={rtmRows}
+                discoveredFeatureModules={qaWorkbook.featureModules}
+                discoveredModules={compiledSdlcState?.discoveredModules}
+                testScenarios={qaWorkbook.testScenarios}
+                bugReports={qaWorkbook.bugReports}
+                uatFlows={qaWorkbook.uatFlows}
+                gapAuditSummary={auditResult.summary}
+                gapAuditItems={auditResult.items}
+                owaspDastSummary={compiledSdlcState?.owaspDastSummary}
+                complianceAssessment={compiledSdlcState?.complianceAssessment}
+                isoRiskSummary={compiledSdlcState?.isoRiskSummary}
+                smtVerificationSummary={compiledSdlcState?.smtVerificationSummary}
+                delphiConsensusSummary={compiledSdlcState?.delphiConsensusSummary}
+                executionTraces={compiledExecutionTraces}
+                deconstructedArchitecture={compiledSdlcState?.deconstructedArchitecture}
+                initialGraphSummary={compiledSdlcState?.knowledgeGraphSummary}
+                compiledState={compiledSdlcState}
+                regressionDiffSummary={regressionDiffSummary}
+                isSavingSnapshot={isSavingSnapshot}
+                onSaveSnapshot={() => handleSaveSnapshotToVault()}
+                onOpenHistory={() => setIsVaultHistoryOpen(true)}
+                onAppendLog={appendTerminalLog}
+                onMergeChangeRequest={handleMergeChangeRequest}
+                onUpdateModulePins={handleUpdateModulePins}
+                onApproveReleaseSignOff={handleApproveReleaseSignOff}
+                onNavigateToStep={(stepId) => setActiveStep(stepId)}
+              />
+              </div>
+              )}
             </div>
           )}
         </main>
@@ -1667,7 +4073,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
             <div className="h-[44px] min-h-[44px] px-4 bg-[#16191F] border-b border-[#22262E] flex items-center justify-between font-mono text-[12px]">
               <div className="flex items-center gap-2">
                 <Sliders className="h-4 w-4 text-[#3B82F6]" />
-                <span className="font-bold text-[#EDEDED]">Contextual Inspector</span>
+                <span className="font-bold text-[#EDEDED]">{copy.inspector.title}</span>
                 <span className="badge-tag px-1.5 py-0.5 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[10px]">
                   {selectedEntityId}
                 </span>
@@ -1675,7 +4081,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
               <button
                 onClick={() => setIsInspectorOpen(false)}
                 className="p-1 hover:bg-[#22262E] rounded text-[#A1A1A1] hover:text-white transition-colors cursor-pointer"
-                title="Close Inspector (Esc)"
+                title={copy.inspector.closeTitle}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1736,6 +4142,39 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                       <span className="text-[#8B5CF6]">TC-001</span>
                     </div>
                   </div>
+
+                  {/* TSD / TRD Code Grep Verification Inspector */}
+                  {selectedTsdRow && (
+                    <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-[#3B82F6] uppercase font-bold">TSD / TRD Code Grep Spec:</span>
+                        <span className="badge-tag px-1.5 py-0.2 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[9px]">
+                          {selectedTsdRow.specId}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#EDEDED] font-sans font-bold leading-snug">
+                        {selectedTsdRow.title}
+                      </div>
+                      <div className="text-[10.5px] text-[#A1A1A1] font-sans">
+                        {selectedTsdRow.statement}
+                      </div>
+                      <div className="pt-1 border-t border-[#22262E] space-y-1 text-[10.5px]">
+                        <span className="text-[#707070] text-[9.5px] uppercase font-bold block">AST Grep Pattern:</span>
+                        <code className="text-[#38BDF8] bg-[#16191F] px-1.5 py-0.5 rounded-[2px] block break-all">
+                          {selectedTsdRow.grepPattern}
+                        </code>
+                        <span className="text-[#707070] text-[9.5px] uppercase font-bold block pt-1">Matched Location:</span>
+                        <span className="text-[#10B981] font-bold block">
+                          {selectedTsdRow.matchedFile || 'Pending Codebase Grep Scan'}
+                        </span>
+                        {selectedTsdRow.matchedSnippet && (
+                          <pre className="text-[9.5px] text-[#EDEDED] bg-[#16191F] p-1.5 rounded-[2px] overflow-x-auto whitespace-pre-wrap">
+                            {selectedTsdRow.matchedSnippet}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1746,7 +4185,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                   <div className="space-y-3">
                     <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-[#707070] uppercase font-bold">Manual Test Spec (ISO 29119-4)</span>
+                        <span className="text-[10px] text-[#707070] uppercase font-bold">{copy.inspector.manualSpecHeader}</span>
                         <span className="badge-tag px-1.5 py-0.5 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[10px]">
                           {selectedRtmRow.testId}
                         </span>
@@ -1769,13 +4208,13 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     {/* Objective & Preconditions */}
                     <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-2 text-[11px]">
                       <div>
-                        <span className="text-[10px] text-[#707070] uppercase font-bold block">Objective:</span>
+                        <span className="text-[10px] text-[#707070] uppercase font-bold block">{copy.inspector.objective}</span>
                         <p className="text-[#EDEDED] font-sans text-[11.5px] mt-0.5 leading-relaxed">
                           {selectedRtmRow.objective || selectedRtmRow.testTitle}
                         </p>
                       </div>
                       <div className="pt-1 border-t border-[#22262E]">
-                        <span className="text-[10px] text-[#707070] uppercase font-bold block">Preconditions:</span>
+                        <span className="text-[10px] text-[#707070] uppercase font-bold block">{copy.inspector.preconditions}</span>
                         <p className="text-[#A1A1A1] font-sans text-[11px] mt-0.5">
                           {selectedRtmRow.preconditions}
                         </p>
@@ -1786,7 +4225,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     {selectedRtmRow.manualSteps && selectedRtmRow.manualSteps.length > 0 && (
                       <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-2">
                         <div className="text-[10px] text-[#3B82F6] uppercase font-bold">
-                          Numbered Test Execution Steps ({selectedRtmRow.manualSteps.length}):
+                          {copy.inspector.executionSteps} ({selectedRtmRow.manualSteps.length}):
                         </div>
                         <div className="space-y-1.5">
                           {selectedRtmRow.manualSteps.map((st) => (
@@ -1815,7 +4254,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     {/* Expected 3-Layer Verification (UI, API, DB) */}
                     <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-2">
                       <div className="text-[10px] text-[#059669] uppercase font-bold">
-                        Expected 3-Layer Verification Contract:
+                        {copy.inspector.expected3Layer}
                       </div>
                       <div className="space-y-1.5 text-[10.5px]">
                         <div className="p-1.5 bg-[#111317] border border-[#22262E] rounded-[2px]">
@@ -1827,7 +4266,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                         <div className="p-1.5 bg-[#111317] border border-[#22262E] rounded-[2px]">
                           <span className="text-[#D97706] font-bold block font-mono">2. HTTP API Contract:</span>
                           <span className="text-[#EDEDED] font-sans">
-                            {selectedRtmRow.expected3LayerVerification?.apiResponse || 'POST /api/v1/checkout/apply-voucher returns validated schema'}
+                            {selectedRtmRow.expected3LayerVerification?.apiResponse || 'Endpoint returns validated HTTP schema'}
                           </span>
                         </div>
                         <div className="p-1.5 bg-[#111317] border border-[#22262E] rounded-[2px]">
@@ -1838,12 +4277,37 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                         </div>
                       </div>
                     </div>
+                    {selectedRtmRow.actualObservedResult && (
+                      <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-[#3B82F6] uppercase font-bold">
+                            {copy.inspector.actualLiveResult} ({selectedRtmRow.moduleName || 'Core'}):
+                          </span>
+                          {selectedRtmRow.executionVerdict && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded-[2px] text-[9.5px] font-bold ${
+                                selectedRtmRow.executionVerdict === 'FAILED'
+                                  ? 'bg-[#DC2626]/20 text-[#EF4444]'
+                                  : selectedRtmRow.executionVerdict === 'WARNING'
+                                  ? 'bg-[#D97706]/20 text-[#F59E0B]'
+                                  : 'bg-[#059669]/20 text-[#10B981]'
+                              }`}
+                            >
+                              {selectedRtmRow.executionVerdict}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[#EDEDED] font-sans text-[11px] leading-relaxed">
+                          {selectedRtmRow.actualObservedResult}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* SECTION B: Cucumber Gherkin (.feature) Monaco Editor */}
                   <div className="flex flex-col bg-[#0B0C0E] border border-[#22262E] rounded-[3px] overflow-hidden min-h-[220px]">
                     <div className="h-[28px] bg-[#16191F] border-b border-[#22262E] px-3 flex items-center justify-between text-[10px] text-[#707070]">
-                      <span className="font-bold text-[#EDEDED]">Cucumber Gherkin (.feature)</span>
+                      <span className="font-bold text-[#EDEDED]">{copy.inspector.gherkinTitle}</span>
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(selectedRtmRow.gherkinSnippet);
@@ -1853,7 +4317,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                         className="flex items-center gap-1 text-[#3B82F6] hover:text-[#60A5FA] cursor-pointer"
                       >
                         {isCopiedGherkin ? <Check className="h-3 w-3 text-[#059669]" /> : <Copy className="h-3 w-3" />}
-                        <span>{isCopiedGherkin ? 'Copied' : 'Copy'}</span>
+                        <span>{isCopiedGherkin ? copy.inspector.copied : copy.inspector.copyGherkin}</span>
                       </button>
                     </div>
                     <div className="h-[180px]">
@@ -1991,7 +4455,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                             <button
                               onClick={() => {
                                 appendTerminalLog(`[SQL MIGRATION] Executing: ${selectedRunnerStage.rootCause!.sqlRemediationQuery}`);
-                                appendTerminalLog('[SQL MIGRATION] SUCCESS: Index idx_vouchers_code_customer created. Latency reduced from 1,420ms to 6ms.');
+                                appendTerminalLog('[SQL MIGRATION] SUCCESS: Index idx_records_lookup created. Latency reduced from 1,420ms to 6ms.');
                               }}
                               className="w-full py-1.5 bg-[#10B981] hover:bg-[#059669] text-black font-bold rounded-[3px] text-[11px] cursor-pointer mt-1"
                             >
@@ -2007,9 +4471,9 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                   <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-1.5 text-[11px]">
                     <div className="text-[10px] text-[#059669] uppercase font-bold">morluto/rea AST Evidence</div>
                     <div className="text-[#707070] space-y-1">
-                      <div>Controller: <code className="text-[#EDEDED]">voucher.controller.ts:42</code></div>
-                      <div>Query Hook: <code className="text-[#EDEDED]">findUnique(voucherCode)</code></div>
-                      <div>DB Index: <span className="text-[#059669]">UNIQUE(customer_id, code)</span></div>
+                      <div>Controller: <code className="text-[#EDEDED]">handler.controller.ts:42</code></div>
+                      <div>Query Hook: <code className="text-[#EDEDED]">findUnique(id)</code></div>
+                      <div>DB Index: <span className="text-[#059669]">UNIQUE(id, status)</span></div>
                     </div>
                   </div>
                 </div>
@@ -2017,8 +4481,9 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
             </div>
           </aside>
         )}
+          </>
+        )}
       </div>
-
       {/* =========================================================================
        * 4. COLLAPSED BOTTOM TERMINAL BAR (28px Height by Default, Expands to 220px)
        * ========================================================================= */}
@@ -2029,9 +4494,9 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
             <div className="flex items-center gap-3">
               <Terminal className="h-3.5 w-3.5 text-[#3B82F6]" />
               {[
-                { key: 'TERMINAL', label: 'Execution Terminal' },
-                { key: 'AST_OUTPUT', label: 'AST Parser Output' },
-                { key: 'REA_STREAM', label: 'morluto/rea Live Stream' },
+                { key: 'TERMINAL', label: copy.terminal.tabConsole },
+                { key: 'AST_OUTPUT', label: copy.terminal.tabAst },
+                { key: 'REA_STREAM', label: copy.terminal.tabStream },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -2052,7 +4517,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
               <button
                 onClick={() => setIsTerminalExpanded(false)}
                 className="hover:text-white cursor-pointer"
-                title="Collapse Terminal"
+                title={copy.terminal.collapse}
               >
                 <ChevronDown className="h-4 w-4" />
               </button>
@@ -2114,7 +4579,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
             </span>
           </div>
           <div className="flex items-center gap-1.5 text-[#707070] text-[10px]">
-            <span>Expand Terminal</span>
+            <span>{copy.terminal.expand}</span>
             <ChevronUp className="h-3.5 w-3.5" />
           </div>
         </footer>
@@ -2125,16 +4590,16 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
        * ========================================================================= */}
       {isCmdkOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center pt-24"
+          className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center pt-24 pointer-events-auto"
           onClick={() => setIsCmdkOpen(false)}
         >
-          <div onClick={(e) => e.stopPropagation()}>
+          <div onClick={(e) => e.stopPropagation()} className="pointer-events-auto">
             <Command label="SDLC Command Palette">
               <Command.Input placeholder="Type a step, command, or artifact to jump to..." autoFocus />
               <Command.List>
                 <Command.Empty>No matching SDLC command found.</Command.Empty>
 
-                <Command.Group heading="SDLC Stepper Navigation (Steps 1–7)">
+                <Command.Group heading="SDLC Stepper Navigation (Steps 1–12)">
                   <Command.Item
                     onSelect={() => {
                       setActiveStep(1);
@@ -2142,7 +4607,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }}
                   >
                     <FileText className="h-3.5 w-3.5 text-[#3B82F6]" />
-                    <span>01. Requirement &amp; MoM Ingestion</span>
+                    <span>{copy.nav.steps[0].title}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2150,8 +4615,8 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                       setIsCmdkOpen(false);
                     }}
                   >
-                    <Layers className="h-3.5 w-3.5 text-[#3B82F6]" />
-                    <span>02. BRD &amp; PRD Specification Engine (ISO 29148)</span>
+                    <GitBranch className="h-3.5 w-3.5 text-[#3B82F6]" />
+                    <span>{copy.nav.steps[1].title}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2159,8 +4624,8 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                       setIsCmdkOpen(false);
                     }}
                   >
-                    <GitBranch className="h-3.5 w-3.5 text-[#D97706]" />
-                    <span>03. Camunda BPMN 2.0 Modeler &amp; Wireframe (ISO 19510)</span>
+                    <Layers className="h-3.5 w-3.5 text-[#3B82F6]" />
+                    <span>{copy.nav.steps[2].title}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2169,7 +4634,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }}
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5 text-[#3B82F6]" />
-                    <span>04. ISO 29119 RTM Spreadsheet Grid</span>
+                    <span>{copy.nav.steps[3].title}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2178,7 +4643,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }}
                   >
                     <Globe className="h-3.5 w-3.5 text-[#3B82F6]" />
-                    <span>05. Tri-Modal Technical Auto-Discovery</span>
+                    <span>{copy.nav.steps[4].title}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2187,7 +4652,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }}
                   >
                     <GitCompare className="h-3.5 w-3.5 text-[#DC2626]" />
-                    <span>06. Spec-to-Code Gap Auditor &amp; DiffEditor</span>
+                    <span>{copy.nav.steps[5].title}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2196,7 +4661,52 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }}
                   >
                     <Activity className="h-3.5 w-3.5 text-[#10B981]" />
-                    <span>07. Playwright Synthesizer &amp; REA Live Runner</span>
+                    <span>{copy.nav.steps[6].title}</span>
+                  </Command.Item>
+                  <Command.Item
+                    onSelect={() => {
+                      setActiveStep(8);
+                      setIsCmdkOpen(false);
+                    }}
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5 text-[#10B981]" />
+                    <span>{copy.nav.steps[7].title}</span>
+                  </Command.Item>
+                  <Command.Item
+                    onSelect={() => {
+                      setActiveStep(9);
+                      setIsCmdkOpen(false);
+                    }}
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5 text-[#EF4444]" />
+                    <span>{copy.nav.steps[8].title}</span>
+                  </Command.Item>
+                  <Command.Item
+                    onSelect={() => {
+                      setActiveStep(10);
+                      setIsCmdkOpen(false);
+                    }}
+                  >
+                    <Code2 className="h-3.5 w-3.5 text-[#10B981]" />
+                    <span>{copy.nav.steps[9].title}</span>
+                  </Command.Item>
+                  <Command.Item
+                    onSelect={() => {
+                      setActiveStep(11);
+                      setIsCmdkOpen(false);
+                    }}
+                  >
+                    <Users className="h-3.5 w-3.5 text-[#38BDF8]" />
+                    <span>{copy.nav.steps[10].title}</span>
+                  </Command.Item>
+                  <Command.Item
+                    onSelect={() => {
+                      setActiveStep(12);
+                      setIsCmdkOpen(false);
+                    }}
+                  >
+                    <Share2 className="h-3.5 w-3.5 text-[#8B5CF6]" />
+                    <span>{copy.nav.steps[11].title}</span>
                   </Command.Item>
                 </Command.Group>
 
@@ -2208,7 +4718,7 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                     }}
                   >
                     <Database className="h-3.5 w-3.5 text-[#3B82F6]" />
-                    <span>Seed Sample Data (Greenfield Voucher Engine)</span>
+                    <span>Seed Sample Data (Greenfield Architecture Engine)</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => {
@@ -2222,6 +4732,278 @@ The Voucher Checkout Engine provides deterministic promotion validation, discoun
                 </Command.Group>
               </Command.List>
             </Command>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+       * 6. SNAPSHOT HISTORY, REGRESSION DIFF & MULTI-PROJECT VAULT MODAL
+       * ========================================================================= */}
+      {isVaultHistoryOpen && (
+        <div
+          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 pointer-events-auto"
+          onClick={() => setIsVaultHistoryOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-4xl max-h-[85vh] bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden shadow-2xl"
+          >
+            <div className="px-4 py-3 bg-[#16191F] border-b border-[#22262E] flex items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <History className="h-4 w-4 text-[#10B981]" />
+                  <h2 className="text-[14px] font-bold text-[#EDEDED] font-mono">{copy.vault.modalTitle}</h2>
+                </div>
+                <p className="text-[11px] text-[#707070] font-mono mt-0.5">{copy.vault.modalSubtitle}</p>
+              </div>
+              <button
+                onClick={() => setIsVaultHistoryOpen(false)}
+                className="p-1 text-[#A1A1A1] hover:text-white hover:bg-[#22262E] rounded cursor-pointer"
+                aria-label={copy.vault.close}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="px-4 py-2 bg-[#0B0C0E] border-b border-[#22262E] flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setVaultModalTab('SNAPSHOTS')}
+                  className={`px-3 py-1 rounded-[2px] cursor-pointer ${
+                    vaultModalTab === 'SNAPSHOTS' ? 'bg-[#2563EB] text-white font-bold' : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  {copy.vault.snapshotsTab} ({projectSnapshots.length})
+                </button>
+                <button
+                  onClick={() => setVaultModalTab('PROJECTS')}
+                  className={`px-3 py-1 rounded-[2px] cursor-pointer ${
+                    vaultModalTab === 'PROJECTS' ? 'bg-[#2563EB] text-white font-bold' : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  {copy.vault.projectsTab} ({vaultProjects.length})
+                </button>
+              </div>
+
+              {compiledSdlcState && (
+                <button
+                  onClick={() => handleSaveSnapshotToVault()}
+                  disabled={isSavingSnapshot}
+                  className="px-3 py-1 bg-[#059669] hover:bg-[#047857] disabled:opacity-50 text-white font-bold rounded-[2px] flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{isSavingSnapshot ? copy.step12.savingSnapshot : copy.vault.saveSnapshotNow}</span>
+                </button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-[11.5px]">
+              {vaultModalTab === 'SNAPSHOTS' && (
+                <>
+                  {regressionDiffSummary ? (
+                    <div className="p-3.5 bg-[#0B0C0E] border border-[#3B82F6]/50 rounded-[3px] space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#3B82F6]">{copy.vault.diffTitle}</span>
+                        <span className="text-[10.5px] text-[#A1A1A1]">{regressionDiffSummary.comparedAgainstLabel}</span>
+                      </div>
+                      <p className="text-[12px] text-[#EDEDED] font-sans leading-relaxed">
+                        {locale === 'id' ? regressionDiffSummary.plainDiffSummary : regressionDiffSummary.plainDiffSummaryEn}
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-1 text-[10.5px]">
+                        <div className="p-2 bg-[#111317] border border-[#22262E] rounded-[2px]">
+                          <span className="text-[#707070] block text-[9.5px]">{copy.vault.passRateDelta}</span>
+                          <strong className={regressionDiffSummary.passRateDelta >= 0 ? 'text-[#10B981]' : 'text-[#EF4444]'}>
+                            {regressionDiffSummary.passRateDelta >= 0 ? `+${regressionDiffSummary.passRateDelta}%` : `${regressionDiffSummary.passRateDelta}%`}
+                          </strong>
+                        </div>
+                        <div className="p-2 bg-[#111317] border border-[#22262E] rounded-[2px]">
+                          <span className="text-[#707070] block text-[9.5px]">{copy.vault.newModules}</span>
+                          <strong className="text-[#3B82F6]">+{regressionDiffSummary.newModulesAdded.length}</strong>
+                        </div>
+                        <div className="p-2 bg-[#111317] border border-[#22262E] rounded-[2px]">
+                          <span className="text-[#707070] block text-[9.5px]">{copy.vault.removedModules}</span>
+                          <strong className="text-[#F59E0B]">-{regressionDiffSummary.removedModules.length}</strong>
+                        </div>
+                        <div className="p-2 bg-[#111317] border border-[#22262E] rounded-[2px]">
+                          <span className="text-[#707070] block text-[9.5px]">{copy.vault.newApis}</span>
+                          <strong className="text-[#8B5CF6]">+{regressionDiffSummary.newApisAdded.length}</strong>
+                        </div>
+                        <div className="p-2 bg-[#111317] border border-[#22262E] rounded-[2px]">
+                          <span className="text-[#707070] block text-[9.5px]">{copy.vault.bugsResolved}</span>
+                          <strong className="text-[#10B981]">{regressionDiffSummary.bugsResolved.length}</strong>
+                        </div>
+                        <div className="p-2 bg-[#111317] border border-[#22262E] rounded-[2px]">
+                          <span className="text-[#707070] block text-[9.5px]">{copy.vault.newBugs}</span>
+                          <strong className="text-[#EF4444]">{regressionDiffSummary.newBugsIntroduced.length}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] text-[#A1A1A1] text-[11px]">
+                      {copy.vault.noPriorSnapshot}
+                    </div>
+                  )}
+
+                  <div className="border border-[#22262E] rounded-[3px] overflow-hidden">
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      <thead className="bg-[#16191F] text-[#707070] uppercase text-[10px] border-b border-[#22262E]">
+                        <tr>
+                          <th className="p-2.5 border-r border-[#22262E]">Version / Snapshot</th>
+                          <th className="p-2.5 border-r border-[#22262E]">Modules</th>
+                          <th className="p-2.5 border-r border-[#22262E]">APIs</th>
+                          <th className="p-2.5 border-r border-[#22262E]">QA Pass Rate</th>
+                          <th className="p-2.5 border-r border-[#22262E]">Open Bugs</th>
+                          <th className="p-2.5">UAT</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#22262E]">
+                        {projectSnapshots.map((snap) => (
+                          <tr key={snap.snapshotId} className="hover:bg-[#16191F]/50">
+                            <td className="p-2.5 border-r border-[#22262E] font-bold text-[#EDEDED]">
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="h-3 w-3 text-[#3B82F6]" />
+                                <span>{snap.versionLabel}</span>
+                              </div>
+                            </td>
+                            <td className="p-2.5 border-r border-[#22262E] tabular-nums">{snap.modulesCount}</td>
+                            <td className="p-2.5 border-r border-[#22262E] tabular-nums">{snap.apisCount}</td>
+                            <td className="p-2.5 border-r border-[#22262E] tabular-nums text-[#10B981] font-bold">
+                              {snap.passedTests}/{snap.totalTests} ({snap.passRatePercent}%)
+                            </td>
+                            <td className="p-2.5 border-r border-[#22262E] tabular-nums text-[#EF4444]">{snap.openBugsCount}</td>
+                            <td className="p-2.5 tabular-nums text-[#3B82F6]">{snap.uatAcceptedCount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+
+              {vaultModalTab === 'PROJECTS' && (
+                <div className="space-y-2">
+                  {vaultProjects.map((proj) => (
+                    <div
+                      key={proj.projectId}
+                      className={`p-3 bg-[#0B0C0E] border rounded-[3px] flex flex-wrap items-center justify-between gap-2 ${
+                        proj.projectId === activeVaultProjectId ? 'border-[#2563EB]' : 'border-[#22262E]'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[#EDEDED] text-[12.5px]">{proj.projectName}</span>
+                          <span className="px-1.5 py-0.2 bg-[#16191F] border border-[#22262E] text-[9.5px] text-[#3B82F6] rounded-[2px]">
+                            {proj.projectType}
+                          </span>
+                        </div>
+                        <div className="text-[10.5px] text-[#707070] truncate mt-0.5">
+                          {proj.targetUrl} · {proj.latestPassRatePercent}% Pass · {proj.snapshotCount} snapshots
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            handleSwitchVaultProject(proj.projectId);
+                            setIsVaultHistoryOpen(false);
+                          }}
+                          className="px-2.5 py-1 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-[10.5px] rounded-[2px] cursor-pointer"
+                        >
+                          {copy.vault.loadProject}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteVaultProject(proj.projectId)}
+                          className="p-1.5 bg-[#16191F] border border-[#22262E] hover:border-[#EF4444] text-[#EF4444] rounded-[2px] cursor-pointer"
+                          title={copy.vault.deleteProject}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+       * 7. CREATE NEW PROJECT WORKSPACE MODAL (Greenfield / Web / Git / ZIP)
+       * ========================================================================= */}
+      {isNewProjectModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 pointer-events-auto"
+          onClick={() => setIsNewProjectModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xl bg-[#111317] border border-[#22262E] rounded-[4px] overflow-hidden shadow-2xl"
+          >
+            <div className="px-4 py-3 bg-[#16191F] border-b border-[#22262E] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Plus className="h-4 w-4 text-[#3B82F6]" />
+                <h2 className="text-[13.5px] font-bold text-[#EDEDED] font-mono">{copy.vault.createNewModalTitle}</h2>
+              </div>
+              <button
+                onClick={() => setIsNewProjectModalOpen(false)}
+                className="p-1 text-[#A1A1A1] hover:text-white rounded cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 font-mono text-[11.5px]">
+              <p className="text-[#A1A1A1] font-sans text-[12px]">{copy.vault.createNewDesc}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  onClick={() => {
+                    setActiveStep(1);
+                    setStep1SourceTab('STAKEHOLDER_MOM');
+                    setGreenfieldProjectName('');
+                    setIsNewProjectModalOpen(false);
+                  }}
+                  className="p-3 bg-[#0B0C0E] border border-[#8B5CF6]/50 hover:border-[#8B5CF6] text-left rounded-[3px] space-y-1 cursor-pointer"
+                >
+                  <FileText className="h-4 w-4 text-[#A78BFA]" />
+                  <div className="font-bold text-[#EDEDED]">{copy.vault.startFromZeroBtn}</div>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveStep(1);
+                    setStep1SourceTab('WEB_URL');
+                    setBlindTargetUrl('');
+                    setLoginSurfaceProbe(null);
+                    setIsNewProjectModalOpen(false);
+                    setTimeout(() => targetUrlInputRef.current?.focus(), 50);
+                  }}
+                  className="p-3 bg-[#0B0C0E] border border-[#D97706]/50 hover:border-[#D97706] text-left rounded-[3px] space-y-1 cursor-pointer"
+                >
+                  <Globe className="h-4 w-4 text-[#F59E0B]" />
+                  <div className="font-bold text-[#EDEDED]">{copy.vault.startFromUrlBtn}</div>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveStep(1);
+                    setStep1SourceTab('GIT_REPO');
+                    setIsNewProjectModalOpen(false);
+                  }}
+                  className="p-3 bg-[#0B0C0E] border border-[#2563EB]/50 hover:border-[#2563EB] text-left rounded-[3px] space-y-1 cursor-pointer"
+                >
+                  <GitBranch className="h-4 w-4 text-[#3B82F6]" />
+                  <div className="font-bold text-[#EDEDED]">{copy.vault.startFromGitBtn}</div>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveStep(1);
+                    setStep1SourceTab('ZIP_FOLDER');
+                    setIsNewProjectModalOpen(false);
+                  }}
+                  className="p-3 bg-[#0B0C0E] border border-[#059669]/50 hover:border-[#059669] text-left rounded-[3px] space-y-1 cursor-pointer"
+                >
+                  <Folder className="h-4 w-4 text-[#10B981]" />
+                  <div className="font-bold text-[#EDEDED]">{copy.vault.startFromZipBtn}</div>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

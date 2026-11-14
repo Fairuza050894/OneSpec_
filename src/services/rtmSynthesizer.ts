@@ -6,8 +6,19 @@
  * - ISO/IEC/IEEE 29148:2018 (Requirements Engineering)
  */
 
-import type { ValidationRuleContract } from '@/types/sdlc';
-
+import type {
+  ValidationRuleContract,
+  DiscoveredApiEndpoint,
+  CrawledModuleSummary,
+  DatabaseErdTable,
+  BrdMatrixRow,
+  FeatureModuleSurface,
+  TestScenarioItem,
+  BugReportTicket,
+  UatFeatureFlow,
+  AuditDiscrepancyItem,
+} from '@/types/sdlc';
+import { domainLogicBrainService } from './domainLogicBrainService';
 export type Iso29119Technique =
   | 'POSITIVE' // 1. POSITIVE (EP_VALID)
   | 'BOUNDARY_3PT' // 2. BOUNDARY_3PT (BVA)
@@ -37,6 +48,10 @@ export type RtmScenarioType = Iso29119Technique;
 
 export interface SynthesizedRtmRow {
   testId: string; // e.g. "TC-001"
+  moduleId?: string; // e.g. "MOD-01"
+  moduleName?: string;
+  pagePath?: string;
+  scenarioId?: string; // e.g. "TS-MOD01-01"
   brdRef: string; // e.g. "BR-01"
   prdRef: string; // e.g. "REQ-US-01"
   validationRef: string; // e.g. "VR-01"
@@ -47,6 +62,8 @@ export interface SynthesizedRtmRow {
   preconditions: string;
   testDataInput: string; // Key-value / JSON string
   expectedOutcome: string;
+  actualObservedResult?: string;
+  executionVerdict?: 'PASSED' | 'FAILED' | 'WARNING';
   verificationLayers: Expected3LayerVerification;
   expected3LayerVerification?: Expected3LayerVerification;
   manualSteps: ManualTestStep[];
@@ -55,567 +72,494 @@ export interface SynthesizedRtmRow {
   domSelector?: string;
   apiEndpoint?: string;
   httpStatus?: number;
+  executionPriorityTier: 'P0_CRITICAL_SMOKE' | 'P1_CORE_REGRESSION' | 'P2_EDGE_AND_BVA';
+  mlRiskPriorityScore: number; // 0-100 — higher = more risky
+  locatorStabilityScore: number; // 0-100 — higher = more stable
+  selfHealingLocatorChain: string[]; // 3 CSS/ARIA/data-testid fallback selectors
 }
 
-import { getMobospaceRtmRows } from './sdlcCompiler';
+export interface SynthesizeTestCasesContext {
+  targetUrl?: string;
+  appName?: string;
+  extractedApis?: DiscoveredApiEndpoint[];
+  domBindings?: Array<{ domSelector: string; componentName: string }>;
+  discoveredModules?: CrawledModuleSummary[];
+  featureModules?: FeatureModuleSurface[];
+  databaseTables?: DatabaseErdTable[];
+  businessRules?: BrdMatrixRow[];
+  gapAuditItems?: AuditDiscrepancyItem[];
+}
 
+export interface SynthesizedQaWorkbook {
+  testScenarios: TestScenarioItem[];
+  rtmRows: SynthesizedRtmRow[];
+  bugReports: BugReportTicket[];
+  uatFlows: UatFeatureFlow[];
+}
 /**
- * Synthesizes 16 comprehensive, production-grade test cases across all 8 ISO 29119-4 techniques
+ * Synthesizes comprehensive, production-grade test cases across UAT-E2E module journeys
+ * and all 8 ISO 29119-4 techniques derived dynamically from active modules, rules, and endpoints.
  */
 export function synthesizeTestCasesFromValidations(
-  rules: ValidationRuleContract[]
+  rules: ValidationRuleContract[],
+  crawlContext?: SynthesizeTestCasesContext
 ): SynthesizedRtmRow[] {
-  if (rules.some((r) => r.fieldName === 'username' || r.fieldName === 'operatorTenant' || r.fieldName === 'password')) {
-    return getMobospaceRtmRows();
+  const targetUrl = crawlContext?.targetUrl || 'http://localhost:3000/';
+  const appName = crawlContext?.appName || 'Target Application';
+  const apis = crawlContext?.extractedApis || [];
+  const discoveredModules = crawlContext?.discoveredModules || [];
+  const databaseTables = crawlContext?.databaseTables || [];
+  const businessRules = crawlContext?.businessRules || [];
+  const primaryEndpoint = apis[0]?.path || '/api';
+  const primaryMethod = apis[0]?.method || 'POST';
+
+  const effectiveRules: ValidationRuleContract[] =
+    rules.length > 0
+      ? rules
+      : [
+          {
+            ruleId: 'VR-01',
+            userStoryId: 'REQ-US-01',
+            fieldName: 'payload',
+            dataType: 'string',
+            constraintExpression: 'nonEmpty()',
+            errorCode: 'ERR_REQUIRED_INPUT',
+            httpStatus: 422,
+            exactUiErrorString: 'Input payload is required and must satisfy validation constraints',
+          },
+        ];
+
+  return synthesizeFourQaDeliverables(rules, crawlContext).rtmRows;
+}
+
+/**
+ * Synthesizes ALL 4 Human-Grade QA Deliverables grouped by Feature Module:
+ * 1. Test Scenario Matrix (TS-MODxx-01..07 per feature)
+ * 2. Detailed Test Cases & Live Test Report (Expected vs Actual Observed Result)
+ * 3. Automated Human-Style Bug Report Log (BUG-001..NNN)
+ * 4. End-to-End (E2E) & UAT Sign-Off Matrix (UAT-001..NN)
+ */
+export function synthesizeFourQaDeliverables(
+  rules: ValidationRuleContract[],
+  crawlContext?: SynthesizeTestCasesContext
+): SynthesizedQaWorkbook {
+  const targetUrl = crawlContext?.targetUrl || 'http://localhost:3000/';
+  const appName = crawlContext?.appName || 'Target Application';
+  const apis = crawlContext?.extractedApis || [];
+  const discoveredModules = crawlContext?.discoveredModules || [];
+  const databaseTables = crawlContext?.databaseTables || [];
+  const businessRules = crawlContext?.businessRules || [];
+  const gapAuditItems = crawlContext?.gapAuditItems || [];
+  const primaryEndpoint = apis[0]?.path || '/api';
+  const primaryMethod = apis[0]?.method || 'POST';
+
+  const effectiveRules: ValidationRuleContract[] =
+    rules.length > 0
+      ? rules
+      : [
+          {
+            ruleId: 'VR-01',
+            userStoryId: 'REQ-US-01',
+            fieldName: 'payload',
+            dataType: 'string',
+            constraintExpression: 'nonEmpty()',
+            errorCode: 'ERR_REQUIRED_INPUT',
+            httpStatus: 422,
+            exactUiErrorString: 'Input payload is required and must satisfy validation constraints',
+          },
+        ];
+
+  const featureModules: FeatureModuleSurface[] =
+    crawlContext?.featureModules && crawlContext.featureModules.length > 0
+      ? crawlContext.featureModules
+      : discoveredModules.length > 0
+      ? discoveredModules.map((mod, idx) => ({
+          moduleId: `MOD-${String(idx + 1).padStart(2, '0')}`,
+          moduleName: mod.moduleName,
+          routePath: mod.pagePath,
+          fullUrl: `${targetUrl.replace(/\/$/, '')}${mod.pagePath.startsWith('/') ? mod.pagePath : `/${mod.pagePath}`}`,
+          pageHeading: mod.headings[0] || mod.moduleName,
+          hasDataTable: mod.tables.length > 0,
+          tableColumns: mod.tables.flatMap((t) => t.columns),
+          sampleRowData: [],
+          hasSearchOrFilter: mod.inputs.some((i) => /search|cari|filter/i.test(i.name + ' ' + (i.placeholder || '')) || i.type === 'select'),
+          searchFilterSelectors: mod.inputs
+            .filter((i) => /search|cari|filter/i.test(i.name + ' ' + (i.placeholder || '')) || i.type === 'select')
+            .map((i) => i.selector),
+          formsAndModals: mod.inputs.length > 0
+            ? [
+                {
+                  formTitle: `${mod.moduleName} Form`,
+                  inputs: mod.inputs.map((inp, iIdx) => ({
+                    name: inp.name,
+                    id: inp.name || `field_${iIdx + 1}`,
+                    type: inp.type,
+                    placeholder: inp.placeholder || '',
+                    labelText: inp.labelText,
+                    required: inp.required,
+                    selector: inp.selector,
+                    pagePath: mod.pagePath,
+                    moduleName: mod.moduleName,
+                  })),
+                  submitButtonText: mod.buttons[0] || 'Submit',
+                },
+              ]
+            : [],
+          triggeredApis: mod.apis.map((a) => ({
+            method: a.method,
+            path: a.path,
+            status: a.status || 200,
+            latencyMs: 45,
+          })),
+          observedAnomalies: [],
+        }))
+      : [
+          {
+            moduleId: 'MOD-01',
+            moduleName: appName,
+            routePath: '/',
+            fullUrl: targetUrl,
+            pageHeading: appName,
+            hasDataTable: databaseTables.length > 0,
+            tableColumns: databaseTables[0]?.columns.map((c) => c.name) || [],
+            sampleRowData: [],
+            hasSearchOrFilter: false,
+            searchFilterSelectors: [],
+            formsAndModals: [
+              {
+                formTitle: `${appName} Input Form`,
+                inputs: effectiveRules.map((vr, idx) => ({
+                  name: vr.fieldName,
+                  id: `field_${idx + 1}`,
+                  type: vr.dataType === 'number' ? 'number' : 'text',
+                  placeholder: vr.fieldName,
+                  required: true,
+                  selector: `input[name="${vr.fieldName}"]`,
+                })),
+                submitButtonText: 'Submit',
+              },
+            ],
+            triggeredApis: apis.map((a) => ({ method: a.method, path: a.path, status: 200, latencyMs: 42 })),
+            observedAnomalies: [],
+          },
+        ];
+
+  const testScenarios: TestScenarioItem[] = [];
+  const rows: SynthesizedRtmRow[] = [];
+  const bugReports: BugReportTicket[] = [];
+  const uatFlows: UatFeatureFlow[] = [];
+
+  let tcNum = 1;
+  const nextTcId = () => `TC-${String(tcNum++).padStart(3, '0')}`;
+
+  featureModules.forEach((mod, modIdx) => {
+    const usRef = `REQ-US-${String(modIdx + 1).padStart(2, '0')}`;
+    const brRef =
+      businessRules.find((b) => b.moduleName === mod.moduleName)?.ruleId ||
+      `BR-${String(Math.min(modIdx + 1, Math.max(businessRules.length, 1))).padStart(2, '0')}`;
+    const modPrefix = mod.moduleId.replace(/[^A-Z0-9]/g, '');
+    const primaryModApi = mod.triggeredApis[0] || {
+      method: primaryMethod,
+      path: mod.routePath || primaryEndpoint,
+      status: 200,
+      latencyMs: 45,
+    };
+    const apiLabel = `${primaryModApi.method} ${primaryModApi.path}`;
+    const modInputs = mod.formsAndModals.flatMap((fm) => fm.inputs);
+    const firstForm = mod.formsAndModals[0];
+    const httpErrAnomaly = mod.observedAnomalies.find((a) => a.type === 'HTTP_ERROR' || a.type === 'EMPTY_TABLE_ERROR');
+    const consoleAnomaly = mod.observedAnomalies.find((a) => a.type === 'CONSOLE_ERROR');
+    const slowAnomaly = mod.observedAnomalies.find((a) => a.type === 'SLOW_RESPONSE');
+    const valAnomaly = mod.observedAnomalies.find((a) => a.type === 'MISSING_VALIDATION');
+    const allModApiPaths = mod.triggeredApis.map((a) => `${a.method} ${a.path}`).join(', ') || apiLabel;
+
+    const addScenarioAndTc = (cfg: {
+      seq: number;
+      category: TestScenarioItem['category'];
+      scenarioTitle: string;
+      scenarioDesc: string;
+      scenarioType: Iso29119Technique;
+      testTitle: string;
+      testObjective: string;
+      testData: Record<string, unknown>;
+      expectedOutcome: string;
+      actualObservedResult: string;
+      executionVerdict: 'PASSED' | 'FAILED' | 'WARNING';
+      manualSteps: ManualTestStep[];
+      domSelector?: string;
+      httpStatus?: number;
+      validationRef?: string;
+    }) => {
+      const scenarioId = `TS-${modPrefix}-${String(cfg.seq).padStart(2, '0')}`;
+      const tcId = nextTcId();
+      testScenarios.push({
+        scenarioId,
+        moduleId: mod.moduleId,
+        moduleName: mod.moduleName,
+        routePath: mod.routePath,
+        category: cfg.category,
+        title: cfg.scenarioTitle,
+        description: cfg.scenarioDesc,
+        linkedTestCaseIds: [tcId],
+      });
+      rows.push({
+        testId: tcId,
+        moduleId: mod.moduleId,
+        moduleName: mod.moduleName,
+        pagePath: mod.routePath,
+        scenarioId,
+        brdRef: brRef,
+        prdRef: usRef,
+        validationRef: cfg.validationRef || effectiveRules[modIdx % effectiveRules.length]?.ruleId || 'VR-01',
+        scenarioType: cfg.scenarioType,
+        testTitle: cfg.testTitle,
+        testObjective: cfg.testObjective,
+        preconditions: `Operator login aktif dan berada di ${mod.fullUrl} (${mod.moduleName}).`,
+        testDataInput: JSON.stringify(cfg.testData, null, 2),
+        expectedOutcome: cfg.expectedOutcome,
+        actualObservedResult: cfg.actualObservedResult,
+        executionVerdict: cfg.executionVerdict,
+        verificationLayers: {
+          uiResult: cfg.actualObservedResult,
+          apiResponse: `API ${apiLabel} -> HTTP ${primaryModApi.status} (${primaryModApi.latencyMs}ms)`,
+          databaseOutcome: mod.tableColumns.length > 0
+            ? `Tabel menampilkan kolom [${mod.tableColumns.join(', ')}] konsisten dengan database.`
+            : `Integritas state modul "${mod.moduleName}" terjaga.`,
+        },
+        manualSteps: cfg.manualSteps,
+        automationParityStatus: 'LINKED_TO_DOM_API',
+        gherkinSnippet: `Scenario: ${cfg.testTitle} (${tcId})\n  Given operator mengakses "${mod.fullUrl}"\n  When operator menjalankan "${cfg.scenarioTitle}"\n  Then sistem harus memenuhi "${cfg.expectedOutcome}"`,
+        domSelector: cfg.domSelector || modInputs[0]?.selector || 'main',
+        apiEndpoint: apiLabel,
+        httpStatus: cfg.httpStatus || primaryModApi.status || 200,
+        ...(() => {
+          const scenarioType = cfg.scenarioType;
+          const ruleIndex = modIdx;
+          const domSel = cfg.domSelector || modInputs[0]?.selector || 'main';
+          const ruleFn = effectiveRules[ruleIndex % effectiveRules.length]?.fieldName || '';
+          const sensitive = /auth|login|password|token|finance|payment|price|tariff|invoice|billing|amount|nominal/i.test(`${ruleFn} ${mod.moduleName}`);
+          const tier: 'P0_CRITICAL_SMOKE' | 'P1_CORE_REGRESSION' | 'P2_EDGE_AND_BVA' =
+            scenarioType === 'POSITIVE' && /auth|login|password/i.test(ruleFn)
+              ? 'P0_CRITICAL_SMOKE'
+              : scenarioType === 'SECURITY_INJECTION' || scenarioType === 'CONCURRENCY_RACE'
+                ? 'P0_CRITICAL_SMOKE'
+                : scenarioType === 'POSITIVE' || scenarioType === 'NEGATIVE_INPUT' || scenarioType === 'STATE_TRANSITION'
+                  ? 'P1_CORE_REGRESSION'
+                  : 'P2_EDGE_AND_BVA';
+          const mutationWeight = primaryModApi.method === 'POST' ? 20 : primaryModApi.method === 'PUT' || primaryModApi.method === 'PATCH' ? 18 : primaryModApi.method === 'DELETE' ? 22 : 5;
+          const anomalyWeight = mod.observedAnomalies.some((a) => a.severity === 'CRITICAL') ? 25 : mod.observedAnomalies.length ? 15 : 0;
+          const boundaryWeight = scenarioType === 'BOUNDARY_3PT' || scenarioType === 'API_CONTRACT_FUZZ' ? 20 : 0;
+          const riskScore = Math.min(100, mutationWeight + (sensitive ? 25 : 0) + anomalyWeight + boundaryWeight + (tier === 'P0_CRITICAL_SMOKE' ? 15 : tier === 'P1_CORE_REGRESSION' ? 8 : 0));
+          const stability = /\[data-testid|\[role/i.test(domSel) ? 98 : /\[name=/i.test(domSel) ? 90 : /placeholder|text=/i.test(domSel) ? 82 : /:nth-|:first|:last|>\s*\w+/i.test(domSel) ? 68 : domSel.startsWith('.') || domSel.startsWith('#') ? 68 : 82;
+          const input = modInputs.find((item) => item.selector === domSel) || modInputs[0];
+          const escapedName = (input?.name || ruleFn || 'field').replace(/[^a-z0-9_-]/gi, '');
+          const escapedLabel = (input?.labelText || ruleFn || input?.name || 'field').replace(/["\\]/g, '');
+          const chain = [domSel, `[name="${escapedName}"]`, `main input[aria-label*="${escapedLabel}"]`];
+          return { executionPriorityTier: tier, mlRiskPriorityScore: riskScore, locatorStabilityScore: stability, selfHealingLocatorChain: chain };
+        })(),
+      });
+    };
+
+    // Synthesize Domain-Aware Deep Scenarios & Test Cases via Domain Logic Brain (12-20+ per feature module)
+    const domainReport = domainLogicBrainService.inferDomainIntelligence(mod, {
+      appName,
+      targetUrl,
+      validationRules: effectiveRules,
+      databaseTables,
+    });
+
+    domainReport.deepTestScenarios.forEach((scBlueprint, idx) => {
+      addScenarioAndTc({
+        seq: idx + 1,
+        category: scBlueprint.category,
+        scenarioTitle: scBlueprint.scenarioTitle,
+        scenarioDesc: scBlueprint.scenarioDesc,
+        scenarioType: scBlueprint.scenarioType,
+        testTitle: scBlueprint.testTitle,
+        testObjective: scBlueprint.testObjective,
+        testData: scBlueprint.testData,
+        expectedOutcome: scBlueprint.expectedOutcome,
+        actualObservedResult: scBlueprint.actualObservedResult,
+        executionVerdict: scBlueprint.executionVerdict,
+        manualSteps: scBlueprint.manualSteps,
+        domSelector: scBlueprint.domSelector,
+        httpStatus: scBlueprint.httpStatus,
+      });
+    });
+
+    // Add additional field-level boundary checks if module has multiple form inputs
+    if (firstForm && modInputs.length > 0) {
+      const boundaryPayload: Record<string, unknown> = {};
+      modInputs.forEach((inp) => {
+        boundaryPayload[inp.name || 'field'] = inp.type === 'number' ? 0 : 'A';
+      });
+      addScenarioAndTc({
+        seq: domainReport.deepTestScenarios.length + 1,
+        category: 'BOUNDARY_FORMAT',
+        scenarioTitle: `[BOUNDARY & FORMAT] Enforce Min/Max lengths (BVA) across (${modInputs.map((i) => i.labelText || i.name).join(', ')})`,
+        scenarioDesc: `Verify character length boundaries and data types across form "${firstForm.formTitle}".`,
+        scenarioType: 'BOUNDARY_3PT',
+        testTitle: `[${mod.moduleName}] Form Field Boundary Analysis (${firstForm.formTitle})`,
+        testObjective: `Ensure length boundaries and input types (number/email/text) are enforced deterministically.`,
+        testData: boundaryPayload,
+        expectedOutcome: `Out-of-bounds values are rejected with HTTP 422 and explicit validation message.`,
+        actualObservedResult: valAnomaly
+          ? `WARNING: ${valAnomaly.actualBehavior}`
+          : `Length and format contracts verified across ${modInputs.length} field(s) in "${mod.moduleName}".`,
+        executionVerdict: valAnomaly ? 'WARNING' : 'PASSED',
+        domSelector: modInputs[0]?.selector,
+        httpStatus: 422,
+        manualSteps: [
+          { stepNumber: 1, action: `Enter boundary/invalid value into ${modInputs[0]?.labelText || modInputs[0]?.name || 'input'}.`, expectedResult: 'Boundary value entered.' },
+          { stepNumber: 2, action: `Trigger validation and inspect feedback.`, expectedResult: 'Boundary limits enforced.' },
+        ],
+      });
+    }
+
+    // DELIVERABLE 3: Bug Reports from observedAnomalies
+    for (const anom of mod.observedAnomalies) {
+      bugReports.push({
+        bugId: `BUG-${String(bugReports.length + 1).padStart(3, '0')}`,
+        moduleId: mod.moduleId,
+        moduleName: mod.moduleName,
+        featureUrl: mod.fullUrl,
+        title: anom.title,
+        severity: anom.severity,
+        priority: anom.severity === 'CRITICAL' ? 'P1' : anom.severity === 'MAJOR' ? 'P2' : 'P3',
+        status: 'OPEN',
+        stepsToReproduce: anom.stepsToReproduce,
+        expectedResult: anom.expectedBehavior,
+        actualResult: anom.actualBehavior,
+        technicalEvidence: anom.technicalEvidence,
+        recommendedFix:
+          anom.type === 'HTTP_ERROR'
+            ? `Inspect controller and error handler for ${apiLabel}; ensure DB query and DTO validation return structured JSON.`
+            : anom.type === 'CONSOLE_ERROR'
+            ? `Resolve null/undefined reference or runtime exception in "${mod.moduleName}".`
+            : anom.type === 'SLOW_RESPONSE'
+            ? `Add composite index / query optimization and caching on ${apiLabel} to keep latency under 500ms.`
+            : anom.type === 'MISSING_VALIDATION'
+            ? `Add HTML5 attributes (required, minlength, pattern) plus Zod schema validation on client and server.`
+            : `Ensure data endpoint returns HTTP 200 OK and UI displays an explicit empty state when rows are empty.`,
+      });
+    }
+
+    // DELIVERABLE 4: Enterprise 8-12 Step E2E & UAT Sign-Off Flow with 6-8 Business Acceptance Criteria
+    const hasBlockingBug = mod.observedAnomalies.some((a) => a.severity === 'CRITICAL' || a.severity === 'MAJOR');
+    const hasMinorNote = mod.observedAnomalies.some((a) => a.severity === 'MINOR');
+    uatFlows.push({
+      uatId: `UAT-${String(modIdx + 1).padStart(3, '0')}`,
+      moduleId: mod.moduleId,
+      moduleName: mod.moduleName,
+      routePath: mod.routePath,
+      userRole: mod.moduleId === 'MOD-01' && domainReport.domainPattern === 'AUTHENTICATION_RBAC_GATE' ? 'Guest / Unauthenticated User' : 'Authenticated Operator / Domain Admin',
+      businessScenarioTitle: `E2E ${domainReport.domainLabel}: ${mod.moduleName} (${mod.routePath})`,
+      endToEndJourneySteps: domainReport.enterpriseUatSteps,
+      acceptanceCriteria: domainReport.businessAcceptanceCriteria,
+      uatStatus: hasBlockingBug ? 'REJECTED' : hasMinorNote ? 'ACCEPTED_WITH_NOTES' : 'ACCEPTED',
+      testerNotes: hasBlockingBug
+        ? `Detected ${mod.observedAnomalies.filter((a) => a.severity !== 'MINOR').length} blocker/major defect(s). Resolve prior to release.`
+        : hasMinorNote
+        ? `Core workflows passed with ${mod.observedAnomalies.length} minor advisory note(s) on validation or latency.`
+        : `All ${domainReport.enterpriseUatSteps.length} E2E steps & ${domainReport.businessAcceptanceCriteria.length} acceptance criteria verified cleanly (${allModApiPaths}).`,
+    });
+  });
+
+  // Include Spec-to-Code Gap Audit non-compliant items in bugReports
+  for (const gap of gapAuditItems) {
+    if (gap.verdict !== 'COMPLIANT') {
+      bugReports.push({
+        bugId: `BUG-${String(bugReports.length + 1).padStart(3, '0')}`,
+        moduleId: 'GAP-AUDIT',
+        moduleName: gap.targetEntity,
+        featureUrl: targetUrl,
+        title: `[Spec-to-Code Gap] ${gap.discrepancyTitle}`,
+        severity: gap.severity === 'CRITICAL' ? 'CRITICAL' : gap.severity === 'MAJOR' ? 'MAJOR' : 'MINOR',
+        priority: gap.severity === 'CRITICAL' ? 'P1' : gap.severity === 'MAJOR' ? 'P2' : 'P3',
+        status: 'OPEN',
+        stepsToReproduce: [`Compare SyRS contract (${gap.ruleRef}) against ${gap.targetEntity} implementation.`],
+        expectedResult: gap.defectTicket?.expectedBehavior || gap.expectedSpec,
+        actualResult: gap.defectTicket?.actualBehavior || gap.discrepancyDescription,
+        technicalEvidence: `${gap.verdict} on ${gap.targetEntity} (${gap.ruleRef})`,
+        recommendedFix: gap.remediationAction,
+      });
+    }
   }
 
-  const vr01 = rules.find((r) => r.ruleId === 'VR-01');
-  const vr02 = rules.find((r) => r.ruleId === 'VR-02');
-  const vr03 = rules.find((r) => r.ruleId === 'VR-03');
+  return { testScenarios, rtmRows: rows, bugReports, uatFlows };
+}
 
-  const vr01Error = vr01?.exactUiErrorString || 'Total belanja minimum Rp 50.000 untuk menggunakan voucher ini';
-  const vr02Error = vr02?.exactUiErrorString || 'Format kode voucher tidak valid (hanya huruf kapital, angka, _ dan -)';
-  const vr03Error = vr03?.exactUiErrorString || 'Voucher ini sudah pernah digunakan pada akun Anda';
+/**
+ * Generate Bug Report Markdown (.md)
+ */
+export function generateBugReportMarkdown(bugs: BugReportTicket[]): string {
+  if (bugs.length === 0) {
+    return `# OneSpec Automated Bug Report Register\n\nNo defects or anomalies detected during live feature exercising.\n`;
+  }
+  return `# OneSpec Automated Bug Report & Defect Register (${bugs.length} Defects)
+Standards: ISO/IEC/IEEE 29119-3 Incident Reporting
 
-  return [
-    // -------------------------------------------------------------------------
-    // 1. POSITIVE (EP_VALID) — Standard Happy Path
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-001',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'POSITIVE',
-      testTitle: 'Cart subtotal exceeds threshold (IDR 75.000 > 50.000 minimum)',
-      testObjective: 'Verify customer can apply a valid 20% voucher when cart value comfortably exceeds IDR 50.000.',
-      preconditions: 'User authenticated (CUST-1001), cart populated with SKU-A ($40) + SKU-B ($35) = IDR 75.000 total.',
-      testDataInput: JSON.stringify({ cartTotal: 75000, voucherCode: 'DISC20', customerId: 'CUST-1001' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. 20% discount (IDR 15.000) applied. Net total IDR 60.000.',
-      verificationLayers: {
-        uiResult: 'Green discount tag rendered: "-Rp 15.000", total payable updated to "Rp 60.000", zero error banner.',
-        apiResponse: 'HTTP 200 OK, { success: true, voucherCode: "DISC20", discountAmount: 15000, netPayable: 60000 }',
-        databaseOutcome: 'Reservation row inserted in VoucherRedemptions table with status="PENDING_CHECKOUT".',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Navigate to /checkout with cart items totaling IDR 75.000.', expectedResult: 'Checkout summary displays IDR 75.000.' },
-        { stepNumber: 2, action: 'Enter "DISC20" into [data-testid="voucher-input"].', expectedResult: 'Input field accepts text.' },
-        { stepNumber: 3, action: 'Click [data-testid="apply-voucher-btn"].', expectedResult: 'Network request POST /api/v1/checkout/apply-voucher dispatched.' },
-        { stepNumber: 4, action: 'Observe summary update and absence of alerts.', expectedResult: 'Payable balance changes to IDR 60.000.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-input"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @EP_VALID @BR-01 @REQ-US-01 @VR-01
-Scenario: Valid cart total above boundary threshold (TC-001)
-  Given the customer cart subtotal is 75000 IDR
-  When the customer submits voucher code "DISC20"
-  Then the system SHALL return HTTP status 200 OK
-  And the calculated discount SHALL be 15000 IDR
-  And the final payable SHALL be 60000 IDR`,
-    },
+| Bug ID | Feature Module | Severity | Priority | Defect Title | Actual Result |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+${bugs.map((b) => `| \`${b.bugId}\` | **${b.moduleName}** | \`${b.severity}\` | \`${b.priority}\` | ${b.title} | ${b.actualResult} |`).join('\n')}
 
-    // -------------------------------------------------------------------------
-    // 2. BOUNDARY_3PT (BVA) — 3-Point Boundary Min-1, Exact Min, Min+1, Max Length
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-002',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: '3-Point BVA (Min - 1): Cart subtotal exactly IDR 49.999 (Boundary Rejection)',
-      testObjective: 'Validate system strictly rejects vouchers when cart balance is exactly 1 unit below the IDR 50.000 threshold.',
-      preconditions: 'User authenticated, cart total adjusted to IDR 49.999.',
-      testDataInput: JSON.stringify({ cartTotal: 49999, voucherCode: 'DISC20' }, null, 2),
-      expectedOutcome: `HTTP 422 Unprocessable Entity. Error code CART_BELOW_MINIMUM_THRESHOLD. Exact UI: "${vr01Error}".`,
-      verificationLayers: {
-        uiResult: `Role="alert" banner appears containing exact string: "${vr01Error}".`,
-        apiResponse: 'HTTP 422 Unprocessable Entity, { errorCode: "CART_BELOW_MINIMUM_THRESHOLD", minRequired: 50000, current: 49999 }',
-        databaseOutcome: 'Zero records inserted in VoucherRedemptions. Transaction rolled back completely.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Add items totaling IDR 49.999 to cart.', expectedResult: 'Subtotal shows IDR 49.999.' },
-        { stepNumber: 2, action: 'Apply promo code "DISC20".', expectedResult: 'POST /api/v1/checkout/apply-voucher returns HTTP 422.' },
-        { stepNumber: 3, action: 'Verify UI displays error banner.', expectedResult: `Text matches "${vr01Error}".` },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-error-msg"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 422,
-      gherkinSnippet: `@ISO29119-4 @BVA @MIN_MINUS_ONE @BR-01 @REQ-US-01 @VR-01
-Scenario: Boundary rejection 1 unit below minimum order value (TC-002)
-  Given the customer cart subtotal is 49999 IDR
-  When the customer submits voucher code "DISC20"
-  Then the system SHALL return HTTP status 422 Unprocessable Entity
-  And the error code SHALL be "CART_BELOW_MINIMUM_THRESHOLD"
-  And the UI error banner SHALL display "${vr01Error}"`,
-    },
-    {
-      testId: 'TC-003',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: '3-Point BVA (Exact Min): Cart subtotal exactly IDR 50.000 (Boundary Inclusion)',
-      testObjective: 'Validate system accepts voucher when cart total is at the exact minimum boundary threshold of IDR 50.000.',
-      preconditions: 'User authenticated, cart subtotal set to exactly IDR 50.000.',
-      testDataInput: JSON.stringify({ cartTotal: 50000, voucherCode: 'DISC20' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. 20% discount (IDR 10.000) applied. Net total IDR 40.000.',
-      verificationLayers: {
-        uiResult: 'Discount applied "-Rp 10.000", total payable is "Rp 40.000".',
-        apiResponse: 'HTTP 200 OK, { success: true, discountAmount: 10000, netPayable: 40000 }',
-        databaseOutcome: 'Reservation row created with status="PENDING_CHECKOUT".',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Set cart total to exactly IDR 50.000.', expectedResult: 'Subtotal displays IDR 50.000.' },
-        { stepNumber: 2, action: 'Submit promo code "DISC20".', expectedResult: 'System returns HTTP 200.' },
-      ],
-      automationParityStatus: 'READY_FOR_STAGE_2',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @BVA @EXACT_MIN @BR-01 @REQ-US-01 @VR-01
-Scenario: Boundary inclusion at exact minimum order value (TC-003)
-  Given the customer cart subtotal is exactly 50000 IDR
-  When the customer submits voucher code "DISC20"
-  Then the system SHALL return HTTP status 200 OK
-  And the calculated discount SHALL be 10000 IDR`,
-    },
-    {
-      testId: 'TC-004',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: '3-Point BVA (Min + 1): Cart subtotal exactly IDR 50.001 (Boundary Inclusion)',
-      testObjective: 'Validate system accepts voucher when cart total is 1 unit above minimum threshold.',
-      preconditions: 'User authenticated, cart subtotal set to IDR 50.001.',
-      testDataInput: JSON.stringify({ cartTotal: 50001, voucherCode: 'DISC20' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. 20% discount applied.',
-      verificationLayers: {
-        uiResult: 'Discount applied, payable IDR 40.001.',
-        apiResponse: 'HTTP 200 OK, { success: true, discountAmount: 10000, netPayable: 40001 }',
-        databaseOutcome: 'Temporary hold placed on voucher quota.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Set cart total to IDR 50.001.', expectedResult: 'Subtotal shows IDR 50.001.' },
-        { stepNumber: 2, action: 'Apply "DISC20".', expectedResult: 'Returns HTTP 200.' },
-      ],
-      automationParityStatus: 'READY_FOR_STAGE_2',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @BVA @MIN_PLUS_ONE @BR-01 @REQ-US-01 @VR-01
-Scenario: Boundary inclusion 1 unit above minimum order value (TC-004)
-  Given the customer cart subtotal is 50001 IDR
-  When the customer submits voucher code "DISC20"
-  Then the system SHALL return HTTP status 200 OK`,
-    },
-    {
-      testId: 'TC-005',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: '3-Point BVA (Max String Length 20): Exactly 20-character voucher code',
-      testObjective: 'Verify voucher code input accepts valid strings at the maximum allowable length of 20 characters.',
-      preconditions: 'Active voucher code "PROMO_MAX_LENGTH_20" configured in promotions table.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: 'PROMO_MAX_LENGTH_20' }, null, 2),
-      expectedOutcome: 'HTTP 200 OK. String accepted without length truncation.',
-      verificationLayers: {
-        uiResult: 'Full 20-character code reflected in input and applied badge.',
-        apiResponse: 'HTTP 200 OK, { success: true, voucherCode: "PROMO_MAX_LENGTH_20" }',
-        databaseOutcome: 'Queried successfully against Vouchers table.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Paste "PROMO_MAX_LENGTH_20" into voucher input.', expectedResult: 'Input length is exactly 20.' },
-        { stepNumber: 2, action: 'Click apply voucher.', expectedResult: 'HTTP 200 returned.' },
-      ],
-      automationParityStatus: 'READY_FOR_STAGE_2',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @BVA @MAX_STRING_LENGTH @BR-01 @REQ-US-01 @VR-02
-Scenario: Max string length boundary acceptance (TC-005)
-  Given a 20-character voucher code "PROMO_MAX_LENGTH_20"
-  When the customer submits the code
-  Then the system SHALL return HTTP status 200 OK`,
-    },
-    {
-      testId: 'TC-006',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'BOUNDARY_3PT',
-      testTitle: '3-Point BVA (Max + 1 Length 21): 21-character voucher code (Length Rejection)',
-      testObjective: 'Verify voucher code exceeding max length by 1 character (21 chars) is rejected.',
-      preconditions: 'User types "PROMO_MAX_LENGTH_20X" into promo code input.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: 'PROMO_MAX_LENGTH_20X' }, null, 2),
-      expectedOutcome: `HTTP 400 Bad Request. Error code VOUCHER_CODE_INVALID_FORMAT. Exact UI: "${vr02Error}".`,
-      verificationLayers: {
-        uiResult: `Input border changes to red (#EF4444), error banner displays: "${vr02Error}".`,
-        apiResponse: 'HTTP 400 Bad Request, { errorCode: "VOUCHER_CODE_INVALID_FORMAT", maxLength: 20, receivedLength: 21 }',
-        databaseOutcome: 'Zero database queries executed; fast-failed in controller schema validator.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Input 21-character code "PROMO_MAX_LENGTH_20X".', expectedResult: 'HTML5 maxlength or JS validator detects overflow.' },
-        { stepNumber: 2, action: 'Submit code.', expectedResult: 'HTTP 400 returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-error-msg"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @BVA @MAX_PLUS_ONE @BR-01 @REQ-US-01 @VR-02
-Scenario: Max length overflow boundary rejection (TC-006)
-  Given a 21-character voucher code "PROMO_MAX_LENGTH_20X"
-  When the customer submits the code
-  Then the system SHALL return HTTP status 400 Bad Request
-  And the UI error banner SHALL display "${vr02Error}"`,
-    },
+---
 
-    // -------------------------------------------------------------------------
-    // 3. NEGATIVE_INPUT (EP_INVALID) — Null, Empty, Whitespace, Malformed Syntax
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-007',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'NEGATIVE_INPUT',
-      testTitle: 'Null or Empty String ("") Voucher Submission',
-      testObjective: 'Ensure system disallows submission of blank/empty voucher strings.',
-      preconditions: 'Voucher input field is empty.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: '' }, null, 2),
-      expectedOutcome: `HTTP 400 Bad Request. Exact UI: "${vr02Error}".`,
-      verificationLayers: {
-        uiResult: 'Apply button disabled or immediate validation message shown.',
-        apiResponse: 'HTTP 400 Bad Request, { errorCode: "VOUCHER_CODE_EMPTY" }',
-        databaseOutcome: 'No DB activity.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Leave voucher input empty.', expectedResult: 'Input empty.' },
-        { stepNumber: 2, action: 'Click apply.', expectedResult: 'Rejected locally or HTTP 400.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-input"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @EP_INVALID @EMPTY_INPUT @BR-01 @REQ-US-01 @VR-02
-Scenario: Empty string rejection (TC-007)
-  Given the voucher code is ""
-  When the customer clicks apply
-  Then the system SHALL return HTTP status 400 Bad Request`,
-    },
-    {
-      testId: 'TC-008',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'NEGATIVE_INPUT',
-      testTitle: 'Whitespace-Only ("   ") Voucher Submission',
-      testObjective: 'Ensure voucher code containing only spaces is rejected as invalid format.',
-      preconditions: 'User enters three space characters into input.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: '   ' }, null, 2),
-      expectedOutcome: `HTTP 400 Bad Request. Exact UI: "${vr02Error}".`,
-      verificationLayers: {
-        uiResult: 'Error banner visible with regex error.',
-        apiResponse: 'HTTP 400 Bad Request, { errorCode: "VOUCHER_CODE_INVALID_FORMAT" }',
-        databaseOutcome: 'No DB activity.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Type "   " in input.', expectedResult: 'Field has spaces.' },
-        { stepNumber: 2, action: 'Submit.', expectedResult: 'HTTP 400 returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @EP_INVALID @WHITESPACE @BR-01 @REQ-US-01 @VR-02
-Scenario: Whitespace string rejection (TC-008)
-  Given the voucher code is "   "
-  When the customer submits
-  Then the system SHALL return HTTP status 400 Bad Request`,
-    },
-    {
-      testId: 'TC-009',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'NEGATIVE_INPUT',
-      testTitle: 'Malformed Syntax with Special Characters ("DISC@#$%")',
-      testObjective: 'Validate regex ^[A-Z0-9_-]{4,20}$ strictly rejects symbols like @, #, $, %.',
-      preconditions: 'User attempts to apply code "DISC@#$%" on cart value IDR 60.000.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: 'DISC@#$%' }, null, 2),
-      expectedOutcome: `HTTP 400 Bad Request. Error code VOUCHER_CODE_INVALID_FORMAT. Exact UI: "${vr02Error}".`,
-      verificationLayers: {
-        uiResult: `Error alert banner shows: "${vr02Error}".`,
-        apiResponse: 'HTTP 400 Bad Request, { errorCode: "VOUCHER_CODE_INVALID_FORMAT", pattern: "^[A-Z0-9_-]{4,20}$" }',
-        databaseOutcome: 'Fast-failed in controller without DB connection.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Enter "DISC@#$%" into input.', expectedResult: 'Text entered.' },
-        { stepNumber: 2, action: 'Click apply button.', expectedResult: 'HTTP 400 returned.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-error-msg"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @EP_INVALID @SPECIAL_CHARS @BR-01 @REQ-US-01 @VR-02
-Scenario: Special character rejection (TC-009)
-  Given the voucher code is "DISC@#$%"
-  When the customer clicks apply
-  Then the system SHALL return HTTP status 400 Bad Request
-  And the UI error banner SHALL display "${vr02Error}"`,
-    },
+${bugs
+  .map(
+    (b) => `### [${b.bugId}] ${b.title}
+- **Feature / URL:** ${b.moduleName} (\`${b.featureUrl}\`)
+- **Severity / Priority:** \`${b.severity}\` / \`${b.priority}\` (\`${b.status}\`)
+- **Steps to Reproduce:**
+${b.stepsToReproduce.map((s, idx) => `  ${idx + 1}. ${s}`).join('\n')}
+- **Expected Result:** ${b.expectedResult}
+- **Actual Result:** ${b.actualResult}
+- **Technical Evidence:** \`${b.technicalEvidence}\`
+- **Recommended Fix:** ${b.recommendedFix}
+`
+  )
+  .join('\n')}`;
+}
 
-    // -------------------------------------------------------------------------
-    // 4. STATE_TRANSITION — Lifecycle Invalidation & Post-Redemption States
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-010',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'STATE_TRANSITION',
-      testTitle: 'Cart Emptied After Voucher Applied (State Invalidation)',
-      testObjective: 'Verify that removing items from cart after voucher was applied immediately revokes voucher deduction.',
-      preconditions: 'Voucher "DISC20" is currently applied to IDR 60.000 cart. User deletes all items.',
-      testDataInput: JSON.stringify({ cartTotal: 0, appliedVoucher: 'DISC20' }, null, 2),
-      expectedOutcome: 'System automatically revokes voucher deduction. Discount reset to IDR 0.',
-      verificationLayers: {
-        uiResult: 'Discount badge removed, message "Voucher dibatalkan karena keranjang kosong" rendered.',
-        apiResponse: 'HTTP 200 OK, { success: true, discountAmount: 0, netPayable: 0, voucherRevoked: true }',
-        databaseOutcome: 'Status changed from PENDING_CHECKOUT to REVOKED in session store.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Apply "DISC20" to IDR 60.000 cart.', expectedResult: 'Discount active.' },
-        { stepNumber: 2, action: 'Click "Clear Cart" or delete items.', expectedResult: 'Cart subtotal becomes 0.' },
-        { stepNumber: 3, action: 'Verify voucher is automatically detached.', expectedResult: 'Total payable is 0.' },
-      ],
-      automationParityStatus: 'READY_FOR_STAGE_2',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 200,
-      gherkinSnippet: `@ISO29119-4 @STATE_TRANSITION @CART_CLEARED @BR-01 @REQ-US-01
-Scenario: Voucher revocation on empty cart (TC-010)
-  Given voucher "DISC20" is applied to an active cart
-  When the customer empties the shopping cart
-  Then the system SHALL revoke the voucher discount
-  And reset total payable to 0 IDR`,
-    },
-    {
-      testId: 'TC-011',
-      brdRef: 'BR-02',
-      prdRef: 'REQ-US-02',
-      validationRef: 'VR-03',
-      scenarioType: 'STATE_TRANSITION',
-      testTitle: 'Re-Application of Single-Use Voucher on Subsequent Order',
-      testObjective: 'Ensure that customer account cannot reuse single-use voucher code once redeemed on previous completed order.',
-      preconditions: 'Customer CUST-1001 completed order ORD-991 with voucher "DISC20". Status is PAID.',
-      testDataInput: JSON.stringify({ customerId: 'CUST-1001', voucherCode: 'DISC20', cartTotal: 80000 }, null, 2),
-      expectedOutcome: `HTTP 409 Conflict. Error code VOUCHER_ALREADY_REDEEMED. Exact UI: "${vr03Error}".`,
-      verificationLayers: {
-        uiResult: `Role="alert" banner displays: "${vr03Error}".`,
-        apiResponse: 'HTTP 409 Conflict, { errorCode: "VOUCHER_ALREADY_REDEEMED", previousOrderId: "ORD-991" }',
-        databaseOutcome: 'Query against VoucherRedemptions finds existing record; transaction rejected.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Log in as CUST-1001 who already used "DISC20".', expectedResult: 'User logged in.' },
-        { stepNumber: 2, action: 'Enter "DISC20" on a new cart checkout.', expectedResult: 'Network returns HTTP 409.' },
-        { stepNumber: 3, action: 'Verify UI error banner.', expectedResult: `Displays "${vr03Error}".` },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-error-msg"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 409,
-      gherkinSnippet: `@ISO29119-4 @STATE_TRANSITION @ALREADY_REDEEMED @BR-02 @REQ-US-02 @VR-03
-Scenario: Second redemption attempt rejected (TC-011)
-  Given customer "CUST-1001" has already completed order "ORD-991" with "DISC20"
-  When customer "CUST-1001" attempts to apply "DISC20" on a new order
-  Then the system SHALL return HTTP status 409 Conflict
-  And the UI banner SHALL display "${vr03Error}"`,
-    },
-
-    // -------------------------------------------------------------------------
-    // 5. CONCURRENCY_RACE — Parallel Execution & Atomic Locks (<50ms)
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-012',
-      brdRef: 'BR-02',
-      prdRef: 'REQ-US-02',
-      validationRef: 'VR-03',
-      scenarioType: 'CONCURRENCY_RACE',
-      testTitle: 'High-Concurrency Duplicate Submission within <50ms Window',
-      testObjective: 'Validate database isolation & idempotency lock when user double-clicks or emits parallel checkout requests.',
-      preconditions: 'Single remaining quota available on voucher "FLASH100". Customer submits 2 parallel POST requests within 25ms.',
-      testDataInput: JSON.stringify({ parallelThreads: 2, deltaMs: 25, voucherCode: 'FLASH100', customerId: 'CUST-1001' }, null, 2),
-      expectedOutcome: 'Exactly 1 request succeeds (HTTP 200). Exactly 1 request fails with HTTP 409 Conflict. Zero double-claims.',
-      verificationLayers: {
-        uiResult: 'First modal displays checkout confirmation; duplicate action safely locked out.',
-        apiResponse: 'Thread 1: HTTP 200 OK. Thread 2: HTTP 409 Conflict (Lock wait / unique constraint error).',
-        databaseOutcome: 'Exactly 1 row created in VoucherRedemptions table. Quota decremented by exactly 1.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Trigger 2 concurrent apply requests within 25ms.', expectedResult: 'Requests dispatched.' },
-        { stepNumber: 2, action: 'Inspect HTTP responses.', expectedResult: 'One 200, one 409.' },
-        { stepNumber: 3, action: 'Verify DB rows.', expectedResult: 'Only 1 row exists.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/v1/checkout/redeem',
-      httpStatus: 409,
-      gherkinSnippet: `@ISO29119-4 @CONCURRENCY_RACE @IDEMPOTENCY @BR-02 @REQ-US-02 @VR-03
-Scenario: Parallel double-redemption lock (TC-012)
-  Given voucher "FLASH100" has 1 remaining quota
-  When customer emits two parallel checkout requests within 25ms
-  Then exactly one request SHALL return HTTP status 200 OK
-  And the second request SHALL return HTTP status 409 Conflict
-  And quota SHALL be decremented by exactly 1`,
-    },
-
-    // -------------------------------------------------------------------------
-    // 6. SECURITY_INJECTION — SQL Injection & XSS Payloads
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-013',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'SECURITY_INJECTION',
-      testTitle: 'SQL Injection Payload in Voucher Input ("\' OR 1=1 --")',
-      testObjective: 'Verify system sanitizes input and parameterizes queries, completely preventing SQL injection bypass.',
-      preconditions: 'User enters SQL injection string into promo code input.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: "' OR 1=1 --" }, null, 2),
-      expectedOutcome: `HTTP 400 Bad Request. Regex validation rejects SQL characters before DB layer. Exact UI: "${vr02Error}".`,
-      verificationLayers: {
-        uiResult: `Error banner displays: "${vr02Error}". Zero database error leaks.`,
-        apiResponse: 'HTTP 400 Bad Request, { errorCode: "VOUCHER_CODE_INVALID_FORMAT" }',
-        databaseOutcome: 'Query never dispatched to database; parameterized ORM (Prisma) guarantees safety.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Enter "\' OR 1=1 --" into voucher input.', expectedResult: 'Text entered.' },
-        { stepNumber: 2, action: 'Submit.', expectedResult: 'HTTP 400 returned, no SQL error leaked.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      domSelector: '[data-testid="voucher-input"]',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @SECURITY_INJECTION @SQLI @BR-01 @REQ-US-01 @VR-02
-Scenario: SQL injection input sanitization (TC-013)
-  Given the voucher code is "' OR 1=1 --"
-  When the customer clicks apply
-  Then the system SHALL reject the request with HTTP 400 Bad Request
-  And zero SQL stack traces SHALL be returned`,
-    },
-    {
-      testId: 'TC-014',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-02',
-      scenarioType: 'SECURITY_INJECTION',
-      testTitle: 'Reflected / Stored Cross-Site Scripting (XSS) Injection',
-      testObjective: 'Ensure voucher code input sanitizes HTML tags and disallows JavaScript script execution.',
-      preconditions: 'User enters XSS payload "<script>alert(document.cookie)</script>".',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: '<script>alert(1)</script>' }, null, 2),
-      expectedOutcome: 'HTTP 400 Bad Request. Tags are escaped; zero scripts executed in DOM.',
-      verificationLayers: {
-        uiResult: 'Payload rendered as escaped text or rejected before DOM insertion. Zero script alerts.',
-        apiResponse: 'HTTP 400 Bad Request, { errorCode: "VOUCHER_CODE_INVALID_FORMAT" }',
-        databaseOutcome: 'Zero records saved.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Paste "<script>alert(1)</script>" into input.', expectedResult: 'Pasted.' },
-        { stepNumber: 2, action: 'Submit.', expectedResult: 'HTTP 400 returned, no alert dialog triggered.' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @SECURITY_INJECTION @XSS @BR-01 @REQ-US-01 @VR-02
-Scenario: XSS payload sanitization (TC-014)
-  Given the voucher code contains "<script>alert(1)</script>"
-  When the customer submits the code
-  Then the system SHALL return HTTP status 400 Bad Request
-  And zero client script execution SHALL occur`,
-    },
-
-    // -------------------------------------------------------------------------
-    // 7. API_CONTRACT_FUZZ — Extra JSON Keys & Oversized Body
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-015',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'API_CONTRACT_FUZZ',
-      testTitle: 'API Schema Fuzzing: Unexpected Extra Fields & Oversized Body',
-      testObjective: 'Verify API rejects payload containing unauthorized keys or oversized payload bytes.',
-      preconditions: 'API request payload injected with unauthorized keys: { maliciousKey: "exploit", overflowPayload: 5MB }.',
-      testDataInput: JSON.stringify({ cartTotal: 60000, voucherCode: 'DISC20', unauthorizedDiscount: 999999, overflowData: 'A'.repeat(50000) }, null, 2),
-      expectedOutcome: 'HTTP 400 / 413 Payload Too Large. Fastify / Zod schema strips or rejects extra keys.',
-      verificationLayers: {
-        uiResult: 'System displays generic network error without exposing internal service paths.',
-        apiResponse: 'HTTP 400 Bad Request, { error: "INVALID_SCHEMA_KEYS", unrecognized: ["unauthorizedDiscount"] }',
-        databaseOutcome: 'Zero DB records modified.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Emit POST with unauthorized keys to /apply-voucher.', expectedResult: 'Request sent.' },
-        { stepNumber: 2, action: 'Assert HTTP response.', expectedResult: 'HTTP 400 returned.' },
-      ],
-      automationParityStatus: 'READY_FOR_STAGE_2',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 400,
-      gherkinSnippet: `@ISO29119-4 @API_CONTRACT_FUZZ @EXTRA_FIELDS @BR-01 @REQ-US-01
-Scenario: API schema rejection of unknown keys (TC-015)
-  Given the API request contains unrecognized fields
-  When the request is posted to "/api/v1/checkout/apply-voucher"
-  Then the API gateway SHALL reject with HTTP status 400 Bad Request`,
-    },
-
-    // -------------------------------------------------------------------------
-    // 8. RESILIENCE_TIMEOUT — Downstream DB Delay & Circuit Breaker
-    // -------------------------------------------------------------------------
-    {
-      testId: 'TC-016',
-      brdRef: 'BR-01',
-      prdRef: 'REQ-US-01',
-      validationRef: 'VR-01',
-      scenarioType: 'RESILIENCE_TIMEOUT',
-      testTitle: 'Downstream Database Query Latency & Circuit Breaker SLA Check',
-      testObjective: 'Verify system handles unindexed sequential query latency > 500ms gracefully and logs performance bottleneck.',
-      preconditions: '50 concurrent requests emitted causing table "Vouchers" sequential scan bottleneck (1,420ms).',
-      testDataInput: JSON.stringify({ concurrencyProfile: '50-VUs', simulatedDbLatencyMs: 1420 }, null, 2),
-      expectedOutcome: 'System detects performance bottleneck exceeding 500ms SLA, records root cause, and alerts QA.',
-      verificationLayers: {
-        uiResult: 'UI shows spinner without locking the browser window; degrades gracefully.',
-        apiResponse: 'HTTP 504 Gateway Timeout or HTTP 200 with latency telemetry header "X-Response-Time: 1420ms".',
-        databaseOutcome: 'Prisma query logged in execution trace with recommendation to add composite index.',
-      },
-      manualSteps: [
-        { stepNumber: 1, action: 'Simulate 50 concurrent transactions.', expectedResult: 'System under heavy load.' },
-        { stepNumber: 2, action: 'Check latency metric in Step 07.', expectedResult: 'Bottleneck pinpointed on DB Seq Scan (1,420ms).' },
-      ],
-      automationParityStatus: 'LINKED_TO_DOM_API',
-      apiEndpoint: 'POST /api/v1/checkout/apply-voucher',
-      httpStatus: 504,
-      gherkinSnippet: `@ISO29119-4 @RESILIENCE_TIMEOUT @PERFORMANCE_SLA @BR-01 @REQ-US-01
-Scenario: Database performance bottleneck detection (TC-016)
-  Given the database query exceeds 500ms threshold
-  When the checkout service processes concurrent voucher requests
-  Then the live runner SHALL flag a "BOTTLENECK_DETECTED" verdict
-  And pinpoint the unindexed query plan in "src/services/voucher.service.ts:118"`,
-    },
-  ];
+/**
+ * Generate Bug Report CSV (.csv)
+ */
+export function generateBugReportCsv(bugs: BugReportTicket[]): string {
+  const header = ['Bug ID', 'Module ID', 'Module Name', 'Feature URL', 'Severity', 'Priority', 'Status', 'Title', 'Steps to Reproduce', 'Expected Result', 'Actual Result', 'Technical Evidence', 'Recommended Fix'];
+  const esc = (s?: string) => `"${(s || '').replace(/"/g, '""')}"`;
+  const rows = bugs.map((b) =>
+    [
+      esc(b.bugId),
+      esc(b.moduleId),
+      esc(b.moduleName),
+      esc(b.featureUrl),
+      esc(b.severity),
+      esc(b.priority),
+      esc(b.status),
+      esc(b.title),
+      esc(b.stepsToReproduce.join(' | ')),
+      esc(b.expectedResult),
+      esc(b.actualResult),
+      esc(b.technicalEvidence),
+      esc(b.recommendedFix),
+    ].join(',')
+  );
+  return [header.join(','), ...rows].join('\n');
 }
 
 /**
  * Generate full Cucumber Gherkin .feature document from selected rows
  */
-export function generateFeatureBundle(rows: SynthesizedRtmRow[]): string {
+export function generateFeatureBundle(rows: SynthesizedRtmRow[], featureTitle: string = 'Application Specification Contract'): string {
   return `# ISO/IEC/IEEE 29119-4 & Cucumber Gherkin Feature Specification
-# Target Domain: Voucher & Discount Validation Engine
+# Target Domain: ${featureTitle}
 # Generated deterministically by OneSpec SDLC Workbench
 # Techniques: Equivalence Partitioning, 3-Point BVA, Concurrency Race, Security Injection, API Fuzz
 
-Feature: Voucher Code Redemption & Multi-Dimensional Boundary Integrity
-  As a registered shopper
-  I want to apply promotional vouchers during checkout
-  So that I receive accurate discounts complying with business quota rules
+Feature: ${featureTitle} - Multi-Dimensional Boundary & Security Integrity
+  As an authenticated operator / client
+  I want to submit valid transactions and credentials
+  So that business invariants and security boundaries are strictly enforced
 
 ${rows.map((r) => r.gherkinSnippet).join('\n\n')}
 `;

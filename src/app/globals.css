@@ -199,9 +199,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   background-color: #0E1015 !important;
 }
 
-.bpmn-dark-theme .djs-shape .djs-visual > rect,
-.bpmn-dark-theme .djs-shape .djs-visual > circle,
-.bpmn-dark-theme .djs-shape .djs-visual > polygon {
+.bpmn-dark-theme .djs-shape:not(.highlight-running):not(.highlight-success):not(.highlight-error) .djs-visual > rect,
+.bpmn-dark-theme .djs-shape:not(.highlight-running):not(.highlight-success):not(.highlight-error) .djs-visual > circle,
+.bpmn-dark-theme .djs-shape:not(.highlight-running):not(.highlight-success):not(.highlight-error) .djs-visual > polygon {
   fill: #16191F !important;
   stroke: #A1A1A1 !important;
 }
@@ -213,18 +213,82 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   stroke-width: 2.5px !important;
 }
 
-.bpmn-dark-theme .djs-connection .djs-visual > path {
+.bpmn-dark-theme .djs-connection:not(.highlight-running-edge):not(.highlight-success-edge):not(.highlight-error-edge) .djs-visual > path {
   stroke: #A1A1A1 !important;
 }
 
-.bpmn-dark-theme .djs-label text,
-.bpmn-dark-theme text {
-  fill: #EDEDED !important;
-  font-family: "JetBrains Mono", "Geist Mono", monospace !important;
+/* Live BPMN Visual Flow Simulation Styles */
+.bpmn-dark-theme .djs-shape.highlight-running .djs-visual > rect,
+.bpmn-dark-theme .djs-shape.highlight-running .djs-visual > circle,
+.bpmn-dark-theme .djs-shape.highlight-running .djs-visual > polygon {
+  stroke: #3B82F6 !important;
+  stroke-width: 4px !important;
+  fill: rgba(37, 99, 235, 0.45) !important;
+  filter: drop-shadow(0 0 14px #3B82F6) !important;
 }
 
-.bpmn-dark-theme .djs-outline {
+.bpmn-dark-theme .djs-shape.highlight-success .djs-visual > rect,
+.bpmn-dark-theme .djs-shape.highlight-success .djs-visual > circle,
+.bpmn-dark-theme .djs-shape.highlight-success .djs-visual > polygon {
+  stroke: #10B981 !important;
+  stroke-width: 3.5px !important;
+  fill: rgba(16, 185, 129, 0.3) !important;
+  filter: drop-shadow(0 0 8px #10B981) !important;
+}
+
+.bpmn-dark-theme .djs-shape.highlight-error .djs-visual > rect,
+.bpmn-dark-theme .djs-shape.highlight-error .djs-visual > circle,
+.bpmn-dark-theme .djs-shape.highlight-error .djs-visual > polygon {
+  stroke: #EF4444 !important;
+  stroke-width: 3.5px !important;
+  fill: rgba(239, 68, 68, 0.3) !important;
+  filter: drop-shadow(0 0 8px #EF4444) !important;
+}
+
+.bpmn-dark-theme .djs-connection.highlight-running-edge .djs-visual > path {
   stroke: #3B82F6 !important;
+  stroke-width: 4.5px !important;
+  stroke-dasharray: 10 5 !important;
+  animation: bpmnDashFlow 0.5s linear infinite !important;
+  filter: drop-shadow(0 0 10px #3B82F6) !important;
+}
+
+.bpmn-dark-theme .djs-connection.highlight-success-edge .djs-visual > path {
+  stroke: #10B981 !important;
+  stroke-width: 3.5px !important;
+  stroke-dasharray: none !important;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.7)) !important;
+}
+
+.bpmn-dark-theme .djs-connection.highlight-error-edge .djs-visual > path {
+  stroke: #EF4444 !important;
+  stroke-width: 3.5px !important;
+  stroke-dasharray: none !important;
+  filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.7)) !important;
+}
+
+@keyframes bpmnDashFlow {
+  from {
+    stroke-dashoffset: 30;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Hide bpmn.io watermark */
+.bjs-powered-by,
+.bjs-powered-by * {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Hide Next.js floating dev indicator */
+[data-nextjs-dev-indicator],
+[data-nextjs-toast] {
+  display: none !important;
 }
 
 /* Motion Reduced Dial (R-39) */

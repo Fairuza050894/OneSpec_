@@ -14,6 +14,9 @@ import {
   ShieldAlert,
   Sliders,
   CheckCircle2,
+  Play,
+  RotateCw,
+  AlertTriangle,
 } from 'lucide-react';
 import type { DiscoveredApiEndpoint } from '@/types/sdlc';
 
@@ -33,14 +36,18 @@ const ApiReferenceReact = dynamic(
 interface ApiContractExplorerProps {
   endpoints: DiscoveredApiEndpoint[];
   openApiSpec: Record<string, unknown>;
+  targetUrl?: string;
   onEndpointSelect?: (endpoint: DiscoveredApiEndpoint) => void;
+  onAppendLog?: (msg: string) => void;
   selectedEndpointId?: string;
 }
 
 export function ApiContractExplorer({
   endpoints,
   openApiSpec,
+  targetUrl = 'http://127.0.0.1:3000',
   onEndpointSelect,
+  onAppendLog,
   selectedEndpointId,
 }: ApiContractExplorerProps) {
   const [viewMode, setViewMode] = useState<'SPLIT_INSPECTOR' | 'SCALAR_VIEW' | 'RAW_SPEC'>('SPLIT_INSPECTOR');
@@ -50,6 +57,19 @@ export function ApiContractExplorer({
   );
   const [copiedSpec, setCopiedSpec] = useState(false);
 
+  const [sandboxQuery, setSandboxQuery] = useState('');
+  const [sandboxBody, setSandboxBody] = useState('{\n  "sample": true\n}');
+  const [useSavedAuth, setUseSavedAuth] = useState(true);
+  const [isSendingReq, setIsSendingReq] = useState(false);
+  const [sandboxResponse, setSandboxResponse] = useState<{
+    status: number;
+    statusText: string;
+    latencyMs: number;
+    authApplied: boolean;
+    requestUrl: string;
+    responseBody: string;
+    schemaDrift?: { hasDrift: boolean; missingKeys: string[] };
+  } | null>(null);
   // Sync selectedEndpointId
   useEffect(() => {
     if (selectedEndpointId) {
@@ -59,6 +79,52 @@ export function ApiContractExplorer({
 
   const activeEndpoint = endpoints.find((ep) => ep.id === activeEndpointId) || endpoints[0];
 
+  useEffect(() => {
+    setSandboxResponse(null);
+    setSandboxQuery('');
+    if (activeEndpoint?.requestBodySchema) {
+      setSandboxBody(JSON.stringify(activeEndpoint.requestBodySchema, null, 2));
+    } else {
+      setSandboxBody('{\n  "query": "test"\n}');
+    }
+  }, [activeEndpoint?.id]);
+
+  const handleSendLiveRequest = async () => {
+    if (!activeEndpoint || isSendingReq) return;
+    setIsSendingReq(true);
+    try {
+      const resp200 = activeEndpoint.responseSchemas?.['200'] as { schema?: { properties?: Record<string, unknown> } } | undefined;
+      const expectedKeys = resp200?.schema?.properties ? Object.keys(resp200.schema.properties) : [];
+      const res = await fetch('/api/discovery/proxy-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUrl,
+          method: activeEndpoint.method,
+          endpointPath: activeEndpoint.path,
+          queryString: sandboxQuery,
+          requestBody: ['POST', 'PUT', 'PATCH'].includes(activeEndpoint.method.toUpperCase()) ? sandboxBody : undefined,
+          useSavedAuth,
+          expectedResponseKeys: expectedKeys,
+        }),
+      });
+      const data = await res.json();
+      setSandboxResponse(data);
+      onAppendLog?.(`[API SANDBOX] ${activeEndpoint.method} ${data.requestUrl || activeEndpoint.path} -> HTTP ${data.status} (${data.latencyMs}ms)`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSandboxResponse({
+        status: 502,
+        statusText: 'Proxy Error',
+        latencyMs: 0,
+        authApplied: false,
+        requestUrl: activeEndpoint.path,
+        responseBody: msg,
+      });
+    } finally {
+      setIsSendingReq(false);
+    }
+  };
   const filteredEndpoints = endpoints.filter(
     (ep) =>
       ep.path.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -223,7 +289,7 @@ export function ApiContractExplorer({
                           <code>{ep.controllerPath}:{ep.lineNumber}</code>
                         </span>
                         <div className="flex items-center gap-1">
-                          {ep.linkedTestCaseIds?.slice(0, 2).map((tc) => (
+                          {ep.linkedTestCaseIds?.slice(0, 50).map((tc) => (
                             <span
                               key={tc}
                               className="badge-tag px-1 py-0.2 bg-[#2563EB]/15 text-[#3B82F6] border border-[#2563EB]/30 text-[9px] font-bold"
@@ -262,6 +328,11 @@ export function ApiContractExplorer({
                         <span className="text-[13px] font-bold text-[#EDEDED]">
                           {activeEndpoint.path}
                         </span>
+                        {activeEndpoint.featureModule && (
+                          <span className="badge-tag px-2 py-0.5 bg-[#2563EB]/15 text-[#60A5FA] border border-[#2563EB]/30 text-[10px] font-bold">
+                            {activeEndpoint.featureModule}
+                          </span>
+                        )}
                       </div>
                       <span className="badge-tag px-2 py-0.5 bg-[#059669]/15 text-[#059669] border border-[#059669]/30 text-[10px] font-bold">
                         OPENAPI 3.1
@@ -297,6 +368,110 @@ export function ApiContractExplorer({
                       </div>
                     </div>
                   </div>
+
+                  {/* Live API Sandbox / Try-It-Out Request Executor */}
+                  <div className="border border-[#3B82F6]/50 rounded-[2px] bg-[#0B0C0E] p-3 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-[#22262E]">
+                      <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-[#60A5FA] uppercase">
+                        <Play className="h-3.5 w-3.5" />
+                        <span>Live API Sandbox (Try It Out)</span>
+                      </div>
+                      <label className="flex items-center gap-1.5 text-[10px] text-[#A1A1A1] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useSavedAuth}
+                          onChange={(e) => setUseSavedAuth(e.target.checked)}
+                          className="accent-[#2563EB] cursor-pointer"
+                        />
+                        <span>Attach Saved Session (.onespec-auth-state.json)</span>
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className={`px-2 py-1 border rounded-[2px] text-[10.5px] font-bold ${getMethodBadgeClass(activeEndpoint.method)}`}>
+                        {activeEndpoint.method}
+                      </span>
+                      <span className="px-2 py-1 bg-[#111317] border border-[#22262E] rounded-[2px] text-[#EDEDED] truncate max-w-[260px]">
+                        {activeEndpoint.path}
+                      </span>
+                      <input
+                        type="text"
+                        value={sandboxQuery}
+                        onChange={(e) => setSandboxQuery(e.target.value)}
+                        placeholder="?page=1&limit=10"
+                        className="flex-1 min-w-[120px] h-7 px-2 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[2px] outline-none text-[10.5px] select-text"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendLiveRequest}
+                        disabled={isSendingReq}
+                        className="h-7 px-3 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white font-bold rounded-[2px] cursor-pointer flex items-center gap-1.5 shrink-0"
+                      >
+                        {isSendingReq ? <RotateCw className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                        <span>{isSendingReq ? 'Sending...' : 'Send Live Request'}</span>
+                      </button>
+                    </div>
+
+                    {['POST', 'PUT', 'PATCH'].includes(activeEndpoint.method.toUpperCase()) && (
+                      <textarea
+                        value={sandboxBody}
+                        onChange={(e) => setSandboxBody(e.target.value)}
+                        rows={4}
+                        className="w-full p-2 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[2px] outline-none font-mono text-[10.5px] select-text"
+                      />
+                    )}
+
+                    {sandboxResponse && (
+                      <div className="space-y-1.5 pt-1 border-t border-[#22262E]">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-1.5 py-0.5 rounded-[2px] font-bold border tabular-nums ${
+                                sandboxResponse.status >= 200 && sandboxResponse.status < 300
+                                  ? 'bg-[#059669]/20 text-[#10B981] border-[#059669]/50'
+                                  : 'bg-[#DC2626]/20 text-[#EF4444] border-[#DC2626]/50'
+                              }`}
+                            >
+                              HTTP {sandboxResponse.status} {sandboxResponse.statusText}
+                            </span>
+                            <span className="text-[#A1A1A1] tabular-nums">{sandboxResponse.latencyMs}ms</span>
+                            {sandboxResponse.authApplied && (
+                              <span className="text-[#8B5CF6] font-bold">Session Cookie Attached</span>
+                            )}
+                          </div>
+                          {sandboxResponse.schemaDrift?.hasDrift ? (
+                            <span className="text-[#F59E0B] flex items-center gap-1 font-bold">
+                              <AlertTriangle className="h-3 w-3" />
+                              <span>Schema Drift: missing [{sandboxResponse.schemaDrift.missingKeys.join(', ')}]</span>
+                            </span>
+                          ) : (
+                            <span className="text-[#10B981] flex items-center gap-1 font-bold">
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>Contract Matched</span>
+                            </span>
+                          )}
+                        </div>
+                        <pre className="p-2.5 bg-[#111317] border border-[#22262E] rounded-[2px] text-[10.5px] text-[#D4D4D8] max-h-44 overflow-auto whitespace-pre-wrap">
+                          {sandboxResponse.responseBody}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Query Parameters Schema */}
+                  {activeEndpoint.queryParameters && Object.keys(activeEndpoint.queryParameters).length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[10px] uppercase font-bold text-[#A1A1A1]">
+                        <span>Query Parameters Contract (URL Search Params)</span>
+                        <span className="text-[#10B981]">OpenAPI 3.1 Parameters</span>
+                      </div>
+                      <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] overflow-x-auto text-[11px]">
+                        <pre className="text-[#EDEDED] leading-relaxed">
+                          {JSON.stringify(activeEndpoint.queryParameters, null, 2)}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Request Payload Schema */}
                   {activeEndpoint.requestBodySchema && (

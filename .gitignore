@@ -24,6 +24,20 @@ pnpm-debug.log*
 # TypeScript build info
 *.tsbuildinfo
 
+# Local OneSpec Vault & Cache
+.onespec-vault/
+.onespec-workspace-cache.json
+
 # OS Files
 .DS_Store
 Thumbs.db
+dist/
+build/
+.env
+.env.*
+.onespec-auth-state.json
+.onespec-backup-*
+.onespec-ui-backup-*
+.onespec-master-backup-*
+*.zip
+*.log

@@ -1,6 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
 import { prisma } from '../../lib/prisma';
 import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
+
+const CACHE_FILE_PATH = path.resolve(process.cwd(), '.onespec-workspace-cache.json');
 
 const createWorkspaceSchema = z.object({
   name: z.string().min(2, 'Workspace name must be at least 2 characters'),
@@ -15,6 +19,29 @@ const createWorkspaceSchema = z.object({
 });
 
 export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
+  // Workspace disk cache endpoints
+  fastify.get('/cache', async (_request, reply) => {
+    try {
+      if (fs.existsSync(CACHE_FILE_PATH)) {
+        const raw = fs.readFileSync(CACHE_FILE_PATH, 'utf8');
+        const data = JSON.parse(raw);
+        return reply.send({ success: true, data });
+      }
+      return reply.status(404).send({ success: false, message: 'No cached workspace on disk' });
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
+  fastify.post('/cache', async (request, reply) => {
+    try {
+      fs.writeFileSync(CACHE_FILE_PATH, JSON.stringify(request.body, null, 2), 'utf8');
+      return reply.send({ success: true, message: 'Workspace cached to disk successfully' });
+    } catch (err: any) {
+      return reply.status(500).send({ success: false, error: err.message });
+    }
+  });
+
   // List all workspaces with ISO artifact counts
   fastify.get('/', async (_request, reply) => {
     const workspaces = await prisma.projectWorkspace.findMany({
@@ -239,18 +266,18 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Seed sample ISO 29148 / BPMN 2.0 / ISO 29119 benchmark workspace
   fastify.post('/seed-sample', async (_request, reply) => {
-    const slug = 'voucher-checkout-engine';
+    const slug = 'architecture-engine';
     let workspace = await prisma.projectWorkspace.findUnique({ where: { slug } });
 
     if (!workspace) {
       workspace = await prisma.projectWorkspace.create({
         data: {
-          name: 'Voucher Checkout Engine',
+          name: 'Architecture & Invariants Engine',
           slug,
-          description: 'E-Commerce promotional discount validation with strict single-redemption and quota invariants.',
+          description: 'Core application transaction validation with strict parameter invariants and concurrency locks.',
           projectMode: 'GREENFIELD',
           existingDomain: null,
-          repositoryUrl: 'https://github.com/example/voucher-service',
+          repositoryUrl: 'https://github.com/example/api-service',
           repositoryBranch: 'main',
         },
       });
@@ -262,19 +289,19 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
       brd = await prisma.brdArtifact.create({
         data: {
           projectId: workspace.id,
-          title: 'Stakeholder Requirements Specification — Voucher & Discount Engine',
+          title: 'Stakeholder Requirements Specification — Architecture Engine',
           version: '1.0.0',
           status: 'APPROVED',
           executiveSummary:
-            'Normative requirements governing promotional voucher application during shopping cart checkout, adhering to fraud mitigation and strict budget ceilings.',
+            'Normative requirements governing transaction validation, fraud mitigation, and strict service SLA ceilings.',
           rawMeetingNotes:
-            'Scrum Master notes: Marketing team requested single-claim vouchers. Voucher cannot be applied if order total is under IDR 50.000. Maximum discount is 30% of total.',
+            'Architecture Workshop: System SHALL enforce strict data integrity across all exposed HTTP routes and database entities. Target KPI: P99 latency < 150ms.',
           kpis: JSON.stringify([
-            { id: 'KPI-01', metric: 'Voucher Validation Latency', target: '< 150ms', baseline: '450ms', unit: 'ms' },
-            { id: 'KPI-02', metric: 'Double Redemption Fraud Rate', target: '0.00%', baseline: '0.12%', unit: '%' },
+            { id: 'KPI-01', metric: 'Transaction Validation Latency', target: '< 150ms', baseline: '350ms', unit: 'ms' },
+            { id: 'KPI-02', metric: 'Duplicate Submission Fraud Rate', target: '0.00%', baseline: '0.05%', unit: '%' },
           ]),
-          scopeIn: JSON.stringify(['Percentage discounts', 'Fixed amount vouchers', 'Customer usage limits']),
-          scopeOut: JSON.stringify(['Cross-border multi-currency FX conversion', 'Gift cards']),
+          scopeIn: JSON.stringify(['Transaction validation', 'Schema verification', 'Concurrency locks']),
+          scopeOut: JSON.stringify(['Cross-border multi-currency FX conversion']),
         },
       });
 
@@ -283,9 +310,9 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
         data: {
           brdArtifactId: brd.id,
           ruleId: 'BR-01',
-          title: 'Minimum Order Value Threshold',
-          statement: 'The system SHALL reject voucher redemptions when total checkout value is below IDR 50.000.',
-          rationale: 'Prevent negative transaction margin from shipping fee subsidies.',
+          title: 'Parameter Validation Invariant',
+          statement: 'The system SHALL validate all input parameters against format and length constraints.',
+          rationale: 'Prevent invalid or malformed data propagation.',
           priority: 'HIGH',
           complianceReference: 'ISO/IEC/IEEE 29148:2018 Section 5.2.4',
         },
@@ -295,9 +322,9 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
         data: {
           brdArtifactId: brd.id,
           ruleId: 'BR-02',
-          title: 'Single-Redemption Per Customer Limitation',
-          statement: 'The system SHALL enforce exactly one redemption per customer account for campaign codes.',
-          rationale: 'Prevent campaign budget exhaustion by sybil accounts.',
+          title: 'Single-Execution Concurrency Limitation',
+          statement: 'The system SHALL enforce ACID row locking and reject concurrent duplicate submissions.',
+          rationale: 'Prevent race conditions and double claims.',
           priority: 'HIGH',
           complianceReference: 'ISO/IEC/IEEE 29148:2018 Section 5.2.6',
         },
@@ -308,7 +335,7 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
         data: {
           projectId: workspace.id,
           brdArtifactId: brd.id,
-          title: 'System Requirements Specification — Voucher Redemption Module',
+          title: 'System Requirements Specification — Core Processing Module',
           version: '1.0.0',
           status: 'VERIFIED',
           overview: 'Detailed user stories, field validations, and HTTP contracts fulfilling BR-01 and BR-02.',
@@ -321,38 +348,38 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
           prdArtifactId: prd.id,
           businessRuleId: br01.id,
           storyId: 'REQ-US-01',
-          title: 'Apply Voucher Code to Checkout Cart',
-          role: 'Registered Shopper',
-          capability: 'input an alphanumeric voucher code at checkout',
-          benefit: 'receive instantaneous subtotal deduction prior to payment gateway routing',
-          acceptanceCriteriaGherkin: `Feature: Voucher Code Redemption
-  Scenario: Valid voucher application above minimum threshold
-    Given the shopping cart total is 100000 IDR
-    When the user submits voucher code "DISC20"
-    Then the system applies 20% discount of 20000 IDR
+          title: 'Process Transaction Request',
+          role: 'Authenticated Client',
+          capability: 'submit formatted transaction parameters to the service gateway',
+          benefit: 'receive instantaneous processing response prior to downstream settlement',
+          acceptanceCriteriaGherkin: `Feature: Transaction Processing
+  Scenario: Valid parameter submission
+    Given the client is authenticated
+    When the client submits valid transaction parameters
+    Then the system processes the request successfully
     And the HTTP response status is 200 OK`,
           fieldValidations: JSON.stringify([
             {
-              fieldName: 'voucherCode',
+              fieldName: 'username',
               dataType: 'string',
               required: true,
-              constraints: { min: 3, max: 20, pattern: '^[A-Z0-9_-]+$' },
-              errorCode: 'VOUCHER_CODE_INVALID_FORMAT',
+              constraints: { min: 3, max: 30, pattern: '^[A-Za-z0-9_.-]+$' },
+              errorCode: 'USERNAME_INVALID_FORMAT',
               errorHttpStatus: 400,
             },
             {
-              fieldName: 'cartTotal',
+              fieldName: 'amount',
               dataType: 'number',
               required: true,
-              constraints: { min: 50000 },
-              errorCode: 'CART_BELOW_MINIMUM_THRESHOLD',
+              constraints: { min: 1 },
+              errorCode: 'AMOUNT_BELOW_MINIMUM',
               errorHttpStatus: 422,
             },
           ]),
           httpContracts: JSON.stringify([
             {
               method: 'POST',
-              path: '/api/v1/vouchers/apply',
+              path: '/api/v1/records/process',
               response2xx: { status: 200, schema: { discountAmount: 'number', finalTotal: 'number' } },
               response4xx: [
                 { status: 400, errorCode: 'INVALID_REQUEST', description: 'Malformed code syntax' },
@@ -369,15 +396,15 @@ export const workspaceRoutes: FastifyPluginAsync = async (fastify) => {
           prdArtifactId: prd.id,
           businessRuleId: br02.id,
           storyId: 'REQ-US-02',
-          title: 'Reject Re-use of Single-Redemption Voucher',
-          role: 'System Security & Fraud Engine',
-          capability: 'query historical completed orders for customer ID and voucher ID',
-          benefit: 'guarantee strict idempotency and zero duplicate benefit leakage',
-          acceptanceCriteriaGherkin: `Feature: Single-Claim Validation
-  Scenario: Duplicate voucher application rejection
-    Given customer "CUST-9921" has previously redeemed "DISC20"
-    When customer "CUST-9921" attempts to apply "DISC20" again
-    Then the system rejects with error "VOUCHER_ALREADY_REDEEMED"
+          title: 'Reject Concurrent Duplicate Requests',
+          role: 'System Security Engine',
+          capability: 'query historical in-flight locks for idempotency key',
+          benefit: 'guarantee strict idempotency and zero duplicate execution leakage',
+          acceptanceCriteriaGherkin: `Feature: Idempotency Validation
+  Scenario: Duplicate request rejection
+    Given a request with key "KEY-9921" is currently in flight
+    When another request attempts to use "KEY-9921" concurrently
+    Then the system rejects with error "CONCURRENT_CLAIM"
     And the HTTP response status is 409 Conflict`,
           fieldValidations: JSON.stringify([
             {

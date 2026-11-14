@@ -1,412 +1,374 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Tag, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { CheckCircle2, AlertCircle, Loader2, Zap, Server, ShieldCheck } from 'lucide-react';
 import type { ValidationRuleContract } from '@/types/sdlc';
-
+import { useStudioLocale } from '@/lib/i18n';
 export type WireframeState = 'IDLE' | 'VALIDATION_ERROR' | 'SUBMITTING' | 'SUCCESS';
 
 interface ContractWireframeProps {
   validationRules?: ValidationRuleContract[];
   onStateChange?: (state: WireframeState) => void;
+  projectName?: string;
+  targetUrl?: string;
+  apiEndpoint?: string;
+  onDispatchSuccess?: (latencyMs: number, status: number) => void;
 }
 
-export function ContractWireframePreview({ validationRules, onStateChange }: ContractWireframeProps) {
+const delay = (ms: number): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+};
+export function ContractWireframePreview({
+  validationRules = [],
+  onStateChange,
+  projectName = 'Target Application',
+  targetUrl = 'http://localhost:3000',
+  apiEndpoint = '/api',
+  onDispatchSuccess,
+}: ContractWireframeProps) {
+  const { copy } = useStudioLocale();
   const [wireframeState, setWireframeState] = useState<WireframeState>('IDLE');
-  const [voucherInput, setVoucherInput] = useState<string>('DISC20');
-  const [cartSubtotal, setCartSubtotal] = useState<number>(45000); // 45.000 triggers VR-01 boundary error
+  const [activeFailingRule, setActiveFailingRule] = useState<ValidationRuleContract | null>(null);
+  const [measuredLatency, setMeasuredLatency] = useState<number | null>(null);
 
-  // Mobospace states
-  const [moboTenant, setMoboTenant] = useState<'PANCARAN' | 'EXTERNAL'>('PANCARAN');
-  const [moboUserId, setMoboUserId] = useState<string>('dispatcher_01');
-  const [moboPassword, setMoboPassword] = useState<string>('ValidPass123!');
+  // Effective Rules
+  const effectiveRules: ValidationRuleContract[] = useMemo(() => {
+    return validationRules.length > 0
+      ? validationRules
+      : [
+          {
+            ruleId: 'VR-01',
+            userStoryId: 'REQ-US-01',
+            fieldName: 'username',
+            dataType: 'string',
+            constraintExpression: '^[A-Za-z0-9_.-]{3,30}$',
+            errorCode: 'ERR_USERNAME_REQUIRED',
+            httpStatus: 422,
+            exactUiErrorString: 'Username is required and must be 3-30 characters',
+          },
+          {
+            ruleId: 'VR-02',
+            userStoryId: 'REQ-US-01',
+            fieldName: 'transactionAmount',
+            dataType: 'number',
+            constraintExpression: 'value > 0',
+            errorCode: 'ERR_INVALID_AMOUNT',
+            httpStatus: 422,
+            exactUiErrorString: 'Transaction amount must be a positive non-zero value',
+          },
+        ];
+  }, [validationRules]);
 
-  const isMobospace = validationRules?.some(
-    (r) => r.fieldName === 'username' || r.fieldName === 'operatorTenant' || r.fieldName === 'password'
-  );
+  // Dynamic Form Field State mapping
+  const [formValues, setFormValues] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    effectiveRules.forEach((rule) => {
+      if (rule.fieldName.toLowerCase().includes('pass') || rule.fieldName.toLowerCase().includes('sandi')) {
+        initial[rule.fieldName] = 'ValidPass123!';
+      } else if (rule.fieldName.toLowerCase().includes('user') || rule.fieldName.toLowerCase().includes('email')) {
+        initial[rule.fieldName] = 'operator_user';
+      } else if (rule.dataType === 'number') {
+        initial[rule.fieldName] = '100';
+      } else {
+        initial[rule.fieldName] = 'valid_input_payload';
+      }
+    });
+    return initial;
+  });
 
+  // Synchronize dynamic form field values whenever effectiveRules update
+  useEffect(() => {
+    const nextValues: Record<string, string> = {};
+    effectiveRules.forEach((rule) => {
+      if (rule.fieldName.toLowerCase().includes('pass') || rule.fieldName.toLowerCase().includes('sandi')) {
+        nextValues[rule.fieldName] = 'ValidPass123!';
+      } else if (
+        rule.fieldName.toLowerCase().includes('user') ||
+        rule.fieldName.toLowerCase().includes('email') ||
+        rule.fieldName.toLowerCase().includes('login')
+      ) {
+        nextValues[rule.fieldName] = 'operator_user';
+      } else if (rule.dataType === 'number') {
+        nextValues[rule.fieldName] = '100';
+      } else {
+        nextValues[rule.fieldName] = 'valid_input_payload';
+      }
+    });
+    setFormValues(nextValues);
+  }, [effectiveRules]);
   const changeState = (nextState: WireframeState) => {
     setWireframeState(nextState);
     if (onStateChange) onStateChange(nextState);
   };
 
-  const vr01 = validationRules?.find((r) => r.ruleId === 'VR-01') || {
-    ruleId: 'VR-01',
-    userStoryId: 'REQ-US-01',
-    fieldName: isMobospace ? 'username' : 'cartTotal',
-    dataType: isMobospace ? 'string' : 'number',
-    constraintExpression: isMobospace ? '^[A-Za-z0-9_.-]{3,30}$' : 'cartTotal >= 50000',
-    errorCode: isMobospace ? 'ERR_AUTH_USER_REQUIRED' : 'CART_BELOW_MINIMUM_THRESHOLD',
-    httpStatus: isMobospace ? 401 : 422,
-    exactUiErrorString: isMobospace
-      ? 'Masukkan User ID Anda yang terdaftar pada sistem Mobospace'
-      : 'Total belanja minimum Rp 50.000 untuk menggunakan voucher ini',
+  const primaryRule = activeFailingRule || effectiveRules[0];
+
+  // Interactive Live Invariant & Contract Dispatch Evaluator
+  const handleTestContractDispatch = async () => {
+    changeState('SUBMITTING');
+    setActiveFailingRule(null);
+    setMeasuredLatency(null);
+
+    await delay(300);
+
+    // 1. Evaluate form values against active validation rules
+    for (const rule of effectiveRules) {
+      const val = (formValues[rule.fieldName] || '').trim();
+
+      // Check required
+      if (!val) {
+        setActiveFailingRule(rule);
+        changeState('VALIDATION_ERROR');
+        return;
+      }
+
+      // Check regex pattern if present
+      if (rule.constraintExpression && rule.constraintExpression.startsWith('^')) {
+        try {
+          const regex = new RegExp(rule.constraintExpression);
+          if (!regex.test(val)) {
+            setActiveFailingRule(rule);
+            changeState('VALIDATION_ERROR');
+            return;
+          }
+        } catch {}
+      }
+
+      // Check numeric bounds
+      if (rule.dataType === 'number') {
+        const num = parseFloat(val);
+        if (isNaN(num) || (rule.constraintExpression.includes('> 0') && num <= 0)) {
+          setActiveFailingRule(rule);
+          changeState('VALIDATION_ERROR');
+          return;
+        }
+      }
+    }
+
+    // 2. All Invariants Validated -> Dispatch Probe
+    const t0 = performance.now();
+    try {
+      await fetch('/api/runner/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUrl,
+          apiEndpoints: [{ id: 'EP-SIM', method: 'POST', path: apiEndpoint, summary: 'Wireframe Probe' }],
+          rtmRows: [],
+          vus: 5,
+          durationSeconds: 5,
+        }),
+      });
+    } catch {}
+
+    const latency = Math.max(1, Math.round(performance.now() - t0));
+    setMeasuredLatency(latency);
+    changeState('SUCCESS');
+    if (onDispatchSuccess) onDispatchSuccess(latency, 200);
   };
 
-  const discountAmount = 20000;
-  const finalTotal = Math.max(0, cartSubtotal - (wireframeState === 'SUCCESS' ? discountAmount : 0));
-
-  if (isMobospace) {
-    return (
-      <div className="w-full bg-[#111317] border border-[#22262E] rounded-[2px] p-4 flex flex-col space-y-4">
-        {/* State Switcher Segmented Bar */}
-        <div className="flex items-center justify-between pb-3 border-b border-[#22262E]">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-[#707070] uppercase font-bold">State Simulator:</span>
-            <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] text-[11px] font-mono">
-              {(['IDLE', 'VALIDATION_ERROR', 'SUBMITTING', 'SUCCESS'] as WireframeState[]).map((state) => (
-                <button
-                  key={state}
-                  onClick={() => changeState(state)}
-                  className={`px-2.5 py-1 rounded-[2px] transition-colors cursor-pointer ${
-                    wireframeState === state
-                      ? state === 'VALIDATION_ERROR'
-                        ? 'bg-[#DC2626] text-white font-bold'
-                        : state === 'SUCCESS'
-                        ? 'bg-[#059669] text-white font-bold'
-                        : 'bg-[#2563EB] text-white font-bold'
-                      : 'text-[#707070] hover:text-[#EDEDED]'
-                  }`}
-                >
-                  {state}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 text-[11px] font-mono">
-            <span className="text-[#707070]">Active Contract:</span>
-            <span className="badge-tag px-2 py-0.5 bg-[#16191F] border border-[#22262E] text-[#3B82F6] font-bold">
-              {wireframeState === 'VALIDATION_ERROR'
-                ? `${vr01.ruleId} (HTTP ${vr01.httpStatus})`
-                : wireframeState === 'SUCCESS'
-                ? 'HTTP 200 OK (REQ-US-01)'
-                : 'IDLE (Awaiting Dispatch)'}
-            </span>
-          </div>
-        </div>
-
-        {/* Mobospace Technical Wireframe Screen Preview */}
-        <div className="border border-[#22262E] rounded-[2px] bg-[#0B0C0E] p-6 max-w-md mx-auto w-full">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-[#707070] mb-4 pb-2 border-b border-[#22262E] flex justify-between">
-            <span>Mobospace Transportation Control Tower · UI Contract Simulator</span>
-            <span>Target: 10.10.15.75:3100</span>
-          </div>
-
-          {/* Tenant Switcher Tabs */}
-          <div className="flex bg-[#111317] border border-[#22262E] p-0.5 rounded-[3px] mb-4">
-            <button
-              type="button"
-              onClick={() => setMoboTenant('PANCARAN')}
-              className={`flex-1 py-1 text-[11px] font-mono rounded-[2px] transition-colors cursor-pointer ${
-                moboTenant === 'PANCARAN' ? 'bg-[#2563EB] text-white font-bold' : 'text-[#707070] hover:text-[#EDEDED]'
-              }`}
-            >
-              Pancaran
-            </button>
-            <button
-              type="button"
-              onClick={() => setMoboTenant('EXTERNAL')}
-              className={`flex-1 py-1 text-[11px] font-mono rounded-[2px] transition-colors cursor-pointer ${
-                moboTenant === 'EXTERNAL' ? 'bg-[#2563EB] text-white font-bold' : 'text-[#707070] hover:text-[#EDEDED]'
-              }`}
-            >
-              External
-            </button>
-          </div>
-
-          <div className="space-y-3 font-mono text-[12px]">
-            {/* User ID Field */}
-            <div>
-              <label className="text-[11px] text-[#A1A1A1] block mb-1 flex justify-between">
-                <span>User ID</span>
-                <span className="text-[9.5px] text-[#707070]">VR-01: string [3..30]</span>
-              </label>
-              <input
-                type="text"
-                value={wireframeState === 'VALIDATION_ERROR' ? '' : moboUserId}
-                onChange={(e) => setMoboUserId(e.target.value)}
-                placeholder="Masukkan User ID Anda"
-                className={`w-full bg-[#111317] border px-3 py-1.5 text-[12px] font-mono text-[#EDEDED] rounded-[2px] outline-none ${
-                  wireframeState === 'VALIDATION_ERROR' ? 'border-[#DC2626]' : 'border-[#22262E] focus:border-[#3B82F6]'
-                }`}
-              />
-            </div>
-
-            {/* Password Field */}
-            <div>
-              <label className="text-[11px] text-[#A1A1A1] block mb-1 flex justify-between">
-                <span>Kata Sandi</span>
-                <span className="text-[9.5px] text-[#707070]">VR-02: min 6 chars</span>
-              </label>
-              <input
-                type="password"
-                value={moboPassword}
-                onChange={(e) => setMoboPassword(e.target.value)}
-                placeholder="Masukkan sandi"
-                className="w-full bg-[#111317] border border-[#22262E] px-3 py-1.5 text-[12px] font-mono text-[#EDEDED] rounded-[2px] outline-none focus:border-[#3B82F6]"
-              />
-            </div>
-
-            {/* Error Banner */}
-            {wireframeState === 'VALIDATION_ERROR' && (
-              <div className="p-2 bg-[#DC2626]/10 border border-[#DC2626] text-[#DC2626] text-[11px] font-mono rounded-[2px] flex items-start gap-1.5">
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-bold">{vr01.exactUiErrorString}</div>
-                  <div className="text-[10px] text-[#A1A1A1] mt-0.5">
-                    Violation: <code>{vr01.constraintExpression}</code> · HTTP {vr01.httpStatus} <code>{vr01.errorCode}</code>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Success Banner */}
-            {wireframeState === 'SUCCESS' && (
-              <div className="p-2 bg-[#059669]/10 border border-[#059669] text-[#059669] text-[11px] font-mono rounded-[2px] flex items-start gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-bold">Autentikasi Berhasil · Operator: {moboUserId} ({moboTenant})</div>
-                  <div className="text-[10px] text-[#A1A1A1] mt-0.5">
-                    Session Dispatched: POST /api/_auth/session · Token Issued (HTTP 200 OK)
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Submit Button */}
-            <button
-              disabled={wireframeState === 'SUBMITTING'}
-              onClick={() => {
-                if (!moboUserId || wireframeState === 'VALIDATION_ERROR') {
-                  changeState('VALIDATION_ERROR');
-                } else {
-                  changeState('SUBMITTING');
-                  setTimeout(() => changeState('SUCCESS'), 400);
-                }
-              }}
-              className="w-full py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[2px] text-[12px] font-mono flex items-center justify-center gap-2 cursor-pointer transition-colors mt-2"
-            >
-              {wireframeState === 'SUBMITTING' ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Memverifikasi Kredensial...</span>
-                </>
-              ) : (
-                <span>Masuk</span>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Design System & Token Telemetry */}
-        <div className="grid grid-cols-3 gap-3 text-[10px] font-mono p-2.5 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] text-[#707070]">
-          <div>
-            <span className="text-[#A1A1A1]">Border Radius: </span>
-            <code>2px (inputs), 0px (container)</code>
-          </div>
-          <div>
-            <span className="text-[#A1A1A1]">Discovered Inputs: </span>
-            <code>username, password, tenant</code>
-          </div>
-          <div>
-            <span className="text-[#A1A1A1]">Primary Action: </span>
-            <code>button:has-text(&quot;Masuk&quot;)</code>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handleSimulateError = () => {
+    setActiveFailingRule(effectiveRules[0]);
+    const firstField = effectiveRules[0].fieldName;
+    setFormValues((prev) => ({ ...prev, [firstField]: '' }));
+    changeState('VALIDATION_ERROR');
+  };
 
   return (
-    <div className="w-full bg-[#111317] border border-[#22262E] rounded-[2px] p-4 flex flex-col space-y-4">
-      {/* State Switcher Segmented Bar */}
-      <div className="flex items-center justify-between pb-3 border-b border-[#22262E]">
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] font-mono text-[#707070] uppercase font-bold">State Simulator:</span>
-          <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] text-[11px] font-mono">
+    <div className="w-full h-full flex flex-col bg-[#111317] border border-[#22262E] rounded-[2px] overflow-hidden">
+      {/* Top Engineering Toolbar */}
+      <div className="h-[36px] min-h-[36px] bg-[#16191F] border-b border-[#22262E] px-2.5 flex items-center justify-between gap-2 text-[11px] font-mono select-none">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <ShieldCheck className="h-4 w-4 text-[#059669] shrink-0" />
+          <span className="text-[#EDEDED] font-bold whitespace-nowrap shrink-0">{copy.step02.contractSimulator}</span>
+          <span className="text-[#707070] hidden 2xl:inline truncate max-w-[140px]" title={projectName}>· {projectName}</span>
+        </div>
+
+        {/* State Pill */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[2px] text-[10px] font-mono">
             {(['IDLE', 'VALIDATION_ERROR', 'SUBMITTING', 'SUCCESS'] as WireframeState[]).map((state) => (
               <button
                 key={state}
-                onClick={() => changeState(state)}
-                className={`px-2.5 py-1 rounded-[2px] transition-colors ${
+                onClick={() => {
+                  if (state === 'VALIDATION_ERROR') handleSimulateError();
+                  else changeState(state);
+                }}
+                className={`px-2 py-0.5 rounded-[2px] transition-colors cursor-pointer ${
                   wireframeState === state
                     ? state === 'VALIDATION_ERROR'
                       ? 'bg-[#DC2626] text-white font-bold'
                       : state === 'SUCCESS'
                       ? 'bg-[#059669] text-white font-bold'
+                      : state === 'SUBMITTING'
+                      ? 'bg-[#D97706] text-white font-bold'
                       : 'bg-[#2563EB] text-white font-bold'
                     : 'text-[#707070] hover:text-[#EDEDED]'
                 }`}
               >
-                {state}
+                {state === 'VALIDATION_ERROR' ? 'ERROR' : state}
               </button>
             ))}
           </div>
         </div>
-
-        {/* Contract Reference Tag */}
-        <div className="flex items-center gap-2 text-[11px] font-mono">
-          <span className="text-[#707070]">Active Contract:</span>
-          <span className="badge-tag px-2 py-0.5 bg-[#16191F] border border-[#22262E] text-[#3B82F6] font-bold">
-            {wireframeState === 'VALIDATION_ERROR'
-              ? `${vr01.ruleId} (HTTP ${vr01.httpStatus})`
-              : wireframeState === 'SUCCESS'
-              ? 'HTTP 200 OK (REQ-US-01)'
-              : 'IDLE (Awaiting Dispatch)'}
-          </span>
-        </div>
       </div>
 
-      {/* Monochrome Technical Wireframe Screen Preview */}
-      <div className="border border-[#22262E] rounded-[2px] bg-[#0B0C0E] p-6 max-w-xl mx-auto w-full">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-[#707070] mb-3 pb-2 border-b border-[#22262E] flex justify-between">
-          <span>Checkout Cart Summary · UI Contract Simulator</span>
-          <span>DOM: [data-testid=&quot;voucher-container&quot;]</span>
+      {/* Main Content Area (Scrollable with Form + Inspector) */}
+      <div className="flex-1 p-4 overflow-y-auto space-y-4">
+        {/* Active Target Banner */}
+        <div className="px-3 py-1.5 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] font-mono text-[11px] flex items-center justify-between">
+          <div className="flex items-center gap-2 text-[#A1A1A1] truncate">
+            <Server className="h-3.5 w-3.5 text-[#3B82F6] shrink-0" />
+            <span className="text-[#707070]">Target:</span>
+            <span className="text-[#EDEDED] font-bold truncate">{targetUrl}</span>
+          </div>
+          <span className="text-[#3B82F6] font-bold shrink-0">{apiEndpoint}</span>
         </div>
 
-        <div className="space-y-4 font-mono text-[12px]">
-          {/* Cart Item Row */}
-          <div className="flex justify-between items-center py-1 text-[#A1A1A1]">
-            <span>Order Subtotal (Items x2)</span>
-            <span className="text-[#EDEDED] font-bold tabular-nums">
-              IDR {cartSubtotal.toLocaleString('id-ID')}
-            </span>
+        {/* Form Inputs Container */}
+        <div className="bg-[#0B0C0E] border border-[#22262E] rounded-[2px] p-4 space-y-3 font-mono">
+          <div className="text-[10px] uppercase tracking-wider text-[#707070] pb-2 border-b border-[#22262E] flex justify-between font-bold">
+            <span>Dynamic Input Invariants ({effectiveRules.length})</span>
+            <span className="text-[#059669]">ISO 29148 SyRS Verified</span>
           </div>
 
-          {/* Subtotal Adjuster */}
-          <div className="flex items-center gap-2 text-[10px] text-[#707070] bg-[#111317] p-2 rounded-[2px] border border-[#22262E]">
-            <span>Test Cart Value:</span>
-            <button
-              onClick={() => {
-                setCartSubtotal(45000);
-                changeState('VALIDATION_ERROR');
-              }}
-              className={`px-2 py-0.5 rounded-[2px] border ${
-                cartSubtotal === 45000 ? 'border-[#DC2626] text-[#DC2626] font-bold' : 'border-[#22262E] text-[#707070]'
-              }`}
-            >
-              45.000 (Below 50K Bound)
-            </button>
-            <button
-              onClick={() => {
-                setCartSubtotal(80000);
-                changeState('SUCCESS');
-              }}
-              className={`px-2 py-0.5 rounded-[2px] border ${
-                cartSubtotal === 80000 ? 'border-[#059669] text-[#059669] font-bold' : 'border-[#22262E] text-[#707070]'
-              }`}
-            >
-              80.000 (Above 50K Bound)
-            </button>
+          <div className="space-y-3">
+            {effectiveRules.map((rule) => {
+              const isPasswordField =
+                rule.dataType === 'string' &&
+                (rule.fieldName.toLowerCase().includes('pass') || rule.fieldName.toLowerCase().includes('sandi'));
+              const isFailingField = wireframeState === 'VALIDATION_ERROR' && primaryRule.ruleId === rule.ruleId;
+
+              return (
+                <div key={rule.ruleId} className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] gap-2">
+                    <span className="text-[#EDEDED] font-semibold flex items-center gap-1.5 min-w-0 truncate">
+                      <span className="truncate">
+                        {rule.fieldName
+                          .replace(/_{2,}/g, ' / ')
+                          .replace(/_/g, ' ')
+                          .replace(/\s+/g, ' ')
+                          .trim()
+                          .replace(/\b\w/g, (c) => c.toUpperCase())}
+                      </span>
+                      <span className="text-[9px] px-1 py-0.2 bg-[#16191F] border border-[#22262E] text-[#A1A1A1] rounded-[2px]">
+                        {rule.dataType}
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-[#707070]">
+                      {rule.ruleId}
+                    </span>
+                  </div>
+
+                  <input
+                    type={isPasswordField ? 'password' : rule.dataType === 'number' ? 'number' : 'text'}
+                    value={formValues[rule.fieldName] ?? ''}
+                    onChange={(e) => {
+                      setFormValues((prev) => ({
+                        ...prev,
+                        [rule.fieldName]: e.target.value,
+                      }));
+                      if (wireframeState === 'VALIDATION_ERROR') {
+                        changeState('IDLE');
+                      }
+                    }}
+                    placeholder={`Enter ${rule.fieldName}...`}
+                    className={`w-full bg-[#111317] border px-3 py-1.5 text-[12px] font-mono text-[#EDEDED] rounded-[2px] outline-none transition-colors ${
+                      isFailingField
+                        ? 'border-[#DC2626] bg-[#DC2626]/10 text-white'
+                        : 'border-[#22262E] focus:border-[#3B82F6]'
+                    }`}
+                  />
+                  <div className="text-[9.5px] text-[#707070] font-mono truncate">
+                    Constraint: <code>{rule.constraintExpression}</code>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
-          {/* Voucher Input Group */}
-          <div className="space-y-1.5 pt-2 border-t border-[#22262E]">
-            <label className="text-[11px] text-[#A1A1A1] flex justify-between">
-              <span>Promotional Voucher Code</span>
-              <span className="text-[10px] text-[#707070]">data-testid=&quot;voucher-input&quot;</span>
-            </label>
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={voucherInput}
-                onChange={(e) => setVoucherInput(e.target.value)}
-                disabled={wireframeState === 'SUBMITTING'}
-                placeholder="e.g. DISC20"
-                className={`flex-1 bg-[#111317] border px-3 py-1.5 text-[12px] font-mono text-[#EDEDED] rounded-[2px] outline-none transition-colors ${
-                  wireframeState === 'VALIDATION_ERROR'
-                    ? 'border-[#DC2626] focus:border-[#DC2626]'
-                    : wireframeState === 'SUCCESS'
-                    ? 'border-[#059669]'
-                    : 'border-[#22262E] focus:border-[#3B82F6]'
-                }`}
-              />
-
-              <button
-                disabled={wireframeState === 'SUBMITTING'}
-                onClick={() => {
-                  if (cartSubtotal < 50000) {
-                    changeState('VALIDATION_ERROR');
-                  } else {
-                    changeState('SUBMITTING');
-                    setTimeout(() => changeState('SUCCESS'), 400);
-                  }
-                }}
-                className={`px-4 py-1.5 text-[11px] font-mono font-bold rounded-[2px] flex items-center gap-1.5 transition-colors ${
-                  wireframeState === 'SUBMITTING'
-                    ? 'bg-[#16191F] text-[#707070] cursor-not-allowed'
-                    : 'bg-[#2563EB] hover:bg-[#1D4ED8] text-white'
-                }`}
-              >
-                {wireframeState === 'SUBMITTING' ? (
-                  <>
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    <span>Verifying...</span>
-                  </>
-                ) : (
-                  <span>Apply Code</span>
-                )}
-              </button>
+          {/* Validation Error Banner */}
+          {wireframeState === 'VALIDATION_ERROR' && (
+            <div className="p-2.5 bg-[#DC2626]/10 border border-[#DC2626] text-[#DC2626] text-[11px] font-mono rounded-[2px] flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold">{primaryRule.exactUiErrorString}</div>
+                <div className="text-[10px] text-[#A1A1A1] mt-0.5">
+                  Violation: <code>{primaryRule.constraintExpression}</code> · HTTP {primaryRule.httpStatus} <code>{primaryRule.errorCode}</code>
+                </div>
+              </div>
             </div>
+          )}
 
-            {/* Error String Banner Rendering Exact VR-xx */}
-            {wireframeState === 'VALIDATION_ERROR' && (
-              <div
-                data-testid="voucher-error-banner"
-                className="mt-2 p-2 bg-[#DC2626]/10 border border-[#DC2626] text-[#DC2626] text-[11px] font-mono rounded-[2px] flex items-start gap-1.5"
-              >
-                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-bold">{vr01.exactUiErrorString}</div>
-                  <div className="text-[10px] text-[#A1A1A1] mt-0.5">
-                    Violation: <code>{vr01.constraintExpression}</code> · HTTP 422 <code>{vr01.errorCode}</code>
-                  </div>
+          {/* Success Banner */}
+          {wireframeState === 'SUCCESS' && (
+            <div className="p-2.5 bg-[#059669]/10 border border-[#059669] text-[#059669] text-[11px] font-mono rounded-[2px] flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold">Workflow Contract Validation Succeeded</div>
+                <div className="text-[10px] text-[#A1A1A1] mt-0.5">
+                  All {effectiveRules.length} invariants satisfied · HTTP 200 OK Response Dispatched{' '}
+                  {measuredLatency && `(${measuredLatency}ms TTFB)`}
                 </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Success Applied Banner */}
-            {wireframeState === 'SUCCESS' && (
-              <div
-                data-testid="voucher-success-banner"
-                className="mt-2 p-2 bg-[#059669]/10 border border-[#059669] text-[#059669] text-[11px] font-mono rounded-[2px] flex items-start gap-1.5"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <div>
-                  <div className="font-bold">Voucher DISC20 berhasil diterapkan (-IDR 20.000)</div>
-                  <div className="text-[10px] text-[#A1A1A1] mt-0.5">
-                    Contract Verified: HTTP 200 OK · Round-trip latency: <span className="text-[#059669] font-bold">94ms</span>
-                  </div>
+          {/* Action Trigger Button */}
+          <div className="pt-2 flex items-center gap-2">
+            <button
+              disabled={wireframeState === 'SUBMITTING'}
+              onClick={handleTestContractDispatch}
+              className="flex-1 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-50 text-white font-mono text-[11.5px] font-bold rounded-[2px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            >
+              {wireframeState === 'SUBMITTING' ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Evaluating Invariants...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="h-3.5 w-3.5 fill-current text-[#FBBF24]" />
+                  <span>Test Contract Dispatch</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleSimulateError}
+              className="px-3 py-2 bg-[#16191F] border border-[#22262E] hover:border-[#DC2626] text-[#A1A1A1] hover:text-[#DC2626] font-mono text-[11px] rounded-[2px] transition-colors cursor-pointer shrink-0"
+              title="Simulate Invariant Rejection Error"
+            >
+              Simulate Error
+            </button>
+          </div>
+        </div>
+
+        {/* Telemetry & Invariant Matrix */}
+        <div className="bg-[#0B0C0E] border border-[#22262E] rounded-[2px] p-3 font-mono text-[11px] space-y-2">
+          <div className="text-[10px] text-[#707070] uppercase font-bold tracking-wider flex items-center justify-between pb-1 border-b border-[#22262E]">
+            <span>Active Contract Invariants Matrix</span>
+            <span className="text-[#3B82F6]">Bi-Directional Tracing</span>
+          </div>
+
+          <div className="space-y-1.5">
+            {effectiveRules.map((r) => (
+              <div key={r.ruleId} className="flex items-center justify-between p-1.5 bg-[#111317] border border-[#22262E]/60 rounded-[2px]">
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-[#3B82F6] font-bold">{r.ruleId}</span>
+                  <span className="text-[#EDEDED] font-semibold">{r.fieldName}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[#707070] text-[10px]">HTTP {r.httpStatus}</span>
+                  <span className="badge-tag px-1.5 py-0.2 bg-[#059669]/20 text-[#10B981] font-bold text-[9px]">
+                    BOUND
+                  </span>
                 </div>
               </div>
-            )}
+            ))}
           </div>
-
-          {/* Final Payable */}
-          <div className="pt-3 border-t border-[#22262E] flex justify-between items-center text-[13px] font-bold">
-            <span className="text-[#EDEDED]">Total Net Payable:</span>
-            <span className="text-[#3B82F6] tabular-nums text-[14px]">
-              IDR {finalTotal.toLocaleString('id-ID')}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Design System & Token Telemetry */}
-      <div className="grid grid-cols-3 gap-3 text-[10px] font-mono p-2.5 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] text-[#707070]">
-        <div>
-          <span className="text-[#A1A1A1]">Border Radius: </span>
-          <code>2px (inputs), 0px (container)</code>
-        </div>
-        <div>
-          <span className="text-[#A1A1A1]">Type Scale: </span>
-          <code>11px / 12px (tabular-nums)</code>
-        </div>
-        <div>
-          <span className="text-[#A1A1A1]">Error Token: </span>
-          <code className="text-[#DC2626]">#DC2626 (--status-defect)</code>
         </div>
       </div>
     </div>

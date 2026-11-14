@@ -14,7 +14,11 @@
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "test:types": "tsc --noEmit",
-    "test:rea": "tsx -e \"import('./src/services/reaBridge').then(m => m.reaBridge.checkAvailability()).then(console.log)\""
+    "test:workbook-sections": "tsx scripts/check-workbook-sections.ts",
+    "test:vault-diff": "tsx scripts/check-vault-snapshot-diff.ts",
+    "test:docx-delta": "tsx scripts/check-docx-delta.ts",
+    "test:product-knowledge": "tsx scripts/check-product-knowledge.ts",
+    "test:screenshot-guard": "tsx scripts/check-screenshot-guard.ts"
   },
   "keywords": [],
   "author": "",
@@ -33,6 +37,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "cross-env": "^10.1.0",
+    "docx": "^9.15.3",
     "elkjs": "^0.12.1",
     "fastify": "^5.12.8",
     "lucide-react": "^1.66.0",
@@ -41,6 +46,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-resizable-panels": "^2.1.9",
+    "sharp": "^0.35.5",
     "tailwind-merge": "^3.7.0",
     "zod": "^4.6.7"
   },

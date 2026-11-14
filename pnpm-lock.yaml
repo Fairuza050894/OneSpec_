@@ -44,6 +44,9 @@ importers:
       cross-env:
         specifier: ^10.1.0
         version: 10.1.0
+      docx:
+        specifier: ^9.15.3
+        version: 9.15.3
       elkjs:
         specifier: ^0.12.1
         version: 0.12.1
@@ -68,6 +71,9 @@ importers:
       react-resizable-panels:
         specifier: ^2.1.9
         version: 2.1.9(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      sharp:
+        specifier: ^0.35.5
+        version: 0.35.5(@types/node@26.6.6)
       tailwind-merge:
         specifier: ^3.7.0
         version: 3.7.0
@@ -1950,6 +1956,10 @@ packages:
     resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
     engines: {node: '>=0.3.1'}
 
+  docx@9.15.3:
+    resolution: {integrity: sha512-3FnU6K5cuvGXEAn24yhvP3mfrZ1G8k9+hH8pSVDYsMR+mGmfK/t0NR5AwoMQodnaaxiRt2e+SvckffcJe/NvTQ==}
+    engines: {node: '>=16'}
+
   domify@3.0.0:
     resolution: {integrity: sha512-bs2yO68JDFOm6rKv8f0EnrM2cENduhRkpqOtt/s5l5JBA/eqGBZCzLPmdYoHtJ6utgLGgcBajFsEQbl12pT0lQ==}
     engines: {node: '>=20'}
@@ -2101,6 +2111,9 @@ packages:
 
   fastq@1.20.3:
     resolution: {integrity: sha512-XKv5nnLs6nLF71NgiKJLIZFLkPyIEuOselLG7ujZnGrRfQK8HpvY+WqKhAJUAdLomwVHErVS4LfxFlPq0/FTAw==}
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
@@ -2675,6 +2688,11 @@ packages:
   nanoid@5.1.16:
     resolution: {integrity: sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==}
     engines: {node: ^18 || >=20}
+    hasBin: true
+
+  nanoid@6.0.2:
+    resolution: {integrity: sha512-hIvVOb9Qr1p/9CNNLOe0OlWvgx/ziTsVwKN/GDSsuArN2K0wDiafP3s0SWmsm7o2BdnyS8Z9Z64NFBUbn6ziBg==}
+    engines: {node: ^22 || ^24 || >=26}
     hasBin: true
 
   napi-build-utils@2.0.0:
@@ -3913,8 +3931,7 @@ snapshots:
       '@tanstack/vue-virtual': 3.13.51(vue@3.5.44(typescript@7.0.2))
       vue: 3.5.44(typescript@7.0.2)
 
-  '@img/colour@1.1.0':
-    optional: true
+  '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.35.5':
     optionalDependencies:
@@ -5577,6 +5594,12 @@ snapshots:
 
   diff@9.0.0: {}
 
+  docx@9.15.3:
+    dependencies:
+      '@types/node': 26.6.6
+      fflate: 0.8.3
+      nanoid: 6.0.2
+
   domify@3.0.0: {}
 
   dompurify@3.4.15:
@@ -5746,6 +5769,8 @@ snapshots:
   fastq@1.20.3:
     dependencies:
       reusify: 1.1.0
+
+  fflate@0.8.3: {}
 
   file-uri-to-path@1.0.0:
     optional: true
@@ -6546,6 +6571,8 @@ snapshots:
 
   nanoid@5.1.16: {}
 
+  nanoid@6.0.2: {}
+
   napi-build-utils@2.0.0:
     optional: true
 
@@ -7043,7 +7070,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
       '@types/node': 26.6.6
-    optional: true
 
   shebang-command@2.0.0:
     dependencies:

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   GitBranch,
   FolderGit2,
@@ -19,6 +19,9 @@ import {
   FileArchive,
   ArrowRight,
   Server,
+  Eye,
+  EyeOff,
+  MousePointer,
 } from 'lucide-react';
 import type {
   AutoDiscoveryMode,
@@ -29,18 +32,31 @@ import type {
   GitProvider,
   GitRefOption,
   UploadArchiveTelemetry,
+  BlindCrawlAuthType,
 } from '@/types/sdlc';
+import { useStudioLocale } from '@/lib/i18n';
+export interface StagingDiscoveryWithAuthConfig extends StagingDiscoveryConfig {
+  authType?: BlindCrawlAuthType;
+  username?: string;
+  password?: string;
+  accessRoleOrTenant?: string;
+  authHeaderOrCookie?: string;
+}
 
 interface TriModalDiscoveryToolbarProps {
   onDiscover: (params: {
     mode: AutoDiscoveryMode;
     gitConfig?: GitDiscoveryConfig;
     localConfig?: LocalDiscoveryConfig;
-    stagingConfig?: StagingDiscoveryConfig;
+    stagingConfig?: StagingDiscoveryWithAuthConfig;
   }) => Promise<void>;
   isScanning: boolean;
   lastResult?: TriModalDiscoveryResult | null;
   onArchiveUploaded?: (telemetry: UploadArchiveTelemetry, result: TriModalDiscoveryResult) => void;
+  onLaunchInteractiveLogin?: (
+    targetUrl?: string,
+    credentials?: { username?: string; password?: string; accessRoleOrTenant?: string }
+  ) => void;
 }
 
 const DEFAULT_GIT_REFS: GitRefOption[] = [
@@ -59,38 +75,38 @@ const DEFAULT_GIT_REFS: GitRefOption[] = [
     description: 'Active integration branch',
   },
   {
-    id: 'branch:feat/voucher-engine',
-    name: 'feat/voucher-engine',
+    id: 'branch:feature/core-service',
+    name: 'feature/core-service',
     type: 'BRANCH',
     commitSha: 'f32a890',
-    description: 'Greenfield promo code & discount engine',
+    description: 'Active feature branch with endpoint contracts',
   },
   {
-    id: 'pr:142',
-    name: 'PR #142: feat(checkout): add voucher quota validation',
+    id: 'pr:101',
+    name: 'PR #101: feat(api): add validation contracts and DTO schemas',
     type: 'PULL_REQUEST',
-    prNumber: 142,
+    prNumber: 101,
     author: '@alex-dev',
     updatedAt: '2026-11-04T07:15:00Z',
-    description: 'Implements VR-02 quota check and 409 concurrency lock',
+    description: 'Implements VR-01 validation and 409 concurrency lock',
   },
   {
-    id: 'pr:141',
-    name: 'PR #141: fix(cart): clamp 30% discount ceiling',
+    id: 'pr:102',
+    name: 'PR #102: fix(core): boundary constraint enforcement',
     type: 'PULL_REQUEST',
-    prNumber: 141,
+    prNumber: 102,
     author: '@sarah-qa',
     updatedAt: '2026-11-04T04:30:00Z',
-    description: 'Enforces BR-03 max 30% deduction threshold',
+    description: 'Enforces BR-02 boundary conditions',
   },
   {
-    id: 'pr:139',
-    name: 'PR #139: perf(db): add compound index on vouchers',
+    id: 'pr:103',
+    name: 'PR #103: perf(db): optimize relational indexes',
     type: 'PULL_REQUEST',
-    prNumber: 139,
+    prNumber: 103,
     author: '@david-lead',
     updatedAt: '2026-11-03T18:00:00Z',
-    description: 'Resolves 1,420ms Seq Scan bottleneck under 50 VUs',
+    description: 'Resolves sequential scan bottleneck under concurrency',
   },
 ];
 
@@ -99,9 +115,10 @@ export function TriModalDiscoveryToolbar({
   isScanning,
   lastResult,
   onArchiveUploaded,
+  onLaunchInteractiveLogin,
 }: TriModalDiscoveryToolbarProps) {
+  const { copy } = useStudioLocale();
   const [activeMode, setActiveMode] = useState<AutoDiscoveryMode>('MODE_A_GIT');
-
   // Mode A: Git Provider & Auth States
   const [gitProvider, setGitProvider] = useState<GitProvider>('github');
   const [gitUrl, setGitUrl] = useState('https://github.com/retail-corp/checkout-service.git');
@@ -136,23 +153,43 @@ export function TriModalDiscoveryToolbar({
   // Mode C Form States
   const [stagingUrl, setStagingUrl] = useState('https://staging-api.internal/checkout/v1');
   const [dbUri, setDbUri] = useState('postgresql://readonly:***@db.staging.internal:5432/checkout');
+  const [modeCAuthType, setModeCAuthType] = useState<BlindCrawlAuthType>('NONE');
+  const [modeCUsername, setModeCUsername] = useState('');
+  const [modeCPassword, setModeCPassword] = useState('');
+  const [modeCAccessRole, setModeCAccessRole] = useState('');
+  const [modeCBearerToken, setModeCBearerToken] = useState('');
+  const [showModeCPassword, setShowModeCPassword] = useState(false);
+  const [modeCNotice, setModeCNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (lastResult?.mode) {
+      setActiveMode(lastResult.mode);
+      if (lastResult.mode === 'MODE_C_STAGING' && lastResult.targetIdentifier) {
+        setStagingUrl(lastResult.targetIdentifier);
+        if (lastResult.branchOrDatabase) {
+          setDbUri(lastResult.branchOrDatabase);
+        }
+      }
+    }
+  }, [lastResult]);
 
   // Live Fetch Branches & Pull Requests
   const handleFetchBranchesAndPRs = async () => {
     setIsFetchingRefs(true);
     setRefFetchSuccess(false);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
 
     try {
       const res = await fetch('/api/discovery/git-refs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           provider: gitProvider,
           repositoryUrl: gitUrl,
           authToken: gitToken || undefined,
         }),
       });
-
       if (res.ok) {
         const json = await res.json();
         if (json.data && json.data.length > 0) {
@@ -160,13 +197,13 @@ export function TriModalDiscoveryToolbar({
           setSelectedRef(json.data[0].id);
         }
       }
-      setRefFetchSuccess(true);
       setTimeout(() => setRefFetchSuccess(false), 2500);
     } catch {
       // Keep benchmark fallback
       setGitRefs(DEFAULT_GIT_REFS);
       setRefFetchSuccess(true);
     } finally {
+      clearTimeout(timer);
       setIsFetchingRefs(false);
     }
   };
@@ -199,6 +236,11 @@ export function TriModalDiscoveryToolbar({
         stagingConfig: {
           stagingUrl,
           dbUri,
+          authType: modeCAuthType,
+          username: modeCUsername || undefined,
+          password: modeCPassword || undefined,
+          accessRoleOrTenant: modeCAccessRole || undefined,
+          authHeaderOrCookie: modeCBearerToken || undefined,
         },
       });
     }
@@ -212,17 +254,19 @@ export function TriModalDiscoveryToolbar({
         ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
         : `${(file.size / 1024).toFixed(1)} KB`;
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
     try {
       const res = await fetch('/api/discovery/upload-archive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           filename: file.name,
           sizeBytes: file.size,
           localPath: localPathInput,
         }),
       });
-
       if (res.ok) {
         const json = await res.json();
         setUploadedTelemetry(json.telemetry);
@@ -262,6 +306,7 @@ export function TriModalDiscoveryToolbar({
         },
       });
     } finally {
+      clearTimeout(timer);
       setIsProcessingFile(false);
     }
   };
@@ -340,7 +385,7 @@ export function TriModalDiscoveryToolbar({
             }`}
           >
             <GitBranch className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">Mode A: Git / PR Connect</span>
+            <span className="truncate">{copy.step05.modeAGit}</span>
           </button>
 
           <button
@@ -352,7 +397,7 @@ export function TriModalDiscoveryToolbar({
             }`}
           >
             <FolderGit2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">Mode B: Device .ZIP Upload</span>
+            <span className="truncate">{copy.step05.modeBArchive}</span>
           </button>
 
           <button
@@ -364,7 +409,7 @@ export function TriModalDiscoveryToolbar({
             }`}
           >
             <Globe className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">Mode C: Live URL / Blind Crawl</span>
+            <span className="truncate">{copy.step05.modeCStaging}</span>
           </button>
         </div>
 
@@ -384,9 +429,7 @@ export function TriModalDiscoveryToolbar({
               <>
                 <Play className="h-3.5 w-3.5 fill-current" />
                 <span>
-                  {activeMode === 'MODE_A_GIT'
-                    ? 'Clone & Execute Auto-Discovery'
-                    : 'Execute Auto-Discovery'}
+                  {copy.step05.executeDiscovery}
                 </span>
               </>
             )}
@@ -552,7 +595,7 @@ export function TriModalDiscoveryToolbar({
 
             {uploadedTelemetry && (
               <div className="flex items-center gap-2 text-[10px] text-[#A1A1A1] font-mono bg-[#0B0C0E] px-2.5 py-0.5 rounded border border-[#22262E]">
-                <span className="text-[#10B981] font-bold">✓ {uploadedTelemetry.status}</span>
+                <span className="text-[#10B981] font-bold">{uploadedTelemetry.status}</span>
                 <span>{uploadedTelemetry.filename}</span>
                 <span className="text-[#707070]">({uploadedTelemetry.sizeFormatted})</span>
                 <span className="text-[#60A5FA]">
@@ -567,31 +610,139 @@ export function TriModalDiscoveryToolbar({
         </div>
       )}
 
-      {/* Row 2: Mode C (Live Staging URL & Read-Only DB URI) */}
+      {/* Row 2: Mode C (Live Staging URL, Auth Credentials & Read-Only DB URI) */}
       {activeMode === 'MODE_C_STAGING' && (
-        <div className="bg-[#0B0C0E] border border-[#22262E] p-2 rounded-[3px] flex items-center gap-3">
-          <div className="flex items-center gap-1.5 flex-1">
-            <span className="text-[#707070] text-[10px]">STAGING URL:</span>
-            <input
-              type="text"
-              value={stagingUrl}
-              onChange={(e) => setStagingUrl(e.target.value)}
-              placeholder="https://staging.internal/service"
-              className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none flex-1 focus:border-[#3B82F6]"
-            />
+        <div className="bg-[#0B0C0E] border border-[#22262E] p-2.5 rounded-[3px] flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-[220px]">
+              <span className="text-[#707070] text-[10px] shrink-0">STAGING URL:</span>
+              <input
+                type="text"
+                value={stagingUrl}
+                onChange={(e) => {
+                  setStagingUrl(e.target.value);
+                  if (modeCNotice) setModeCNotice(null);
+                }}
+                placeholder="https://staging.internal/service"
+                className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none flex-1 min-w-0 focus:border-[#3B82F6]"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 w-full sm:w-64">
+              <Database className="h-3 w-3 text-[#707070] shrink-0" />
+              <span className="text-[#707070] text-[10px] shrink-0">DB URI:</span>
+              <input
+                type="text"
+                value={dbUri}
+                onChange={(e) => setDbUri(e.target.value)}
+                placeholder="postgresql://readonly:***@host:5432/db"
+                className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none w-full min-w-0 focus:border-[#3B82F6]"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[#707070] text-[10px] shrink-0">AUTH:</span>
+              <select
+                value={modeCAuthType}
+                onChange={(e) => setModeCAuthType(e.target.value as BlindCrawlAuthType)}
+                className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none cursor-pointer focus:border-[#3B82F6]"
+              >
+                <option value="NONE">None</option>
+                <option value="LOGIN_FORM">Login Form</option>
+                <option value="INTERACTIVE_LOGIN">Interactive Login</option>
+                <option value="BEARER_COOKIE">Bearer / Cookie</option>
+              </select>
+            </div>
+
+            {onLaunchInteractiveLogin && (
+              <button
+                type="button"
+                onClick={() => {
+                  const trimmed = stagingUrl.trim();
+                  if (!trimmed) {
+                    setModeCNotice('Enter a staging or target URL before launching the guided browser.');
+                    return;
+                  }
+                  setModeCNotice(null);
+                  onLaunchInteractiveLogin(trimmed, {
+                    username: modeCUsername || undefined,
+                    password: modeCPassword || undefined,
+                    accessRoleOrTenant: modeCAccessRole || undefined,
+                  });
+                }}
+                className="px-2.5 py-1 bg-[#16191F] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] font-mono text-[10.5px] rounded-[2px] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                title="Open a live Chrome browser for manual sign-in and guided exploration"
+              >
+                <MousePointer className="h-3 w-3 text-[#60A5FA]" />
+                <span>{copy.step05.launchGuided}</span>
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 w-96">
-            <Database className="h-3 w-3 text-[#707070]" />
-            <span className="text-[#707070] text-[10px]">READ-ONLY DB URI:</span>
-            <input
-              type="text"
-              value={dbUri}
-              onChange={(e) => setDbUri(e.target.value)}
-              placeholder="postgresql://readonly:***@host:5432/db"
-              className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none w-full focus:border-[#3B82F6]"
-            />
-          </div>
+          {(modeCAuthType === 'LOGIN_FORM' || modeCAuthType === 'INTERACTIVE_LOGIN') && (
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center pt-2 border-t border-[#22262E]">
+              <div className="sm:col-span-4 flex items-center gap-1.5 min-w-0">
+                <span className="text-[#707070] text-[10px] shrink-0">USERNAME:</span>
+                <input
+                  type="text"
+                  value={modeCUsername}
+                  onChange={(e) => setModeCUsername(e.target.value)}
+                  placeholder="Username / User ID"
+                  className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none flex-1 min-w-0 focus:border-[#3B82F6]"
+                />
+              </div>
+              <div className="sm:col-span-4 flex items-center gap-1.5 min-w-0">
+                <span className="text-[#707070] text-[10px] shrink-0">PASSWORD:</span>
+                <div className="relative flex-1 min-w-0 flex items-center">
+                  <input
+                    type={showModeCPassword ? 'text' : 'password'}
+                    value={modeCPassword}
+                    onChange={(e) => setModeCPassword(e.target.value)}
+                    placeholder="Password"
+                    className="bg-[#111317] border border-[#22262E] px-2 py-1 pr-7 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none w-full min-w-0 focus:border-[#3B82F6]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowModeCPassword((prev) => !prev)}
+                    className="absolute right-1.5 text-[#707070] hover:text-[#EDEDED] cursor-pointer"
+                    aria-label={showModeCPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showModeCPassword ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                  </button>
+                </div>
+              </div>
+              <div className="sm:col-span-4 flex items-center gap-1.5 min-w-0">
+                <span className="text-[#707070] text-[10px] shrink-0">ACCESS:</span>
+                <input
+                  type="text"
+                  value={modeCAccessRole}
+                  onChange={(e) => setModeCAccessRole(e.target.value)}
+                  placeholder="Internal / Eksternal / Pancaran"
+                  className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none flex-1 min-w-0 focus:border-[#3B82F6]"
+                />
+              </div>
+            </div>
+          )}
+
+          {modeCAuthType === 'BEARER_COOKIE' && (
+            <div className="flex items-center gap-1.5 pt-2 border-t border-[#22262E]">
+              <span className="text-[#707070] text-[10px] shrink-0">TOKEN / COOKIE:</span>
+              <input
+                type="text"
+                value={modeCBearerToken}
+                onChange={(e) => setModeCBearerToken(e.target.value)}
+                placeholder="Bearer eyJhbG... or session cookie"
+                className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none flex-1 min-w-0 focus:border-[#3B82F6]"
+              />
+            </div>
+          )}
+
+          {modeCNotice && (
+            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[#D97706]/10 border border-[#D97706]/40 text-[#FBBF24] text-[10.5px] rounded-[2px]">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>{modeCNotice}</span>
+            </div>
+          )}
         </div>
       )}
 

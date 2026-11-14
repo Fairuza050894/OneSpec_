@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { StudioLocaleProvider } from '@/lib/i18n';
 
 export const metadata: Metadata = {
   title: 'OneSpec SDLC Workbench | ISO/IEC/IEEE 29148 & 29119 Engineering Platform',
@@ -15,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className="w-screen h-screen overflow-hidden bg-[#0B0C0E] text-[#EDEDED] antialiased selection:bg-[#2563EB]/40">
-        {children}
+        <StudioLocaleProvider>{children}</StudioLocaleProvider>
       </body>
     </html>
   );

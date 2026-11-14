@@ -24,7 +24,7 @@ import type {
   GapAuditVerdict,
 } from '@/types/sdlc';
 import { gapAuditorService } from '@/services/gapAuditorService';
-
+import { useStudioLocale } from '@/lib/i18n';
 // Dynamic import of DiffEditor to avoid SSR hydration conflicts
 const MonacoDiffEditor = dynamic(
   () => import('@monaco-editor/react').then((mod) => mod.DiffEditor),
@@ -53,6 +53,7 @@ export function GapAuditorWorkbench({
   onSelectItem,
   onExportDoc,
 }: GapAuditorWorkbenchProps) {
+  const { copy } = useStudioLocale();
   const [activeVerdictFilter, setActiveVerdictFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeItemId, setActiveItemId] = useState<string>(
@@ -145,7 +146,7 @@ export function GapAuditorWorkbench({
             title="Copy Unified Technical Documentation Markdown"
           >
             {copiedDoc ? <Check className="h-3 w-3 text-[#059669]" /> : <Copy className="h-3 w-3" />}
-            <span>{copiedDoc ? 'Copied' : 'Copy Tech Doc'}</span>
+            <span>{copiedDoc ? copy.step06.copied : copy.step06.copyTechDoc}</span>
           </button>
 
           <button
@@ -154,7 +155,7 @@ export function GapAuditorWorkbench({
             title="Download ISO 29148 PRD-to-Code Audit Report"
           >
             <Download className="h-3 w-3 text-[#3B82F6]" />
-            <span>Export Report</span>
+            <span>{copy.step06.exportReport}</span>
           </button>
         </div>
       </div>
@@ -170,7 +171,7 @@ export function GapAuditorWorkbench({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter discrepancy rules..."
+                placeholder={copy.step06.searchPlaceholder}
                 className="bg-transparent border-none outline-none text-[#EDEDED] text-[10px] w-48 font-mono"
               />
             </div>
@@ -199,7 +200,7 @@ export function GapAuditorWorkbench({
           </div>
 
           <span className="text-[10px] text-[#707070] tabular-nums">
-            {filteredItems.length} / {items.length} Rules Mapped
+            {filteredItems.length} / {items.length} {copy.step06.rulesMapped}
           </span>
         </div>
 
@@ -209,25 +210,25 @@ export function GapAuditorWorkbench({
             <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 z-10">
               <tr className="h-[26px]">
                 <th className="py-1 px-2.5 w-20 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  Audit ID
+                  {copy.step06.colAuditId}
                 </th>
                 <th className="py-1 px-2.5 w-40 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  Audit Verdict
+                  {copy.step06.colVerdict}
                 </th>
                 <th className="py-1 px-2.5 w-24 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  Rule Ref
+                  {copy.step06.colRuleRef}
                 </th>
                 <th className="py-1 px-2.5 w-24 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  User Story
+                  {copy.step06.colUserStory}
                 </th>
                 <th className="py-1 px-2.5 w-52 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  Target Entity
+                  {copy.step06.colTargetEntity}
                 </th>
                 <th className="py-1 px-2.5 w-20 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  Severity
+                  {copy.step06.colSeverity}
                 </th>
                 <th className="py-1 px-2.5 border-r border-[#22262E] text-[10px] uppercase font-semibold text-[#A1A1A1]">
-                  Discrepancy Title
+                  {copy.step06.colTitle}
                 </th>
               </tr>
             </thead>
