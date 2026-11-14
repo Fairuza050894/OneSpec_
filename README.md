@@ -12,6 +12,7 @@
 [![ISO 19510](https://img.shields.io/badge/ISO%2FIEC-19510%20(BPMN%202.0)-red?style=flat-square)](https://www.iso.org/standard/62652.html)
 [![ISO 29119](https://img.shields.io/badge/ISO%2FIEC%2FIEEE-29119-green?style=flat-square)](https://www.iso.org/standard/56736.html)
 [![ISO 26514](https://img.shields.io/badge/ISO%2FIEC%2FIEEE-26514-purple?style=flat-square)](https://www.iso.org/standard/43073.html)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
 ---
 
@@ -217,4 +218,4 @@ All development and AI agent operations in this repository strictly adhere to [`
 
 ## 10. License
 
-Proprietary enterprise software. All rights reserved.
+This project is licensed under the [MIT License](./LICENSE).

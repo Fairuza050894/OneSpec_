@@ -21,8 +21,8 @@
     "test:screenshot-guard": "tsx scripts/check-screenshot-guard.ts"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Fairuza Restu Chabita",
+  "license": "MIT",
   "packageManager": "pnpm@10.30.3",
   "dependencies": {
     "@fastify/cors": "^11.4.0",
