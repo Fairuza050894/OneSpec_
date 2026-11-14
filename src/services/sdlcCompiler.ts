@@ -113,7 +113,7 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult): Comp
   // Guarantee 1:1 manual coverage: every discovered route/page and API resource group
   // receives a complete FeatureModuleSurface, even if the crawler only captured Login.
   const discoveredFeatureModules = ensureCompleteFeatureModuleCoverage({
-    featureModules: crawlResult.discoveredFeatureModules || [],
+    featureModules: crawlResult.discoveredFeatureModules || crawlResult.featureModules || [],
     discoveredModules,
     discoveredPages: pages,
     apiEndpoints: apis,

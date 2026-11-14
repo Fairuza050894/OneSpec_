@@ -114,6 +114,7 @@ import { DelphiConsensusWorkbench } from '@/components/consensus/DelphiConsensus
 import { EnterpriseLibraryPortal } from '@/components/portal/EnterpriseLibraryPortal';
 import { ProductKnowledgeMonitorHub } from '@/components/portal/ProductKnowledgeMonitorHub';
 import { UniversalKnowledgeGraphWorkbench } from '@/components/ontology/UniversalKnowledgeGraphWorkbench';
+import { QuickExportToolbar } from '@/components/shared/QuickExportToolbar';
 const LiveRunnerWorkbench = dynamic(
   () => import('@/components/runner/LiveRunnerWorkbench').then((m) => m.LiveRunnerWorkbench),
   {
@@ -212,6 +213,10 @@ export default function OneSpecEngineeringWorkbench() {
   const [isProbingSurface, setIsProbingSurface] = useState<boolean>(false);
   const [loginSurfaceProbe, setLoginSurfaceProbe] = useState<LoginSurfaceProbeResult | null>(null);
   const [dynamicFieldValues, setDynamicFieldValues] = useState<Record<string, string>>({});
+  const [loginUsername, setLoginUsername] = useState<string>('admin');
+  const [loginPassword, setLoginPassword] = useState<string>('password123');
+  const [loginAccessType, setLoginAccessType] = useState<string>('Pancaran');
+  const [showLoginPassword, setShowLoginPassword] = useState<boolean>(false);
   const [visiblePasswordSelectors, setVisiblePasswordSelectors] = useState<Record<string, boolean>>({});
   const [isRunningAutoRobot, setIsRunningAutoRobot] = useState<boolean>(false);
   const [isBlindCrawling, setIsBlindCrawling] = useState<boolean>(false);
@@ -1418,6 +1423,27 @@ The system provides deterministic transaction processing, input validation, and 
     appendTerminalLog(`[AUTO ROBOT] Launching 1-Click Robot crawl & deep menu spider on: ${target}`);
 
     try {
+      const mergedDynamicValues: Record<string, string> = {
+        username: loginUsername,
+        password: loginPassword,
+        access_type: loginAccessType,
+        ...dynamicFieldValues,
+      };
+      if (loginSurfaceProbe) {
+        for (const inp of loginSurfaceProbe.detectedInputs) {
+          if (inp.type === 'password' && !mergedDynamicValues[inp.selector]) {
+            mergedDynamicValues[inp.selector] = loginPassword;
+          } else if (/user|email|login/i.test(`${inp.name} ${inp.label}`) && !mergedDynamicValues[inp.selector]) {
+            mergedDynamicValues[inp.selector] = loginUsername;
+          }
+        }
+        for (const sel of loginSurfaceProbe.detectedSelects) {
+          if (/pancaran|eksternal|role|domain|access/i.test(`${sel.name} ${sel.label}`) && !mergedDynamicValues[sel.selector]) {
+            mergedDynamicValues[sel.selector] = loginAccessType;
+          }
+        }
+      }
+
       const res = await fetchWithTimeout(
         '/api/discovery/blind-crawl',
         {
@@ -1426,7 +1452,7 @@ The system provides deterministic transaction processing, input validation, and 
           body: JSON.stringify({
             action: 'RUN_AUTO_ROBOT',
             targetUrl: target,
-            dynamicFieldValues,
+            dynamicFieldValues: mergedDynamicValues,
             probeResult: loginSurfaceProbe,
           }),
         },
@@ -1887,10 +1913,9 @@ The system provides deterministic transaction processing, input validation, and 
                     ? 'bg-[#2563EB] text-white font-semibold'
                     : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
                 }`}
-                title={copy.header.phase1}
+                title="Phase 1: Pre-Development (Steps 01-04)"
               >
-                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F1: Pra-Dev' : 'P1: Pre-Dev'}</span>
-                <span className="hidden min-[1680px]:inline">{copy.header.phase1}</span>
+                <span>P1: Pre-Dev</span>
               </button>
               <button
                 onClick={() => handlePhaseChange(2)}
@@ -1899,10 +1924,9 @@ The system provides deterministic transaction processing, input validation, and 
                     ? 'bg-[#2563EB] text-white font-semibold'
                     : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
                 }`}
-                title={copy.header.phase2}
+                title="Phase 2: Staging & Automation (Steps 05-07)"
               >
-                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F2: Staging' : 'P2: Staging'}</span>
-                <span className="hidden min-[1680px]:inline">{copy.header.phase2}</span>
+                <span>P2: Staging</span>
               </button>
               <button
                 onClick={() => handlePhaseChange(3)}
@@ -1911,10 +1935,9 @@ The system provides deterministic transaction processing, input validation, and 
                     ? 'bg-[#2563EB] text-white font-semibold'
                     : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
                 }`}
-                title={copy.header.phase3}
+                title="Phase 3: GRC & Security (Steps 08-09)"
               >
-                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F3: GRC' : 'P3: GRC'}</span>
-                <span className="hidden min-[1680px]:inline">{copy.header.phase3}</span>
+                <span>P3: GRC</span>
               </button>
               <button
                 onClick={() => handlePhaseChange(4)}
@@ -1923,10 +1946,9 @@ The system provides deterministic transaction processing, input validation, and 
                     ? 'bg-[#2563EB] text-white font-semibold'
                     : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
                 }`}
-                title={copy.header.phase4}
+                title="Phase 4: Formal Assurance (Steps 10-12)"
               >
-                <span className="min-[1680px]:hidden">{locale === 'id' ? 'F4: Formal' : 'P4: Formal'}</span>
-                <span className="hidden min-[1680px]:inline">{copy.header.phase4}</span>
+                <span>P4: Formal</span>
               </button>
             </div>
           )}
@@ -1985,58 +2007,69 @@ The system provides deterministic transaction processing, input validation, and 
        * ========================================================================= */}
       <div className="flex-1 flex overflow-hidden min-h-0 relative">
         {workspaceMode === 'ENTERPRISE_LIBRARY' ? (
-          <EnterpriseLibraryPortal
-            activeState={compiledSdlcState}
-            activeVaultProjectId={activeVaultProjectId}
-            onOpenInStudio={async (projectId, jumpToStep) => {
-              if (projectId && projectId !== 'active-workspace' && projectId !== activeVaultProjectId) {
-                await handleSwitchVaultProject(projectId);
-              }
-              setWorkspaceMode('STUDIO');
-              setActiveStep(jumpToStep || 1);
-            }}
-            onCopyBlueprintToNewProject={(blueprintMom, projectNameHint) => {
-              setGreenfieldProjectName(projectNameHint);
-              setRawMoMNotes(blueprintMom);
-              setStep1SourceTab('STAKEHOLDER_MOM');
-              setWorkspaceMode('STUDIO');
-              setActiveStep(1);
-              appendTerminalLog(`[BLUEPRINT REGISTRY] Copied enterprise blueprint "${projectNameHint}" into Step 01 Greenfield Compiler.`);
-            }}
-            onSwitchToStudioMode={() => setWorkspaceMode('STUDIO')}
-            onAppendLog={appendTerminalLog}
-            onSyncProject={async (rec) => {
-              appendTerminalLog(`[1:1 SYNC & AUTO-VERSION] Initiating structural re-scan & audit ledger for "${rec.projectName}" (${rec.projectId})...`);
-              try {
-                if (rec.projectId && rec.projectId !== activeVaultProjectId) {
-                  await handleSwitchVaultProject(rec.projectId);
-                }
-                const saveRes = await fetch('/api/workspace/vault', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    action: 'CREATE_SNAPSHOT',
-                    projectId: rec.projectId,
-                    projectName: rec.projectName,
-                    targetUrl: rec.targetUrl,
-                    compiledState: rec.latestState || compiledSdlcState,
-                    createSnapshot: true,
-                    versionLabel: `Live 1:1 Sync ${new Date().toLocaleTimeString()}`,
-                  }),
-                });
-                if (saveRes.ok) {
-                  const saveJson = await saveRes.json();
-                  const newVer = saveJson.data?.snapshots?.[0]?.semanticVersion || 'v1.1.0';
-                  const crId = saveJson.data?.snapshots?.[0]?.autoChangeRequestId || 'CR-AUTO-002';
-                  appendTerminalLog(`[1:1 SYNC COMPLETE] Successfully saved new version ${newVer} (${crId}) with deep delta grep across UI buttons, forms, and API contracts.`);
-                } else {
-                  appendTerminalLog(`[1:1 SYNC ERROR] Failed to save snapshot: ${saveRes.statusText}`);
-                }
-              } catch (err) {
-                appendTerminalLog(`[1:1 SYNC ERROR] Sync exception: ${err instanceof Error ? err.message : String(err)}`);
-              }
-            }}
-          />
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="px-3 py-1.5 border-b border-[#22262E] bg-[#111317]">
+              <QuickExportToolbar
+                compiledState={compiledSdlcState}
+                activeVaultProjectId={activeVaultProjectId}
+                locale={locale}
+              />
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <EnterpriseLibraryPortal
+                activeState={compiledSdlcState}
+                activeVaultProjectId={activeVaultProjectId}
+                onOpenInStudio={async (projectId, jumpToStep) => {
+                  if (projectId && projectId !== 'active-workspace' && projectId !== activeVaultProjectId) {
+                    await handleSwitchVaultProject(projectId);
+                  }
+                  setWorkspaceMode('STUDIO');
+                  setActiveStep(jumpToStep || 1);
+                }}
+                onCopyBlueprintToNewProject={(blueprintMom, projectNameHint) => {
+                  setGreenfieldProjectName(projectNameHint);
+                  setRawMoMNotes(blueprintMom);
+                  setStep1SourceTab('STAKEHOLDER_MOM');
+                  setWorkspaceMode('STUDIO');
+                  setActiveStep(1);
+                  appendTerminalLog(`[BLUEPRINT REGISTRY] Copied enterprise blueprint "${projectNameHint}" into Step 01 Greenfield Compiler.`);
+                }}
+                onSwitchToStudioMode={() => setWorkspaceMode('STUDIO')}
+                onAppendLog={appendTerminalLog}
+                onSyncProject={async (rec) => {
+                  appendTerminalLog(`[1:1 SYNC & AUTO-VERSION] Initiating structural re-scan & audit ledger for "${rec.projectName}" (${rec.projectId})...`);
+                  try {
+                    if (rec.projectId && rec.projectId !== activeVaultProjectId) {
+                      await handleSwitchVaultProject(rec.projectId);
+                    }
+                    const saveRes = await fetch('/api/workspace/vault', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        action: 'CREATE_SNAPSHOT',
+                        projectId: rec.projectId,
+                        projectName: rec.projectName,
+                        targetUrl: rec.targetUrl,
+                        compiledState: rec.latestState || compiledSdlcState,
+                        createSnapshot: true,
+                        versionLabel: `Live 1:1 Sync ${new Date().toLocaleTimeString()}`,
+                      }),
+                    });
+                    if (saveRes.ok) {
+                      const saveJson = await saveRes.json();
+                      const newVer = saveJson.data?.snapshots?.[0]?.semanticVersion || 'v1.1.0';
+                      const crId = saveJson.data?.snapshots?.[0]?.autoChangeRequestId || 'CR-AUTO-002';
+                      appendTerminalLog(`[1:1 SYNC COMPLETE] Successfully saved new version ${newVer} (${crId}) with deep delta grep across UI buttons, forms, and API contracts.`);
+                    } else {
+                      appendTerminalLog(`[1:1 SYNC ERROR] Failed to save snapshot: ${saveRes.statusText}`);
+                    }
+                  } catch (err) {
+                    appendTerminalLog(`[1:1 SYNC ERROR] Sync exception: ${err instanceof Error ? err.message : String(err)}`);
+                  }
+                }}
+              />
+            </div>
+          </div>
         ) : (
           <>
         {/* LEFT VERTICAL SIDEBAR (248px Fixed Width, Breathable Stepper Navigation) */}
@@ -2399,146 +2432,197 @@ The system provides deterministic transaction processing, input validation, and 
                     </button>
                   </div>
 
-                  {/* STEP 2: Adaptive Form Area (Rendered Dynamically After Scan) */}
-                  {loginSurfaceProbe && (
-                    <div className="bg-[#0B0C0E] border border-[#22262E] p-3 rounded-[3px] space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px] pb-2 border-b border-[#22262E]">
+                  {/* STEP 2: Surface Configuration & Authentication Credential Inputs (Always Visible) */}
+                  <div className="bg-[#0B0C0E] border border-[#22262E] p-3 rounded-[3px] space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[10.5px] pb-2 border-b border-[#22262E]">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-3.5 w-3.5 text-[#3B82F6]" />
                         <span className="font-bold text-[#EDEDED] uppercase tracking-wider">
-                          {copy.step01.detectedSurface}: {loginSurfaceProbe.pageTitle}
+                          {loginSurfaceProbe
+                            ? `${copy.step01.detectedSurface}: ${loginSurfaceProbe.pageTitle}`
+                            : 'Surface Configuration & Authentication Credentials'}
                         </span>
-                        <span className="text-[#707070] truncate max-w-[360px]">{loginSurfaceProbe.targetUrl}</span>
+                      </div>
+                      <span className="text-[#707070] truncate max-w-[360px]">
+                        {loginSurfaceProbe?.targetUrl || blindTargetUrl || 'http://localhost:3000'}
+                      </span>
+                    </div>
+
+                    {loginSurfaceProbe && !loginSurfaceProbe.requiresLogin && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#059669]/15 border border-[#059669]/40 text-[#34D399] rounded-[3px] text-[11px] font-medium">
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        <span>{copy.step01.publicPageBanner}</span>
+                      </div>
+                    )}
+
+                    {/* Detected Role / Access Switcher Tabs if probed */}
+                    {loginSurfaceProbe?.detectedTabs && loginSurfaceProbe.detectedTabs.length > 0 && (
+                      <div className="space-y-2">
+                        {loginSurfaceProbe.detectedTabs.map((tabGroup) => (
+                          <div key={tabGroup.selector} className="space-y-1">
+                            <label className="text-[10px] text-[#707070] uppercase font-bold block">
+                              {tabGroup.label}
+                            </label>
+                            <div className="flex flex-wrap items-center gap-1.5 bg-[#111317] border border-[#22262E] p-1 rounded-[3px]">
+                              {tabGroup.options.map((opt) => {
+                                const isSelected = dynamicFieldValues[tabGroup.selector] === opt;
+                                return (
+                                  <button
+                                    key={opt}
+                                    type="button"
+                                    onClick={() =>
+                                      setDynamicFieldValues((prev) => ({
+                                        ...prev,
+                                        [tabGroup.selector]: opt,
+                                      }))
+                                    }
+                                    className={`px-3 py-1.5 rounded-[2px] text-[11px] transition-colors cursor-pointer ${
+                                      isSelected
+                                        ? 'bg-[#2563EB] text-white font-bold'
+                                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                                    }`}
+                                  >
+                                    {opt}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 3 Core Guaranteed Inputs: Username, Password, and Access Type (Pancaran / Eksternal) */}
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                      {/* 1. Username / User ID */}
+                      <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                        <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
+                          <span>Username / User ID *</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={loginUsername}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setLoginUsername(val);
+                            if (loginSurfaceProbe) {
+                              const userInp = loginSurfaceProbe.detectedInputs.find((i) =>
+                                /user|email|login/i.test(`${i.name} ${i.label}`)
+                              );
+                              if (userInp) {
+                                setDynamicFieldValues((prev) => ({ ...prev, [userInp.selector]: val }));
+                              }
+                            }
+                          }}
+                          placeholder="Username / NIP / Email..."
+                          className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
+                        />
                       </div>
 
-                      {!loginSurfaceProbe.requiresLogin ? (
-                        <div className="flex items-center gap-2 px-3 py-2 bg-[#059669]/15 border border-[#059669]/40 text-[#34D399] rounded-[3px] text-[11.5px] font-bold">
-                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                          <span>{copy.step01.publicPageBanner}</span>
+                      {/* 2. Password / Kata Sandi */}
+                      <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                        <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
+                          <span>Password / Kata Sandi *</span>
+                        </label>
+                        <div className="relative w-full min-w-0 flex items-center">
+                          <input
+                            type={showLoginPassword ? 'text' : 'password'}
+                            value={loginPassword}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setLoginPassword(val);
+                              if (loginSurfaceProbe) {
+                                const passInp = loginSurfaceProbe.detectedInputs.find(
+                                  (i) => i.type === 'password' || /pass/i.test(i.name)
+                                );
+                                if (passInp) {
+                                  setDynamicFieldValues((prev) => ({ ...prev, [passInp.selector]: val }));
+                                }
+                              }
+                            }}
+                            placeholder="Kata Sandi / Password..."
+                            className="w-full min-w-0 h-9 px-2.5 pr-8 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowLoginPassword((prev) => !prev)}
+                            className="absolute right-2 text-[#707070] hover:text-[#EDEDED] cursor-pointer"
+                            aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showLoginPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
                         </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {/* Detected Tabs / Role Switchers */}
-                          {loginSurfaceProbe.detectedTabs.map((tabGroup) => (
-                            <div key={tabGroup.selector} className="space-y-1.5">
-                              <label className="text-[10px] text-[#707070] uppercase font-bold block">
-                                {tabGroup.label}
-                              </label>
-                              <div className="flex flex-wrap items-center gap-1.5 bg-[#111317] border border-[#22262E] p-1 rounded-[3px]">
-                                {tabGroup.options.map((opt) => {
-                                  const isSelected = dynamicFieldValues[tabGroup.selector] === opt;
-                                  return (
-                                    <button
-                                      key={opt}
-                                      type="button"
-                                      onClick={() =>
-                                        setDynamicFieldValues((prev) => ({
-                                          ...prev,
-                                          [tabGroup.selector]: opt,
-                                        }))
-                                      }
-                                      className={`px-3 py-1.5 rounded-[2px] text-[11px] transition-colors cursor-pointer ${
-                                        isSelected
-                                          ? 'bg-[#2563EB] text-white font-bold'
-                                          : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
-                                      }`}
-                                    >
-                                      {opt}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
+                      </div>
 
-                          {/* Detected Dropdowns & Input Fields */}
-                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
-                            {loginSurfaceProbe.detectedSelects.map((sel) => (
-                              <div key={sel.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
-                                <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
-                                  {sel.label || sel.name}
-                                </label>
-                                {sel.options.length > 0 ? (
-                                  <select
-                                    value={dynamicFieldValues[sel.selector] || ''}
-                                    onChange={(e) =>
-                                      setDynamicFieldValues((prev) => ({
-                                        ...prev,
-                                        [sel.selector]: e.target.value,
-                                      }))
-                                    }
-                                    className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer"
-                                  >
-                                    <option value="">Select {sel.label || sel.name}...</option>
-                                    {sel.options.map((o, idx) => (
-                                      <option key={`${o.value}-${idx}`} value={o.value}>
-                                        {o.label}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={dynamicFieldValues[sel.selector] || ''}
-                                    onChange={(e) =>
-                                      setDynamicFieldValues((prev) => ({
-                                        ...prev,
-                                        [sel.selector]: e.target.value,
-                                      }))
-                                    }
-                                    placeholder={`Enter ${sel.label || sel.name}`}
-                                    className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text"
-                                  />
-                                )}
-                              </div>
-                            ))}
-
-                            {loginSurfaceProbe.detectedInputs.map((inp) => {
-                              const isPass = inp.type === 'password';
-                              const showPass = Boolean(visiblePasswordSelectors[inp.selector]);
-                              return (
-                                <div key={inp.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
-                                  <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
-                                    {inp.label || inp.placeholder || inp.name}
-                                    {inp.required ? ' *' : ''}
-                                  </label>
-                                  <div className="relative w-full min-w-0 flex items-center">
-                                    <input
-                                      type={isPass && showPass ? 'text' : inp.type}
-                                      value={dynamicFieldValues[inp.selector] || ''}
-                                      onChange={(e) =>
-                                        setDynamicFieldValues((prev) => ({
-                                          ...prev,
-                                          [inp.selector]: e.target.value,
-                                        }))
-                                      }
-                                      placeholder={inp.placeholder || inp.label || inp.name}
-                                      className={`w-full min-w-0 h-9 px-2.5 ${
-                                        isPass ? 'pr-8' : ''
-                                      } bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text`}
-                                    />
-                                    {isPass && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setVisiblePasswordSelectors((prev) => ({
-                                            ...prev,
-                                            [inp.selector]: !prev[inp.selector],
-                                          }))
-                                        }
-                                        className="absolute right-2 text-[#707070] hover:text-[#EDEDED] cursor-pointer"
-                                        aria-label={showPass ? 'Hide password' : 'Show password'}
-                                      >
-                                        {showPass ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
+                      {/* 3. Tipe Akses / Domain Otorisasi (Pancaran / Eksternal) */}
+                      <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                        <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
+                          <span>Tipe Akses / Domain *</span>
+                        </label>
+                        <select
+                          value={loginAccessType}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setLoginAccessType(val);
+                            if (loginSurfaceProbe) {
+                              const sel = loginSurfaceProbe.detectedSelects.find((s) =>
+                                /pancaran|eksternal|role|domain|access/i.test(`${s.name} ${s.label}`)
                               );
-                            })}
+                              if (sel) {
+                                setDynamicFieldValues((prev) => ({ ...prev, [sel.selector]: val }));
+                              }
+                            }
+                          }}
+                          className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer text-[11.5px]"
+                        >
+                          <option value="Pancaran">Pancaran (Internal Domain)</option>
+                          <option value="Eksternal">Eksternal (Partner / Vendor Domain)</option>
+                          {loginSurfaceProbe?.detectedSelects
+                            ?.flatMap((s) => s.options)
+                            ?.filter(
+                              (o) =>
+                                o.value !== 'Pancaran' &&
+                                o.value !== 'Eksternal' &&
+                                o.value &&
+                                o.value.trim() !== ''
+                            )
+                            ?.map((o, idx) => (
+                              <option key={`${o.value}-${idx}`} value={o.value}>
+                                {o.label || o.value}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {/* Any extra detected inputs from surface probe beyond username/password */}
+                      {loginSurfaceProbe?.detectedInputs
+                        ?.filter(
+                          (inp) =>
+                            inp.type !== 'password' &&
+                            !/user|email|login|username|nip|nik/i.test(`${inp.name} ${inp.label} ${inp.placeholder}`)
+                        )
+                        ?.map((inp) => (
+                          <div key={inp.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                            <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
+                              {inp.label || inp.placeholder || inp.name}
+                              {inp.required ? ' *' : ''}
+                            </label>
+                            <input
+                              type={inp.type}
+                              value={dynamicFieldValues[inp.selector] || ''}
+                              onChange={(e) =>
+                                setDynamicFieldValues((prev) => ({
+                                  ...prev,
+                                  [inp.selector]: e.target.value,
+                                }))
+                              }
+                              placeholder={inp.placeholder || inp.label || inp.name}
+                              className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
+                            />
                           </div>
-                        </div>
-                      )}
+                        ))}
                     </div>
-                  )}
+                  </div>
 
                   {/* STEP 3: Dual Execution Modes (Side-by-Side) */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -2582,24 +2666,38 @@ The system provides deterministic transaction processing, input validation, and 
                           {copy.step01.modeBDesc}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleStartHumanSession()}
-                        disabled={isStartingInteractive}
-                        className="w-full h-8 px-3 bg-[#16191F] hover:bg-[#1E242E] border border-[#3B82F6]/60 disabled:opacity-50 text-[#EDEDED] font-bold text-[11px] rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        {isStartingInteractive ? (
-                          <>
-                            <RotateCw className="h-3.5 w-3.5 animate-spin text-[#60A5FA]" />
-                            <span>{copy.step01.modeBBtnBusy}</span>
-                          </>
-                        ) : (
-                          <>
-                            <MousePointer className="h-3.5 w-3.5 text-[#3B82F6] shrink-0" />
-                            <span>{copy.step01.modeBBtn}</span>
-                          </>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleStartHumanSession()}
+                          disabled={isStartingInteractive}
+                          className="flex-1 h-8 px-3 bg-[#16191F] hover:bg-[#1E242E] border border-[#3B82F6]/60 disabled:opacity-50 text-[#EDEDED] font-bold text-[11px] rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          {isStartingInteractive ? (
+                            <>
+                              <RotateCw className="h-3.5 w-3.5 animate-spin text-[#60A5FA]" />
+                              <span>{copy.step01.modeBBtnBusy}</span>
+                            </>
+                          ) : (
+                            <>
+                              <MousePointer className="h-3.5 w-3.5 text-[#3B82F6] shrink-0" />
+                              <span>{copy.step01.modeBBtn}</span>
+                            </>
+                          )}
+                        </button>
+
+                        {interactiveSession.isRunning && (
+                          <button
+                            type="button"
+                            onClick={handleFinishInteractiveSession}
+                            className="h-8 px-3 bg-[#059669] hover:bg-[#047857] text-white font-bold text-[11px] rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                            title="Complete guided harvest and compile all 12 Steps"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            <span>Complete Guided Harvest</span>
+                          </button>
                         )}
-                      </button>
+                      </div>
                     </div>
                   </div>
 
@@ -3412,6 +3510,13 @@ The system provides deterministic transaction processing, input validation, and 
                 </div>
               </div>
 
+              {/* Quick Export Toolbar for Step 04 */}
+              <QuickExportToolbar
+                compiledState={compiledSdlcState}
+                activeVaultProjectId={activeVaultProjectId}
+                locale={locale}
+              />
+
               {/* 100% Full-Width Spreadsheet Grid */}
               <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] overflow-hidden">
                 <RtmSpreadsheetGrid
@@ -3983,6 +4088,11 @@ The system provides deterministic transaction processing, input validation, and 
            * ========================================================================= */}
           {activeStep === 12 && (
             <div className="h-full flex flex-col space-y-2 min-h-0 overflow-hidden">
+              <QuickExportToolbar
+                compiledState={compiledSdlcState}
+                activeVaultProjectId={activeVaultProjectId}
+                locale={locale}
+              />
               <div className="h-[32px] min-h-[32px] px-1 flex items-center gap-1 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] font-mono text-[10.5px]">
                 <button
                   type="button"

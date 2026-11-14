@@ -74,3 +74,65 @@ All surfaces are flat, high-contrast structural planes separated by hairline div
    - Every metric must originate from active AST scans, database queries, or Playwright traces.
 4. **NO Dead Controls (`R-24`):** Every button, split pane handle, keyboard shortcut, and filter must execute a real state change.
 5. **NO Conversational Slop (`antislop-copywriting`):** Never output *"Here is your generated spec"*, *"AI magic"*, or sparkle emojis. Use formal ISO/IEC/IEEE 29148, ISO 19510, and ISO 29119 terminology.
+
+---
+
+## 6. Modern Studio 4-Phase Workbench Navigation & Step Hierarchy
+
+The root layout in `src/app/page.tsx` strictly adheres to the 4-Phase 12-Step Modern Workbench architecture:
+
+### 6.1 Top Header Bar (`36px` Fixed Height)
+- **Left:** Brand badge `1S OneSpec` with semantic status dot (`#10B981` online).
+- **Workspace Switcher:** Custom select dropdown bound to `/api/sdlc/vault` workspaces, plus `+` New Project quick button.
+- **Primary View Switcher:** Segmented toggle between `Studio` (active workbench) and `ISO Library` (centralized project catalog with count badge).
+- **4-Phase Fast Jump Controls:**
+  - `P1: Pre-Dev` (Steps 01–04)
+  - `P2: Staging` (Steps 05–07)
+  - `P3: GRC` (Steps 08–09)
+  - `P4: Formal` (Steps 10–12)
+- **Utility Controls:** `Seed Data` button, Bilingual language switcher (`EN | ID`), and `Cmd+K` Command Palette shortcut.
+
+### 6.2 Left Navigation Sidebar (12 Steps Grouped in 4 Phases)
+- **PHASE 1: PRE-DEVELOPMENT:**
+  - `01. Project Source & Ingestion Hub` (`Globe / Ingestion`)
+  - `02. Architecture & BPMN / DFD` (`GitBranch / Flow`)
+  - `03. Normative Specs (ISO 29148)` (`FileText / Requirements`)
+  - `04. QA Workbook & Traceability` (`CheckSquare / Matrix`)
+- **PHASE 2: STAGING & AUTOMATION:**
+  - `05. Quad-Modal Auto-Discovery` (`Compass / Deep Harvester`)
+  - `06. Spec-to-Code Gap Audit` (`AlertTriangle / Conformance`)
+  - `07. Live Runner & Bottlenecks` (`Zap / Telemetry`)
+- **PHASE 3: GRC & SECURITY:**
+  - `08. GRC, Risk & Merkle Vault` (`Shield / Tamper-Evident Vault`)
+  - `09. OWASP API Top 10 DAST` (`Lock / Security Scanner`)
+- **PHASE 4: FORMAL ASSURANCE:**
+  - `10. SMT Z3 Formal Proofs` (`Cpu / Theorem Prover`)
+  - `11. Delphi ARB Consensus` (`Users / Architecture Board`)
+  - `12. Executive Summary & Graph` (`BarChart2 / Multi-Artifact Export`)
+
+---
+
+## 7. Step 01 Ingestion Hub & Quick Export Toolbar Specifications
+
+### 7.1 Step 01: Project Source & Ingestion Hub
+- **4 Ingestion Source Tabs:**
+  1. `1. Live Web URL` (Active Crawl & Guided Browser)
+  2. `2. Git Repo (AST)` (Remote branch code analysis)
+  3. `3. .ZIP / Local Folder` (Direct folder/archive ingestion)
+  4. `4. Stakeholder Notes (MoM)` (Meeting notes compiler)
+- **Live URL Surface Scanner Panel:**
+  - Input field for target domain (`https://...`) and `Scan Target URL` action.
+  - **Zero Credential Concealment Guarantee:** Username (`text`), Password (`password`), and Access Type (`Pancaran` / `Eksternal`) inputs MUST ALWAYS remain visible and directly editable. They must never be concealed behind a "public page detected" badge.
+  - **Dual Execution Action Cards:**
+    - `MODE A · Autonomous Discovery`: Direct one-click trigger for `Run Autonomous Crawl`.
+    - `MODE B · Guided Browser Session`: Direct trigger for `Launch Guided Browser` with `Complete Guided Harvest` when active.
+
+### 7.2 Quick Export Toolbar (`QuickExportToolbar.tsx`)
+Embedded directly in Step 04 (QA Workbook), Step 12 (Executive Summary), and the ISO Library portal:
+- Direct instant downloads for:
+  - `📊 Excel QA Workbook (.xlsx)` (17 sheets)
+  - `📘 Word User Manual (.docx)` (ISO 26514, bilingual, 1:1 callout pins)
+  - `⚡ Playwright (.spec.ts)` (`/api/sdlc/automation-bundle?format=playwright`)
+  - `🚀 Postman v2.1 (.json)` (`/api/sdlc/automation-bundle?format=postman`)
+  - `🛡️ RBAC Matrix (.json)` (`/api/sdlc/automation-bundle?format=rbac`)
+

@@ -116,13 +116,23 @@ export async function runDeepSpaHarvester(
       r.abort()
     );
 
-    // Sniffer Jaringan: Tangkap semua XHR/Fetch + Bedah Isi JSON untuk Menu & Tabel DB!
+    // Sniffer Jaringan: Tangkap semua XHR/Fetch + Cross-Subdomain API + Bedah Isi JSON untuk Menu & Tabel DB!
     context.on('response', async (resp: any) => {
       try {
         const req = resp.request();
         const rt = req.resourceType();
         const u = new URL(resp.url());
-        if (rt === 'xhr' || rt === 'fetch' || u.pathname.includes('/api/') || u.pathname.includes('/v1/') || u.pathname.includes('/v2/')) {
+        const ct = (resp.headers()['content-type'] || '').toLowerCase();
+        const isJson = ct.includes('application/json');
+        const isXhrOrFetch = rt === 'xhr' || rt === 'fetch';
+        const isApiLike =
+          /api|v[0-9]|rest|service|graphql|data|dfs|mobo/i.test(u.pathname) ||
+          /mobo|pancaran/i.test(u.hostname) ||
+          u.pathname.includes('/api/') ||
+          u.pathname.includes('/v1/') ||
+          u.pathname.includes('/v2/');
+
+        if (isXhrOrFetch || isJson || isApiLike) {
           const method = req.method().toUpperCase();
           const key = `${method} ${u.pathname}`;
           let reqBodySchema: Record<string, string> | undefined;
@@ -135,12 +145,11 @@ export async function runDeepSpaHarvester(
           } catch {}
 
           let jsonBody: any = null;
-          const ct = resp.headers()['content-type'] || '';
-          if (ct.includes('application/json')) {
+          if (isJson) {
             jsonBody = await resp.json().catch(() => null);
           }
 
-          if (activeRouteApis.length < 15 && !activeRouteApis.some((a) => a.method === method && a.path === u.pathname)) {
+          if (activeRouteApis.length < 25 && !activeRouteApis.some((a) => a.method === method && a.path === u.pathname)) {
             activeRouteApis.push({
               method: (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method) ? method : 'GET') as any,
               path: u.pathname,
@@ -165,47 +174,62 @@ export async function runDeepSpaHarvester(
             });
           }
 
-          // Jika respons berupa JSON, ekstrak (a) rute menu tersembunyi dan (b) struktur tabel database nyata!
+          // Jika respons berupa JSON, ekstrak (a) rute menu tersembunyi & nested routes dan (b) struktur tabel database nyata!
           if (jsonBody && typeof jsonBody === 'object') {
-            const walkJson = (node: any, depth = 0) => {
-              if (!node || typeof node !== 'object' || depth > 5) return;
+            const walkJson = (node: any, depth = 0, parentPath = '') => {
+              if (!node || typeof node !== 'object' || depth > 8) return;
               if (Array.isArray(node)) {
-                node.slice(0, 40).forEach((item) => walkJson(item, depth + 1));
+                node.slice(0, 60).forEach((item) => walkJson(item, depth + 1, parentPath));
                 return;
               }
+              let currentPath = parentPath;
               for (const [k, v] of Object.entries(node)) {
-                if (
-                  typeof v === 'string' &&
-                  /^(path|url|route|href|link|to|menu_url| route_path|uri)$/i.test(k) &&
-                  v.startsWith('/') &&
-                  v.length > 1 &&
-                  !v.startsWith('//') &&
-                  !v.startsWith('/api/')
-                ) {
-                  jsonDiscoveredRoutes.add(v.split('?')[0]);
-                } else if (typeof v === 'object' && v !== null) {
-                  walkJson(v, depth + 1);
+                if (typeof v === 'string') {
+                  const isRouteKey = /^(path|url|route|href|link|to|menu_url|route_path|uri|slug|component_path)$/i.test(k.trim());
+                  if (isRouteKey && v.trim().length > 1) {
+                    const cleanVal = v.trim().split('?')[0].split('#')[0];
+                    if (!cleanVal.startsWith('http') && !cleanVal.startsWith('//') && !cleanVal.startsWith('/api/')) {
+                      let resolvedRoute = cleanVal;
+                      if (!resolvedRoute.startsWith('/')) {
+                        resolvedRoute = parentPath ? `${parentPath.replace(/\/$/, '')}/${cleanVal}` : `/${cleanVal}`;
+                      }
+                      if (resolvedRoute.length > 1 && !/^\/(api|_nuxt|_next|static|assets|images|favicon)/i.test(resolvedRoute)) {
+                        jsonDiscoveredRoutes.add(resolvedRoute);
+                        currentPath = resolvedRoute;
+                      }
+                    }
+                  }
+                }
+              }
+
+              for (const [k, v] of Object.entries(node)) {
+                if (typeof v === 'object' && v !== null) {
+                  const nextParent = /^(children|sub_?menus|menus|modules|items|permissions)$/i.test(k) ? currentPath : parentPath;
+                  walkJson(v, depth + 1, nextParent);
                 }
               }
             };
             walkJson(jsonBody);
 
-            // Ekstrak Tabel Database dari array objek data API
-            const sampleArray = Array.isArray(jsonBody)
-              ? jsonBody
-              : Array.isArray(jsonBody.data)
-              ? jsonBody.data
-              : Array.isArray(jsonBody.items)
-              ? jsonBody.items
-              : Array.isArray(jsonBody.results)
-              ? jsonBody.results
-              : Array.isArray(jsonBody.rows)
-              ? jsonBody.rows
-              : null;
+            // Ekstrak Tabel Database dari array objek data API (data, items, results, rows, list, content, records)
+            const rawCandidates = [
+              Array.isArray(jsonBody) ? jsonBody : null,
+              Array.isArray(jsonBody.data) ? jsonBody.data : null,
+              Array.isArray(jsonBody.items) ? jsonBody.items : null,
+              Array.isArray(jsonBody.results) ? jsonBody.results : null,
+              Array.isArray(jsonBody.rows) ? jsonBody.rows : null,
+              Array.isArray(jsonBody.list) ? jsonBody.list : null,
+              Array.isArray(jsonBody.content) ? jsonBody.content : null,
+              Array.isArray(jsonBody.records) ? jsonBody.records : null,
+              Array.isArray(jsonBody.data?.items) ? jsonBody.data.items : null,
+              Array.isArray(jsonBody.data?.rows) ? jsonBody.data.rows : null,
+              Array.isArray(jsonBody.data?.list) ? jsonBody.data.list : null,
+              Array.isArray(jsonBody.data?.records) ? jsonBody.data.records : null,
+            ].filter((c): c is any[] => Array.isArray(c) && c.length > 0);
 
-            const sampleObj = sampleArray && sampleArray[0] && typeof sampleArray[0] === 'object'
-              ? sampleArray[0]
-              : !Array.isArray(jsonBody.data) && jsonBody.data && typeof jsonBody.data === 'object'
+            const sampleObj = (rawCandidates[0] && rawCandidates[0][0] && typeof rawCandidates[0][0] === 'object')
+              ? rawCandidates[0][0]
+              : (!Array.isArray(jsonBody.data) && jsonBody.data && typeof jsonBody.data === 'object')
               ? jsonBody.data
               : null;
 
@@ -505,19 +529,27 @@ export async function runDeepSpaHarvester(
     // ------------------------------------------------------------------------
     await waitForSpaDataReady(page, 2500);
 
-    // 2A. Buka Hamburger Menu jika Sidebar tertutup lalu klik setiap Accordion Grup Menu secara berurutan
+    // 2A. 3-Putaran Buka Semua Accordion Grup Menu Sidebar + Smooth Scroll + Vue/Nuxt Router Memory + JS Bundles
     const accordionRoutes = await page
       .evaluate(`(async () => {
         const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         const collected = new Set([window.location.pathname]);
 
         const harvestAnchors = () => {
-          document.querySelectorAll('a[href]').forEach((a) => {
-            const href = a.getAttribute('href') || '';
+          document.querySelectorAll('a[href], [data-route], [data-path], [to]').forEach((a) => {
+            const href = a.getAttribute('href') || a.getAttribute('data-route') || a.getAttribute('data-path') || a.getAttribute('to') || '';
             try {
-              const u = new URL(href, window.location.origin);
-              if (u.origin === window.location.origin && !/logout|signout|keluar/i.test(u.pathname)) {
-                collected.add(u.pathname);
+              if (href.startsWith('/')) {
+                const clean = href.split('?')[0].split('#')[0];
+                if (clean.length > 1 && !/logout|signout|keluar/i.test(clean)) collected.add(clean);
+              } else if (!href.startsWith('http') && href.length > 1 && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                const clean = '/' + href.split('?')[0].split('#')[0];
+                if (clean.length > 1 && !/logout|signout|keluar/i.test(clean)) collected.add(clean);
+              } else {
+                const u = new URL(href, window.location.origin);
+                if (u.origin === window.location.origin && !/logout|signout|keluar/i.test(u.pathname)) {
+                  collected.add(u.pathname);
+                }
               }
             } catch {}
           });
@@ -525,7 +557,7 @@ export async function runDeepSpaHarvester(
 
         harvestAnchors();
 
-        // Buka semua grup menu / accordion di sidebar satu per satu
+        // 3-Pass Recursive Sidebar Unfolder with Vertical Smooth Scroll
         const expandableSelectors = [
           'aside [aria-expanded="false"]',
           'nav [aria-expanded="false"]',
@@ -534,27 +566,44 @@ export async function runDeepSpaHarvester(
           '.ant-menu-submenu-title',
           'aside button',
           'nav button',
+          '[class*="sidebar" i] [class*="menu" i]',
+          '[class*="sidebar" i] [class*="accordion" i]',
           '[class*="sidebar" i] [class*="item" i]',
-          '[class*="menu" i] [class*="header" i]'
+          '[class*="sidebar" i] [class*="title" i]',
+          '[class*="menu" i] [class*="header" i]',
+          '[class*="drawer" i] button'
         ];
-        const expandables = Array.from(document.querySelectorAll(expandableSelectors.join(', '))).slice(0, 35);
-        for (const el of expandables) {
-          const txt = (el.textContent || '').trim();
-          if (/logout|keluar|sign out|hapus|delete/i.test(txt)) continue;
-          try {
-            el.click();
+
+        const sidebarContainer = document.querySelector('aside, nav, [class*="sidebar" i], .el-menu, .v-navigation-drawer__content') || document.body;
+        for (let pass = 0; pass < 3; pass++) {
+          const expandables = Array.from(document.querySelectorAll(expandableSelectors.join(', '))).slice(0, 45);
+          for (const el of expandables) {
+            const txt = (el.textContent || '').trim();
+            if (/logout|keluar|sign out|hapus|delete/i.test(txt)) continue;
+            try {
+              el.click();
+              await sleep(100);
+              harvestAnchors();
+            } catch {}
+          }
+          if (sidebarContainer && typeof sidebarContainer.scrollTop === 'number') {
+            sidebarContainer.scrollTop = (pass + 1) * 320;
             await sleep(140);
             harvestAnchors();
-          } catch {}
+          }
+        }
+        if (sidebarContainer && typeof sidebarContainer.scrollTop === 'number') {
+          sidebarContainer.scrollTop = 0;
+          await sleep(100);
         }
 
-        // Ekstrak semua rute dari Vue 2 / Vue 3 / Nuxt 2 / Nuxt 3 Router di memori
+        // Ekstrak seluruh rute dari Vue 2 / Vue 3 / Nuxt 2 / Nuxt 3 Router di memori
         try {
           const roots = [
             document.querySelector('#__nuxt'),
             document.querySelector('#app'),
             document.body,
-            ...Array.from(document.querySelectorAll('*')).slice(0, 120)
+            ...Array.from(document.querySelectorAll('*')).slice(0, 160)
           ].filter(Boolean);
 
           for (const node of roots) {
@@ -567,15 +616,20 @@ export async function runDeepSpaHarvester(
             if (router) {
               if (typeof router.getRoutes === 'function') {
                 router.getRoutes().forEach((r) => {
-                  if (r.path && r.path.startsWith('/')) collected.add(r.path);
+                  if (r.path) {
+                    const cleanPath = r.path.startsWith('/') ? r.path : ('/' + r.path);
+                    if (!/logout|signout|keluar/i.test(cleanPath)) collected.add(cleanPath);
+                  }
                 });
               }
               const walkOpts = (list, prefix = '') => {
                 if (!Array.isArray(list)) return;
                 for (const item of list) {
                   if (item?.path) {
-                    const full = item.path.startsWith('/') ? item.path : (prefix.replace(/\/$/, '') + '/' + item.path);
-                    collected.add(full);
+                    const full = item.path.startsWith('/')
+                      ? item.path
+                      : (prefix.replace(/\/$/, '') + '/' + item.path);
+                    if (!/logout|signout|keluar/i.test(full)) collected.add(full);
                     if (item.children) walkOpts(item.children, full);
                   }
                 }
@@ -598,18 +652,21 @@ export async function runDeepSpaHarvester(
               } catch {}
             }
           });
-          for (const sUrl of Array.from(scriptUrls).slice(0, 25)) {
+          for (const sUrl of Array.from(scriptUrls).slice(0, 35)) {
             try {
               const resp = await fetch(sUrl);
               const code = await resp.text();
               const regexes = [
                 /path\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
                 /route\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
-                /to\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g
+                /to\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
+                /["'](\/[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)+)["']/g
               ];
               for (const rx of regexes) {
                 for (const m of code.matchAll(rx)) {
-                  if (m[1] && m[1].length > 1) collected.add(m[1]);
+                  if (m[1] && m[1].length > 1 && !/^\/(api|_nuxt|_next|static|assets|images)/i.test(m[1])) {
+                    collected.add(m[1]);
+                  }
                 }
               }
             } catch {}
@@ -620,17 +677,17 @@ export async function runDeepSpaHarvester(
       })()`)
       .catch(() => [ '/home' ]);
 
-    // 2B. Jika item menu di sidebar memakai @click tanpa <a href>, klik hingga 18 item menu sidebar untuk memanen URL-nya!
+    // 2B. Interactive Sidebar Click-Probe: Untuk item menu di sidebar yang tidak memiliki atribut href (hanya @click Vue/React)
     const clickDiscoveredRoutes: string[] = [];
     try {
       const menuLabels: string[] = await page
         .evaluate(`(() => {
-          const items = Array.from(document.querySelectorAll('aside li, nav li, .el-menu-item, .v-list-item, [class*="sidebar" i] a, [class*="sidebar" i] button, [class*="nav-item" i]'));
+          const items = Array.from(document.querySelectorAll('aside li, nav li, .el-menu-item, .v-list-item, [class*="sidebar" i] a, [class*="sidebar" i] button, [class*="sidebar" i] [role="menuitem"], [class*="nav-item" i]'));
           return Array.from(new Set(
             items
               .map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim())
-              .filter((t) => t.length >= 3 && t.length <= 32 && !/logout|keluar|sign out|profil/i.test(t))
-          )).slice(0, 20);
+              .filter((t) => t.length >= 2 && t.length <= 40 && !/logout|keluar|sign out|profil|password/i.test(t))
+          )).slice(0, 25);
         })()`)
         .catch(() => []);
 
@@ -639,7 +696,7 @@ export async function runDeepSpaHarvester(
           const clicked = await page
             .evaluate(`((targetText) => {
               const els = Array.from(document.querySelectorAll('aside li, nav li, .el-menu-item, .v-list-item, [class*="sidebar" i] *'));
-              const hit = els.find((el) => (el.textContent || '').replace(/\s+/g, ' ').trim() === targetText && el.getBoundingClientRect().width > 15);
+              const hit = els.find((el) => (el.textContent || '').replace(/\s+/g, ' ').trim() === targetText && el.getBoundingClientRect().width > 12);
               if (hit) {
                 hit.click();
                 return true;
@@ -1042,6 +1099,7 @@ export async function runDeepSpaHarvester(
       extractedApis: Array.from(apiMap.values()),
       databaseTables: Array.from(dbTableMap.values()),
       featureModules,
+      discoveredFeatureModules: featureModules,
     };
   } catch (err) {
     if (browser) {

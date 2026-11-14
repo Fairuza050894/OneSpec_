@@ -163,3 +163,105 @@ Mengacu pada Bagian 5 dan Bagian 6 dari `ARCHITECTURE_AND_SDLC_SPEC.md`, kerjaka
    - Sorot secara visual dengan warna `--status-defect` (`#B91C1C`) tahapan mana yang menjadi **BOTTLENECK** (misal query DB lambat karena belum ada index atau bug validasi di controller) lengkap dengan bukti file/baris dari `morluto/rea`.
 3. Lakukan pemeriksaan menyeluruh terhadap seluruh aplikasi menggunakan daftar periksa `antislop` (R-01 s/d R-40) dan serahkan laporan akhir Anti-Slop Delivery Gate Report.
 ```
+
+---
+
+### PROMPT TAHAP 7: Membangun 7-Layer Deep SPA Harvester 2.0 & Cross-Subdomain Ingestion (Langkah 5)
+
+```text
+antislop active: during (session override).
+Mengacu pada Bagian 8 dari `ARCHITECTURE_AND_SDLC_SPEC.md`, kembangkan kemampuan crawler di `src/services/deepSpaHarvester.ts` dan `src/services/blindCrawlerService.ts` menjadi 7-Layer Deep SPA Harvester:
+
+1. Tangkap seluruh panggilan XHR/Fetch ke domain utama maupun subdomain backend (seperti `mobodfs-sandbox.pancaran-group.co.id`) tanpa membatasi pada filter `/api/`.
+2. Jalankan `walkJson` rekursif pada body respons JSON untuk mengekstrak struktur menu dan menginferensi skema `DatabaseErdTable` (tipe data kolom INTEGER, DECIMAL, TIMESTAMP, VARCHAR, Primary Key, dan Foreign Key).
+3. Implementasikan 3-pass recursive accordion unfolder pada sidebar dengan smooth scrolling vertikal.
+4. Ekstrak rute dari memori Vue 2/3 dan Nuxt 2/3 (`$router.getRoutes()`, `window.__NUXT__`) dengan propagasi prefix path anak (`parentPath + '/' + childPath`).
+5. Pindai chunk JavaScript (`/_nuxt/*.js`, `/_next/*.js`, `/assets/*.js`) untuk menemukan rute bersarang dan rute tersembunyi.
+6. Jalankan non-anchor click probe untuk mendeteksi rute komponen yang dipicu handler `@click` tanpa `<a href>`.
+7. Lakukan per-module deep grepping untuk sub-tab, form modal, dropdown options, action buttons dengan koordinat `(xPercent, yPercent)`, dan screenshot instan via CDP.
+8. Tutup dengan Anti-Slop Delivery Gate Report.
+```
+
+---
+
+### PROMPT TAHAP 8: Membangun GRC, Risk Matrix & Merkle Audit Vault (Langkah 8)
+
+```text
+antislop active: during (session override).
+Bangun modul `src/services/merkleAuditVaultService.ts` dan UI Langkah 8 untuk kepatuhan tata kelola enterprise (GRC):
+
+1. Bentuk pohon Merkle (Merkle Tree) berdasar hashing SHA-256 dari seluruh artefak SDLC (BRD, PRD, BPMN, RTM, Bukti Temuan AST, Hasil Pengujian, DAST).
+2. Sediakan riwayat snapshot perubahan (*version diffing*) yang dapat diverifikasi integritasnya tanpa bisa dimanipulasi (*tamper-evident*).
+3. Hitung Matriks Risiko Proyek berdasarkan formula ISO/IEC 27005 (Likelihood x Impact) dengan penanda mitigasi mitigatif.
+4. Tutup dengan Anti-Slop Delivery Gate Report.
+```
+
+---
+
+### PROMPT TAHAP 9: Membangun OWASP API Top 10 DAST & Security Scanner (Langkah 9)
+
+```text
+antislop active: during (session override).
+Bangun modul `src/services/owaspDastService.ts` dan UI Langkah 9 untuk pemindaian keamanan dinamis API (DAST):
+
+1. Jalankan audit otomatis terhadap 10 kategori risiko OWASP API Security:
+   - API1: BOLA (Broken Object Level Authorization)
+   - API2: Broken Authentication & Credential Stuffing
+   - API3: Broken Object Property Level Authorization (BOPLA)
+   - API4: Unrestricted Resource Consumption
+   - API5: BFLA (Broken Function Level Authorization)
+   - API6: Server-Side Request Forgery (SSRF)
+   - API7: Security Misconfiguration (CORS, Missing Security Headers)
+   - API8: Lack of Protection from Automated Threats
+   - API9: Improper Inventory Management
+   - API10: Unsafe Consumption of APIs
+2. Cegah error Temporal Dead Zone (TDZ) dengan mendeklarasikan seluruh variabel di awal fungsi.
+3. Tampilkan hasil pemindaian dengan skor CVSS v3.1 dan rekomendasi remediasi teknis.
+4. Tutup dengan Anti-Slop Delivery Gate Report.
+```
+
+---
+
+### PROMPT TAHAP 10: Membangun SMT Z3 Formal Proofs Engine (Langkah 10)
+
+```text
+antislop active: during (session override).
+Bangun modul `src/services/smtProofService.ts` dan UI Langkah 10 untuk pembuktian formal logika sistem:
+
+1. Transformasikan aturan bisnis (`BR-xx`) dan transisi status (state machines) menjadi formula logika predikat ordo pertama (First-Order Logic SMT-LIB2).
+2. Verifikasi keterpenuhan (*satisfiability / unsat*) terhadap deadlock, invariant violations, dan celah eskalasi hak akses RBAC.
+3. Visualisasikan status pembuktian formal (PROVEN, COUNTEREXAMPLE, REFUTED) secara deterministik.
+4. Tutup dengan Anti-Slop Delivery Gate Report.
+```
+
+---
+
+### PROMPT TAHAP 11: Membangun Delphi ARB Consensus Engine (Langkah 11)
+
+```text
+antislop active: during (session override).
+Bangun modul `src/services/delphiArbService.ts` dan UI Langkah 11 untuk Architecture Review Board:
+
+1. Simulasikan evaluasi konsensus multi-perspektif (Enterprise Architect, Principal Security Engineer, Head of QA, Compliance Lead).
+2. Hitung skor konsensus Delphi, bobot risiko, dan catatan pertimbangan arsitektur (*architectural decisions*).
+3. Hasilkan ringkasan rekomendasi persetujuan rilis (APPROVED, CONDITIONAL, REJECTED).
+4. Tutup dengan Anti-Slop Delivery Gate Report.
+```
+
+---
+
+### PROMPT TAHAP 12: Membangun Executive Summary, Knowledge Graph & Multi-Artifact Export Hub (Langkah 12)
+
+```text
+antislop active: during (session override).
+Bangun modul `src/services/unifiedReportGenerator.ts`, `src/services/automationBundleExportService.ts`, dan UI Langkah 12 serta komponen `QuickExportToolbar.tsx`:
+
+1. Sediakan visualisasi Knowledge Graph interaktif yang menghubungkan Stakeholder ➔ Business Rule ➔ User Story ➔ Endpoint API ➔ Tabel DB ➔ Test Case ➔ Vulnerability.
+2. Sediakan tombol unduh instan dan endpoint `/api/sdlc/automation-bundle` untuk:
+   - Workbook QA Excel (`.xlsx` 17 sheets lengkap dengan Bus-Factor, Synthetic Data, dan RBAC Matrix)
+   - Manual Pengguna Word (`.docx` ISO 26514 bilingual dengan visual pin callout 1:1)
+   - Playwright Test Suite (`.spec.ts`)
+   - Postman Collection v2.1 (`.json`)
+   - RBAC Differential Matrix (`.json`)
+3. Lakukan verifikasi menyeluruh terhadap seluruh gate anti-slop (R-01 s/d R-40) dan serahkan laporan final Anti-Slop Delivery Gate Report.
+```

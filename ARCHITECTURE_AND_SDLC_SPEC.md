@@ -120,3 +120,97 @@ To guarantee that single-manpower QA output matches dedicated enterprise toolcha
 | **API Collection & Environment** | Postman v2.1 & Newman CLI runner | `<project_code>.postman_collection.json` |
 | **BDD Feature Specification** | Cucumber / SpecFlow / Behave | `features/<project_code>.feature` |
 | **CI/CD Execution Telemetry** | Jenkins / GitLab CI / GitHub Actions / Xray | `reports/junit-results.xml` + `trace.zip` |
+
+---
+
+## 7. The 4-Phase 12-Step Modern Enterprise SDLC Architecture
+
+OneSpec SDLC Studio scales beyond basic pre- and post-development into a 4-phase, 12-step engineering lifecycle:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ PHASE 1: PRE-DEVELOPMENT                                                                         │
+│   01. Project Source & Ingestion Hub (Dual Modes A/B, 4 Ingestion Streams)                       │
+│   02. Architecture & BPMN / DFD (ISO 19510 Pools/Swimlanes & Level-0/1 DFD)                      │
+│   03. Normative Specs ISO 29148 (StRS BRD BR-xx & SyRS PRD REQ-US-xx)                           │
+│   04. QA Workbook & Traceability (ISO 29119 Bi-Directional RTM + Quick Export Toolbar)          │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 2: STAGING & AUTOMATION                                                                    │
+│   05. Quad-Modal Auto-Discovery (7-Layer Deep SPA Harvester 2.0 with Subdomain Capture)          │
+│   06. Spec-to-Code Gap Audit (AST / Database Schema vs PRD Validation Conformance)               │
+│   07. Live Runner & Bottlenecks (DOM ➔ Controller ➔ SQL SLA Telemetry Stream)                    │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 3: GRC & SECURITY                                                                          │
+│   08. GRC, Risk & Merkle Vault (Tamper-Evident SHA-256 SDLC Project Snapshots)                   │
+│   09. OWASP API Top 10 DAST (Automated BOLA, BFLA, Broken Auth, Injection, CORS Checks)         │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ PHASE 4: FORMAL ASSURANCE                                                                        │
+│   10. SMT Z3 Formal Proofs (State Invariant & RBAC Guard Theorem Prover)                         │
+│   11. Delphi ARB Consensus (Automated Architecture Review Board Voting & Rationale)              │
+│   12. Executive Summary & Graph (Knowledge Graph Explorer & Comprehensive Multi-Export Hub)     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 8. 7-Layer Deep SPA Harvester 2.0 & Cross-Subdomain Engine
+
+The harvester (`src/services/deepSpaHarvester.ts`) resolves enterprise SPA complexity through seven cooperative layers:
+
+1. **Cross-Subdomain XHR/Fetch Body Interceptor:**  
+   Captures network requests and responses across both host and backend subdomains (e.g. `mobospace-sandbox` + `mobodfs-sandbox`) regardless of path prefixes.
+2. **Recursive JSON Walk (`walkJson`) & Database ERD Extraction:**  
+   Parses nested JSON payloads to discover route trees and auto-synthesize `DatabaseErdTable` definitions with explicit column data types (`INTEGER`, `DECIMAL(18,2)`, `BOOLEAN`, `TIMESTAMP`, `VARCHAR(255)`), primary keys, and foreign keys (`_id` / `Id`).
+3. **3-Pass Recursive Accordion Unfolder & Smooth Scrolling:**  
+   Expands all collapsible menus (`[aria-expanded="false"]`, `.el-sub-menu__title`, `.v-list-group__header`) across 3 passes, scrolling vertically to force rendering of lazy elements.
+4. **Vue 2/3 & Nuxt 2/3 Memory Router Extraction:**  
+   Queries live runtime routers (`$router.getRoutes()`, `$router.options.routes`, `window.__NUXT__`, `window.$nuxt`) and resolves nested routes with parent-prefix propagation (`parentPath + '/' + childPath`).
+5. **Production JavaScript Chunk Scanner:**  
+   Inspects `/_nuxt/*.js`, `/_next/*.js`, and `/assets/*.js` chunk files with AST-informed regexes to discover lazy-loaded and administrative routes.
+6. **Interactive Non-Anchor Click Prober:**  
+   Interactively triggers sidebar navigation items lacking `href` attributes (`@click` Vue/React handlers), reads resulting URL paths and page headings (`h1`, `h2`), and catalogs discrete feature modules.
+7. **Deep Per-Module Grepping & CDP Screenshot Engine:**  
+   Takes instant high-resolution screenshots via CDP (`Page.captureScreenshot`), maps action buttons with exact `(xPercent, yPercent)` pins, probes form controls and options, inspects sub-tabs, and triggers modal overlays.
+
+---
+
+## 9. Multi-Persona RBAC Differential Matrix & Synthetic Data Factory
+
+### Multi-Persona RBAC Modeling (`src/services/rbacDifferentialMatrixService.ts`)
+OneSpec evaluates permissions across four enterprise personas:
+- **Pancaran Internal:** Full operational authority, edit/delete/approve capabilities, unfiltered financial/telemetry view.
+- **Eksternal Partner:** Scoped self-service access, voucher redemption, partner-specific data filtering.
+- **Viewer / Auditor:** Read-only access, analytical reports, mutation actions disabled.
+- **Unauthenticated:** Redirected to login surface boundary with 401/403 controls.
+
+### Domain Logic Brain & Synthetic Data Factory (`src/services/domainLogicBrainService.ts`)
+- Automatically prioritizes authentication gates (`AUTHENTICATION_RBAC_GATE`) by checking `type === 'password'` first.
+- Generates realistic synthetic datasets for Indonesian enterprise systems: NIK (16 digits), Plat Nomor Kendaraan (e.g. `B 1234 PCD`), NPWP (15 digits), GUIDs, timestamps, and realistic monetary amounts.
+
+---
+
+## 10. ISO/IEC/IEEE 26514 Bilingual User Manual Engine
+
+The User Manual Service (`src/services/iso26514UserManualService.ts`) synthesizes a 9-section bilingual (`EN` / `ID`) document:
+1. Document Overview & Target Audience
+2. System Architecture & Prerequisites
+3. Getting Started & Authentication SOP (with `Pancaran` vs `Eksternal` domain procedures)
+4. Core Feature Modules & Navigation Walkthrough
+5. Detailed Step-by-Step Task Procedures
+6. 1:1 Visual Callout Pins (matching CDP screenshots with labelled buttons)
+7. Error Handling, Validation Rules & Troubleshooting
+8. RBAC Matrix & Access Control Guidelines
+9. Dynamic Terminology Glossary
+
+Generated as a fully formatted Microsoft Word document (`.docx`) utilizing modern heading styles, visual callout boxes, and formatted data tables.
+
+---
+
+## 11. Complete Multi-Artifact Export Engine
+
+All artifacts are unified under `/api/sdlc/automation-bundle` and `src/components/shared/QuickExportToolbar.tsx`:
+- **Excel QA Workbook (`.xlsx`):** 17 structured sheets including RTM, Test Cases, Bus Factor, Synthetic Data, and RBAC Matrix.
+- **Word User Manual (`.docx`):** ISO 26514 compliant with screenshots and callout pins.
+- **Playwright Test Suite (`.spec.ts`):** Complete end-to-end executable test suite with assertion gates.
+- **Postman Collection (`.json`):** Version 2.1 collection with authentication pre-request scripts and tests.
+- **RBAC Matrix (`.json`):** Machine-readable differential access control specification.

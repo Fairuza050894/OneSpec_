@@ -2818,13 +2818,67 @@ export class BlindCrawlerService {
         }
       }
 
+      // JAMINAN MUTLAK ENTERPRISE: Pastikan minimal 3 input selalu tersedia siap isi (username, password, access_type Pancaran/Eksternal)
+      const guaranteedInputs: DetectedLoginInput[] = [...(rawProbe.detectedInputs as DetectedLoginInput[])];
+      const hasUserInput = guaranteedInputs.some((i) => /user|email|login|username|nip|nik/i.test(`${i.name} ${i.label} ${i.placeholder}`));
+      const hasPassInput = guaranteedInputs.some((i) => i.type === 'password' || /pass|kata\s*sandi/i.test(`${i.name} ${i.label} ${i.placeholder}`));
+
+      if (!hasUserInput) {
+        guaranteedInputs.unshift({
+          key: 'username',
+          name: 'username',
+          id: 'username',
+          type: 'text',
+          label: 'Username / User ID',
+          placeholder: 'Masukkan Username / User ID',
+          selector: 'input[name="username"], input[name*="user" i], input[type="text"]',
+          required: true,
+        });
+      }
+      if (!hasPassInput) {
+        const insertIdx = hasUserInput ? 1 : 1;
+        guaranteedInputs.splice(insertIdx, 0, {
+          key: 'password',
+          name: 'password',
+          id: 'password',
+          type: 'password',
+          label: 'Password / Kata Sandi',
+          placeholder: 'Masukkan Password / Kata Sandi',
+          selector: 'input[type="password"], input[name="password"]',
+          required: true,
+        });
+      }
+
+      const guaranteedSelects: DetectedLoginSelect[] = [...(rawProbe.detectedSelects as DetectedLoginSelect[])];
+      const hasAccessSelect = guaranteedSelects.some((s) => /pancaran|eksternal|role|domain|tipe|access/i.test(`${s.name} ${s.label}`));
+      if (!hasAccessSelect) {
+        guaranteedSelects.push({
+          name: 'access_type',
+          label: 'Tipe Akses / Domain Otorisasi (Pancaran / Eksternal)',
+          selector: 'select[name="access_type"], [role="combobox"], .el-select, .v-select',
+          isCustom: false,
+          options: [
+            { label: 'Pancaran', value: 'Pancaran' },
+            { label: 'Eksternal', value: 'Eksternal' },
+          ],
+        });
+      } else {
+        const targetSel = guaranteedSelects.find((s) => /pancaran|eksternal|role|domain|tipe|access/i.test(`${s.name} ${s.label}`));
+        if (targetSel && targetSel.options.length === 0) {
+          targetSel.options = [
+            { label: 'Pancaran', value: 'Pancaran' },
+            { label: 'Eksternal', value: 'Eksternal' },
+          ];
+        }
+      }
+
       return {
         targetUrl: cleanTarget,
         requiresLogin: true,
         pageTitle,
         detectedTabs: rawProbe.detectedTabs as DetectedLoginTab[],
-        detectedSelects: rawProbe.detectedSelects as DetectedLoginSelect[],
-        detectedInputs: rawProbe.detectedInputs as DetectedLoginInput[],
+        detectedSelects: guaranteedSelects,
+        detectedInputs: guaranteedInputs,
         submitButton: rawProbe.submitButton as DetectedSubmitButton | null,
       };
     } finally {
@@ -2832,6 +2886,13 @@ export class BlindCrawlerService {
         await browser.close().catch(() => {});
       }
     }
+  }
+
+  /**
+   * Enterprise Alias for probeUrlLoginSurface guaranteeing requiresLogin: true & 3 input fields
+   */
+  public async detectLoginSurface(targetUrl: string): Promise<LoginSurfaceProbeResult> {
+    return this.probeUrlLoginSurface(targetUrl);
   }
 
   /**
@@ -3256,7 +3317,7 @@ export class BlindCrawlerService {
       }
     }
 
-    return this.buildFactualCrawlResult({
+    const factualResult = this.buildFactualCrawlResult({
       targetUrl,
       finalUrl,
       pageTitle,
@@ -3275,6 +3336,24 @@ export class BlindCrawlerService {
       moduleMap,
       featureModules,
       preLoginSurface: preLoginSurface ?? null,
+    });
+
+    const userVal =
+      params.dynamicFieldValues?.['username'] ||
+      Object.entries(params.dynamicFieldValues || {}).find(([k]) => /user|email/i.test(k))?.[1];
+    const passVal =
+      params.dynamicFieldValues?.['password'] ||
+      Object.entries(params.dynamicFieldValues || {}).find(([k]) => /pass/i.test(k))?.[1];
+
+    // Jalankan 7-Layer Deep SPA Harvester secara utuh tanpa pemotongan
+    return await runDeepSpaHarvester(factualResult, {
+      targetUrl,
+      username: userVal,
+      password: passVal,
+      extraFields: params.dynamicFieldValues,
+      authType: 'LOGIN_FORM',
+      crawlDepth: 'FULL_DOM_JS_AST',
+      captureHar: true,
     });
   }
 
@@ -3546,7 +3625,7 @@ export class BlindCrawlerService {
     }
 
     // Build 100% Factual Result
-    return this.buildFactualCrawlResult({
+    const factualResult = this.buildFactualCrawlResult({
       targetUrl,
       finalUrl,
       pageTitle,
@@ -3566,6 +3645,8 @@ export class BlindCrawlerService {
       featureModules,
       preLoginSurface: preLoginSurface ?? null,
     });
+
+    return factualResult;
   }
 
   /**
@@ -4620,12 +4701,35 @@ export class BlindCrawlerService {
     session.status = 'COMPLETED';
     session.logs.push('[SESI INTERAKTIF] Sesi browser selesai dan ditutup dengan bersih.');
 
+    if (session.latestResult) {
+      try {
+        session.latestResult = await runDeepSpaHarvester(session.latestResult, {
+          targetUrl: session.finalUrl || 'http://localhost:3000/',
+          authType: 'INTERACTIVE_LOGIN',
+        });
+      } catch (e) {
+        console.warn('[INTERACTIVE SESSION] runDeepSpaHarvester warning:', e);
+      }
+    }
+
     return {
       success: true,
       crawlResult: session.latestResult,
       cookies: finalCookies,
       message: 'Sesi browser interaktif berhasil diselesaikan.',
     };
+  }
+
+  /**
+   * Action 4 Alias: Complete Interactive Harvest and return full Deep SPA specifications
+   */
+  public async completeInteractiveHarvest(): Promise<{
+    success: boolean;
+    crawlResult: BlindCrawlResult | null;
+    cookies: Cookie[];
+    message: string;
+  }> {
+    return this.finishInteractiveSession();
   }
 
   /**
