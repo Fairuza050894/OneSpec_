@@ -74,12 +74,23 @@ import { detectBlankRasterDataUrl } from '@/lib/screenshotQuality';
 
 function normalizeManualImgSrc(raw?: string | null): string {
   if (!raw) return '/api/manual-assets/placeholder.png';
-  const s = String(raw).trim().replace(/\\/g, '/');
-  if (s.startsWith('data:image/') || s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
+  const s = String(raw).trim();
+  if (s.startsWith('data:image/')) {
+    if (s.startsWith('data:image/svg+xml;utf8,')) {
+      try {
+        const svgBody = decodeURIComponent(s.replace('data:image/svg+xml;utf8,', ''));
+        const b64 = typeof Buffer !== 'undefined' ? Buffer.from(svgBody, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(svgBody)));
+        return `data:image/svg+xml;base64,${b64}`;
+      } catch {}
+    }
+    return s;
+  }
+  if (s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
     return s;
   }
   if (s.startsWith('/api/manual-assets/')) return s;
   const cleaned = s
+    .replace(/\\/g, '/')
     .replace(/^\.\//, '')
     .replace(/^\//, '')
     .replace(/^public\//, '')
@@ -1525,7 +1536,7 @@ export function UniversalKnowledgeGraphWorkbench({
                                         ),
                                       }));
                                     }}
-                                    className={`relative w-full overflow-hidden rounded-[2px] border border-[#22262E] bg-[#0F172A] ${
+                                    className={`relative w-full min-h-[260px] overflow-hidden rounded-[2px] border border-[#22262E] bg-slate-950 ${
                                       isEditingThis ? 'cursor-crosshair ring-1 ring-[#F59E0B]' : ''
                                     }`}
                                   >
@@ -1533,7 +1544,7 @@ export function UniversalKnowledgeGraphWorkbench({
                                       src={normalizeManualImgSrc(screenshotSrc)}
                                       blueprintDataUrl={blueprintDataUrl}
                                       alt={guide.moduleName}
-                                      className="w-full h-auto block pointer-events-none bg-[#0F172A]"
+                                      className="w-full min-h-[260px] bg-slate-950 object-contain block pointer-events-none"
                                     />
                                     {activePins.map((pin) => (
                                       <div

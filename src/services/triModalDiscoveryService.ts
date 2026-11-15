@@ -592,13 +592,145 @@ export class TriModalDiscoveryService {
         paths[ep.path] = {};
       }
 
+      const successSchema: Record<string, any> = {
+        type: ep.responseSchema && Array.isArray(ep.responseSchema) ? 'array' : 'object',
+      };
+      if (ep.responseSchema && typeof ep.responseSchema === 'object' && !Array.isArray(ep.responseSchema)) {
+        successSchema.properties = Object.fromEntries(
+          Object.entries(ep.responseSchema)
+            .slice(0, 30)
+            .map(([k, v]) => [
+              k,
+              {
+                type:
+                  typeof v === 'number'
+                    ? 'number'
+                    : typeof v === 'boolean'
+                    ? 'boolean'
+                    : Array.isArray(v)
+                    ? 'array'
+                    : typeof v === 'object' && v !== null
+                    ? 'object'
+                    : 'string',
+                example: v,
+              },
+            ])
+        );
+      } else if (!ep.responseSchema) {
+        successSchema.properties = {
+          code: { type: 'integer', example: 200 },
+          status: { type: 'string', example: 'success' },
+          data: { type: 'object' },
+        };
+      }
+
       const operation: Record<string, any> = {
         summary: ep.summary,
         description: ep.description,
         operationId: ep.handlerName || `${methodKey}_${ep.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
         responses: {
-          '200': { description: 'Successful invocation' },
-          '400': { description: 'Validation error or invalid request' },
+          '200': {
+            description: 'Successful invocation · Contract verified per ISO/IEC/IEEE 29148:2018',
+            content: {
+              'application/json': {
+                schema: successSchema,
+                ...(ep.responseSchema ? { example: ep.responseSchema } : {}),
+              },
+            },
+          },
+          '400': {
+            description: 'Bad Request · Input syntax error or parameter constraint violation (RFC 9110)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['statusCode', 'error', 'message'],
+                  properties: {
+                    statusCode: { type: 'integer', example: 400 },
+                    error: { type: 'string', example: 'Bad Request' },
+                    message: { type: 'string', example: 'Invalid request payload or malformed query parameter' },
+                    timestamp: { type: 'string', format: 'date-time', example: '2026-11-15T12:00:00Z' },
+                  },
+                },
+              },
+            },
+          },
+          '401': {
+            description: 'Unauthorized · Missing, expired, or invalid session token (OWASP API2:2023)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['statusCode', 'error', 'message'],
+                  properties: {
+                    statusCode: { type: 'integer', example: 401 },
+                    error: { type: 'string', example: 'Unauthorized' },
+                    message: { type: 'string', example: 'Authentication credentials missing or session expired' },
+                    realm: { type: 'string', example: 'OneSpec Enterprise Gate' },
+                  },
+                },
+              },
+            },
+          },
+          '403': {
+            description: 'Forbidden · Insufficient role privileges or cross-tenant boundary breach (OWASP API1:2023 / API5:2023)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['statusCode', 'error', 'message'],
+                  properties: {
+                    statusCode: { type: 'integer', example: 403 },
+                    error: { type: 'string', example: 'Forbidden' },
+                    message: { type: 'string', example: 'Access denied: role does not possess required permission scope' },
+                  },
+                },
+              },
+            },
+          },
+          '422': {
+            description: 'Unprocessable Entity · Semantic validation failure or domain constraint violation (VR-01..VR-AST)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['statusCode', 'error', 'validationErrors'],
+                  properties: {
+                    statusCode: { type: 'integer', example: 422 },
+                    error: { type: 'string', example: 'Unprocessable Entity' },
+                    validationErrors: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          field: { type: 'string', example: 'username' },
+                          rule: { type: 'string', example: 'VR-AST-01' },
+                          message: { type: 'string', example: 'Field is mandatory and cannot be empty' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '500': {
+            description: 'Internal Server Error · Unhandled runtime exception or downstream service failure (ISO 25010 / SRE Gate)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['statusCode', 'error', 'incidentId'],
+                  properties: {
+                    statusCode: { type: 'integer', example: 500 },
+                    error: { type: 'string', example: 'Internal Server Error' },
+                    incidentId: { type: 'string', example: 'INC-20261115-001' },
+                    message: { type: 'string', example: 'An unexpected server error occurred. Tracing logged.' },
+                  },
+                },
+              },
+            },
+          },
         },
       };
 

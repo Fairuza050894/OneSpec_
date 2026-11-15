@@ -3929,8 +3929,19 @@ The system provides deterministic transaction processing, input validation, and 
                       ISO/IEC 27001 · ISO 31000 · SOC 2
                     </span>
                   </div>
-                  <div className="text-[11px] font-mono text-[#707070] hidden 2xl:inline whitespace-nowrap">
-                    {copy.step08.subtitle}
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`/api/sdlc/automation-bundle?format=git-patch${activeVaultProjectId ? `&projectId=${activeVaultProjectId}` : ''}`}
+                      download={`${(compiledSdlcState?.appName || 'onespec').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-remediation.patch`}
+                      className="h-7 px-2.5 bg-[#111317] hover:bg-[#16191F] border border-[#22262E] hover:border-[#10B981] text-[#EDEDED] rounded-[3px] flex items-center gap-1.5 font-mono text-[11px] cursor-pointer transition-colors"
+                      title="Download Autonomous Unified Git Remediation Patch & Runbook (.patch)"
+                    >
+                      <span className="text-[12px]">🩹</span>
+                      <span>Self-Healing Git Patch (.patch)</span>
+                    </a>
+                    <div className="text-[11px] font-mono text-[#707070] hidden 2xl:inline whitespace-nowrap">
+                      {copy.step08.subtitle}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[3px] gap-1 text-[11px] font-mono self-start overflow-x-auto">
@@ -4010,7 +4021,18 @@ The system provides deterministic transaction processing, input validation, and 
                     OWASP ASVS v4.0 · ISO 27001
                   </span>
                 </div>
-                <p className="text-[11.5px] text-[#707070] font-mono truncate">{copy.step09.subtitle}</p>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/api/sdlc/automation-bundle?format=git-patch${activeVaultProjectId ? `&projectId=${activeVaultProjectId}` : ''}`}
+                    download={`${(compiledSdlcState?.appName || 'onespec').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-remediation.patch`}
+                    className="h-7 px-2.5 bg-[#111317] hover:bg-[#16191F] border border-[#22262E] hover:border-[#10B981] text-[#EDEDED] rounded-[3px] flex items-center gap-1.5 font-mono text-[11px] cursor-pointer transition-colors"
+                    title="Download Autonomous Unified Git Remediation Patch & Runbook (.patch)"
+                  >
+                    <span className="text-[12px]">🩹</span>
+                    <span>Self-Healing Git Patch (.patch)</span>
+                  </a>
+                  <p className="text-[11.5px] text-[#707070] font-mono truncate hidden xl:inline">{copy.step09.subtitle}</p>
+                </div>
               </div>
               <OwaspDastWorkbench
                 appName={activeWorkspace?.name || 'Active Project'}

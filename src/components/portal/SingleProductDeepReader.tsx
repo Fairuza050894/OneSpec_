@@ -54,12 +54,23 @@ import { ModuleScreenshot } from '@/components/shared/ModuleScreenshot';
 
 function normalizeManualImgSrc(raw?: string | null): string {
   if (!raw) return '/api/manual-assets/placeholder.png';
-  const s = String(raw).trim().replace(/\\/g, '/');
-  if (s.startsWith('data:image/') || s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
+  const s = String(raw).trim();
+  if (s.startsWith('data:image/')) {
+    if (s.startsWith('data:image/svg+xml;utf8,')) {
+      try {
+        const svgBody = decodeURIComponent(s.replace('data:image/svg+xml;utf8,', ''));
+        const b64 = typeof Buffer !== 'undefined' ? Buffer.from(svgBody, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(svgBody)));
+        return `data:image/svg+xml;base64,${b64}`;
+      } catch {}
+    }
+    return s;
+  }
+  if (s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
     return s;
   }
   if (s.startsWith('/api/manual-assets/')) return s;
   const cleaned = s
+    .replace(/\\/g, '/')
     .replace(/^\.\//, '')
     .replace(/^\//, '')
     .replace(/^public\//, '')
@@ -786,7 +797,7 @@ export function SingleProductDeepReader({
       )}
 
       {/* =====================================================================
-       * SECTION 2: COMPLETE 8-SECTION USER MANUAL (ISO 26514)
+       * SECTION 2: COMPLETE 9-SECTION USER MANUAL (ISO 26514)
        * ===================================================================== */}
       {(activeSection === 'ALL' || activeSection === 'SEC2_USER_MANUAL') && (
         <div className="bg-[#111317] border border-[#22262E] rounded-[4px] p-4 space-y-4">
@@ -794,8 +805,8 @@ export function SingleProductDeepReader({
             <div className="flex items-center gap-2">
               <span className="font-mono text-[12px] font-bold text-[#10B981]">
                 {isId
-                  ? '📖 2. BUKU MANUAL PENGGUNA & LOGIKA LAYAR OPERASIONAL (ISO/IEC/IEEE 26514:2022 — 8 SEKSI)'
-                  : '📖 2. COMPLETE 8-SECTION USER MANUAL & SCREEN LOGIC (ISO/IEC/IEEE 26514:2022)'}
+                  ? '📖 2. BUKU MANUAL PENGGUNA & LOGIKA LAYAR OPERASIONAL (ISO/IEC/IEEE 26514:2022 — 9 SEKSI)'
+                  : '📖 2. COMPLETE 9-SECTION USER MANUAL & SCREEN LOGIC (ISO/IEC/IEEE 26514:2022)'}
               </span>
             </div>
             <span className="font-mono text-[10px] text-[#707070]">
@@ -939,12 +950,12 @@ export function SingleProductDeepReader({
                                 : `Visual Screen Capture & Numbered Pins (#1..#${m.visualCalloutPins?.length || 0})`}
                             </span>
                           </div>
-                          <div className="relative w-full overflow-hidden rounded-[2px] border border-[#22262E] bg-[#0F172A]">
+                          <div className="relative w-full min-h-[260px] overflow-hidden rounded-[2px] border border-[#22262E] bg-slate-950">
                             <ModuleScreenshot
                               src={normalizeManualImgSrc(screenshotSrc)}
                               blueprintDataUrl={blueprintDataUrl}
                               alt={guide.moduleName}
-                              className="w-full h-auto block bg-[#0F172A]"
+                              className="w-full min-h-[260px] bg-slate-950 object-contain block"
                             />
                             {(m.visualCalloutPins || []).map((pin) => (
                               <div

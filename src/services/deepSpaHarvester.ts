@@ -273,6 +273,7 @@ export async function runDeepSpaHarvester(
               latencyMs,
             });
           }
+          const isSuccess2xx = resp.status() >= 200 && resp.status() < 300;
           if (!apiMap.has(key)) {
             apiMap.set(key, {
               id: `EP-${String(apiMap.size + 1).padStart(3, '0')}`,
@@ -285,14 +286,23 @@ export async function runDeepSpaHarvester(
               description: `Intercepted live API call (${u.origin})`,
               queryParameters: queryParams,
               requestBodySchema: reqBodySchema,
+              responseSchema: isSuccess2xx && jsonBody ? jsonBody : undefined,
               linkedTestCaseIds: [`TC-${String(apiMap.size + 1).padStart(3, '0')}`],
               linkedRequirementId: 'REQ-US-01',
               authRequired: true,
             });
-          } else if (queryParams) {
+          } else {
             const existing = apiMap.get(key);
-            if (existing && !existing.queryParameters) {
-              existing.queryParameters = queryParams;
+            if (existing) {
+              if (queryParams && !existing.queryParameters) {
+                existing.queryParameters = queryParams;
+              }
+              if (reqBodySchema && !existing.requestBodySchema) {
+                existing.requestBodySchema = reqBodySchema;
+              }
+              if (isSuccess2xx && jsonBody && !existing.responseSchema) {
+                existing.responseSchema = jsonBody;
+              }
             }
           }
 
@@ -546,11 +556,27 @@ export async function runDeepSpaHarvester(
         if (config.extraFields && Object.keys(config.extraFields).length > 0) {
           for (const [, val] of Object.entries(config.extraFields)) {
             if (!val) continue;
+            const rawVal = String(val).trim();
+            const cleanVal = rawVal.replace(/\([^)]*\)/g, '').trim();
+            const primaryToken = cleanVal.split(/[\s|/,-]+/)[0]?.toLowerCase() || cleanVal.toLowerCase();
+
             await page
-              .evaluate(`((v) => {
+              .evaluate(`(({ rawVal, cleanVal, primaryToken }) => {
+                const matchOption = (text, valueAttr = '') => {
+                  const t = (text || '').trim().toLowerCase();
+                  const vAttr = (valueAttr || '').trim().toLowerCase();
+                  if (!t && !vAttr) return false;
+                  return (
+                    t === rawVal.toLowerCase() ||
+                    t === cleanVal.toLowerCase() ||
+                    vAttr === cleanVal.toLowerCase() ||
+                    (primaryToken.length >= 3 && (t.includes(primaryToken) || vAttr.includes(primaryToken)))
+                  );
+                };
+
                 const selects = Array.from(document.querySelectorAll('select'));
                 for (const s of selects) {
-                  const opt = Array.from(s.options).find((o) => o.value.toLowerCase() === v.toLowerCase() || (o.textContent || '').toLowerCase().includes(v.toLowerCase()));
+                  const opt = Array.from(s.options).find((o) => matchOption(o.textContent, o.value));
                   if (opt) {
                     s.value = opt.value;
                     s.dispatchEvent(new Event('input', { bubbles: true }));
@@ -561,15 +587,27 @@ export async function runDeepSpaHarvester(
                 document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], .el-select, .v-select, .ant-select, [class*="select" i]').forEach((el) => {
                   try { el.click(); } catch (e) {}
                 });
-              })(${JSON.stringify(val)})`)
+              })(${JSON.stringify({ rawVal, cleanVal, primaryToken })})`)
               .catch(() => {});
             await page.waitForTimeout(350);
             await page
-              .evaluate(`((v) => {
+              .evaluate(`(({ rawVal, cleanVal, primaryToken }) => {
+                const matchOption = (text, valueAttr = '') => {
+                  const t = (text || '').trim().toLowerCase();
+                  const vAttr = (valueAttr || '').trim().toLowerCase();
+                  if (!t && !vAttr) return false;
+                  return (
+                    t === rawVal.toLowerCase() ||
+                    t === cleanVal.toLowerCase() ||
+                    vAttr === cleanVal.toLowerCase() ||
+                    (primaryToken.length >= 3 && (t.includes(primaryToken) || vAttr.includes(primaryToken)))
+                  );
+                };
+
                 const items = Array.from(document.querySelectorAll('[role="option"], li, .el-select-dropdown__item, .v-list-item, .ant-select-item-option, span, div'));
-                const hit = items.find((el) => (el.textContent || '').trim().toLowerCase() === v.toLowerCase() && el.getBoundingClientRect().width > 10);
+                const hit = items.find((el) => matchOption(el.textContent, el.getAttribute('data-value') || el.getAttribute('value') || '') && el.getBoundingClientRect().width > 10);
                 if (hit) hit.click();
-              })(${JSON.stringify(val)})`)
+              })(${JSON.stringify({ rawVal, cleanVal, primaryToken })})`)
               .catch(() => {});
             await page.waitForTimeout(250);
           }
@@ -591,6 +629,38 @@ export async function runDeepSpaHarvester(
             .evaluate(`Boolean(document.querySelector('input[type="password"]')) && /\/login|\/signin/i.test(window.location.pathname)`)
             .catch(() => false);
           if (!stillOnLogin) break;
+        }
+        await waitForSpaDataReady(page, 2800);
+
+        // Jika diarahkan ke /home atau /dashboard (atau rute non-login), pastikan menu sidebar dibuka penuh sebelum diekstrak
+        const postLoginPath = await page.evaluate(`window.location.pathname`).catch(() => '');
+        if (/\/home|\/dashboard/i.test(postLoginPath) || !/\/login|\/signin/i.test(postLoginPath)) {
+          await page
+            .evaluate(`(() => {
+              const expandableSelectors = [
+                'aside [aria-expanded="false"]',
+                'nav [aria-expanded="false"]',
+                '.v-list-group__header',
+                '.el-sub-menu__title',
+                '.ant-menu-submenu-title',
+                'aside button',
+                'nav button',
+                '[class*="sidebar" i] [class*="menu" i]',
+                '[class*="sidebar" i] [class*="accordion" i]',
+                '[class*="sidebar" i] [class*="item" i]',
+                '[class*="sidebar" i] [class*="title" i]',
+                '[class*="menu" i] [class*="header" i]',
+                '[class*="drawer" i] button'
+              ];
+              document.querySelectorAll(expandableSelectors.join(', ')).forEach((el) => {
+                const txt = (el.textContent || '').trim();
+                if (!/logout|keluar|sign out|hapus|delete/i.test(txt)) {
+                  try { el.click(); } catch (e) {}
+                }
+              });
+            })()`)
+            .catch(() => {});
+          await page.waitForTimeout(600);
         }
         await page.waitForTimeout(1800);
         await context.storageState({ path: AUTH_STATE_PATH }).catch(() => {});
@@ -896,6 +966,26 @@ export async function runDeepSpaHarvester(
       };
       page.once('pageerror', pageErrorHandler);
 
+      const consoleErrorHandler = (msg: any) => {
+        try {
+          if (msg.type() === 'error' && activeRouteAnomalies.length < 8) {
+            const text = (msg.text() || '').slice(0, 200);
+            if (!activeRouteAnomalies.some((a) => a.type === 'CONSOLE_ERROR' && a.actualBehavior.includes(text.slice(0, 40)))) {
+              activeRouteAnomalies.push({
+                type: 'CONSOLE_ERROR',
+                severity: 'MAJOR',
+                title: `Browser Console Error on ${routePath}`,
+                expectedBehavior: 'Clean browser console without runtime JS exceptions',
+                actualBehavior: text || 'Uncaught console error',
+                technicalEvidence: `console.error: ${text}`,
+                stepsToReproduce: [`Open ${routePath} and inspect DevTools console`],
+              });
+            }
+          }
+        } catch {}
+      };
+      page.on('console', consoleErrorHandler);
+
       try {
         // Anti-Hang Per-Page Navigation Guard dengan batas timeout 14 detik
         await Promise.race([
@@ -1150,6 +1240,18 @@ export async function runDeepSpaHarvester(
                 .replace(/[-_/]+/g, ' ')
                 .replace(/\b\w/g, (c: string) => c.toUpperCase());
 
+        if (domSurface.cols.length > 0 && domSurface.rows.length === 0 && activeRouteAnomalies.length < 8) {
+          activeRouteAnomalies.push({
+            type: 'EMPTY_TABLE_ERROR',
+            severity: 'MINOR',
+            title: `Empty Dataset Rendered on ${cleanModuleName} (${routePath})`,
+            expectedBehavior: 'Data table renders initial records or explicit empty-state notice',
+            actualBehavior: `Table headers [${domSurface.cols.slice(0, 4).join(', ')}] rendered with 0 data rows`,
+            technicalEvidence: `DOM <table> at ${routePath} has ${domSurface.cols.length} columns and 0 <tbody> rows`,
+            stepsToReproduce: [`Open ${routePath} and inspect primary data table`],
+          });
+        }
+
         featureModules.push({
           moduleId: `MOD-${String(modNum).padStart(2, '0')}`,
           moduleName: cleanModuleName,
@@ -1233,7 +1335,12 @@ export async function runDeepSpaHarvester(
                 ],
           observedAnomalies: [...activeRouteAnomalies],
         });
-      } catch {}
+      } catch (routeErr: any) {
+        console.warn(`[DeepSpaHarvester] Route iteration notice on ${routePath}:`, routeErr?.message);
+      } finally {
+        page.off('pageerror', pageErrorHandler);
+        page.off('console', consoleErrorHandler);
+      }
     }
 
     await browser.close();

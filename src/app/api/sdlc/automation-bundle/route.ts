@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { workspaceVaultService } from '@/services/workspaceVaultService';
 import { automationBundleExportService } from '@/services/automationBundleExportService';
 import { rbacDifferentialMatrixService } from '@/services/rbacDifferentialMatrixService';
+import { selfHealingPatchService } from '@/services/selfHealingPatchService';
 
 export async function GET(request: Request) {
   try {
@@ -48,6 +49,17 @@ export async function GET(request: Request) {
     if (format === 'rbac') {
       const matrix = rbacDifferentialMatrixService.buildDifferentialMatrix(state);
       return NextResponse.json(matrix, { status: 200 });
+    }
+
+    if (format === 'git-patch' || format === 'patch') {
+      const patch = selfHealingPatchService.generateUnifiedGitPatch(state);
+      return new NextResponse(patch, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/x-diff; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${slug}-remediation.patch"`,
+        },
+      });
     }
 
     const specTs = automationBundleExportService.generatePlaywrightSpecTs(state);

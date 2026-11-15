@@ -2000,9 +2000,17 @@ export class Iso26514UserManualService {
       });
     });
 
-    // Anti-blank-screen guard: a missing or uniform-white JPEG cannot guide a reader.
-    // Replace it with a data-driven UI blueprint built from the harvested surface.
-    const resolvedScreenshotDataUrl = isBlankOrMissingScreenshot(mod.screenshotDataUrl)
+    // Anti-blank-screen guard: a missing, malformed, or unencoded SVG screenshot cannot guide a reader.
+    // Replace it with a crisp Base64 data-driven UI blueprint built from the harvested surface.
+    const isBadShot =
+      !mod.screenshotDataUrl ||
+      typeof mod.screenshotDataUrl !== 'string' ||
+      mod.screenshotDataUrl.length < 1500 ||
+      !mod.screenshotDataUrl.startsWith('data:image/') ||
+      mod.screenshotDataUrl.startsWith('data:image/svg+xml;utf8') ||
+      isBlankOrMissingScreenshot(mod.screenshotDataUrl);
+
+    const resolvedScreenshotDataUrl = isBadShot
       ? this.buildRichModuleBlueprintSvgDataUrl(mod, buttonsList, filtersList)
       : mod.screenshotDataUrl;
 

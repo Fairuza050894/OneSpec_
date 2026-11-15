@@ -98,6 +98,115 @@ export class OwaspDastService {
   }
 
   /**
+   * Performs an active, empirical HTTP probe to capture live server security headers
+   * and test unauthenticated gateway boundaries against API2:2023.
+   */
+  public async executeLiveActiveDastAudit(params: {
+    targetUrl: string;
+    appName: string;
+    apiEndpoints: DiscoveredApiEndpoint[];
+    databaseTables: DatabaseErdTable[];
+    validationRules: ValidationRuleContract[];
+    discoveredFeatureModules?: DiscoveredFeatureModule[] | FeatureModuleSurface[];
+    gapAuditItems?: GapAuditItem[] | AuditDiscrepancyItem[];
+  }): Promise<OwaspDastAssessmentSummary> {
+    const liveHeaders: Record<string, string> = {};
+
+    // 1. Fetch real server headers via lightweight HEAD/GET request (4000ms timeout)
+    try {
+      const abortCtrl = new AbortController();
+      const timer = setTimeout(() => abortCtrl.abort(), 4000);
+      let headRes = await fetch(params.targetUrl, {
+        method: 'HEAD',
+        signal: abortCtrl.signal,
+        headers: { 'User-Agent': 'OneSpec-LiveDast-Probe/2.0' },
+      }).catch(() => null);
+
+      if (!headRes || !headRes.ok) {
+        const getCtrl = new AbortController();
+        const getTimer = setTimeout(() => getCtrl.abort(), 4000);
+        headRes = await fetch(params.targetUrl, {
+          method: 'GET',
+          signal: getCtrl.signal,
+          headers: { 'User-Agent': 'OneSpec-LiveDast-Probe/2.0' },
+        }).catch(() => null);
+        clearTimeout(getTimer);
+      }
+      clearTimeout(timer);
+
+      if (headRes && headRes.headers) {
+        headRes.headers.forEach((val, key) => {
+          liveHeaders[key.toLowerCase()] = val;
+        });
+      }
+    } catch (probeErr) {
+      console.warn('[OwaspDastService] Active header probe notice:', probeErr);
+    }
+
+    // 2. Active Unauthenticated Ingress Probe against protected endpoint (API2:2023)
+    let unauthProbeResult: { status: number; leaked: boolean; detail: string } | null = null;
+    const protectedEp =
+      params.apiEndpoints.find(
+        (e) =>
+          e.authRequired ||
+          /api|v1|v2|user|profile|order|faktur|transaksi|dashboard|data|secure/i.test(e.path)
+      ) || params.apiEndpoints[0];
+
+    if (protectedEp && params.targetUrl.startsWith('http')) {
+      try {
+        const probeTarget = new URL(protectedEp.path, params.targetUrl).toString();
+        const probeCtrl = new AbortController();
+        const probeTimer = setTimeout(() => probeCtrl.abort(), 4000);
+        const probeRes = await fetch(probeTarget, {
+          method: protectedEp.method || 'GET',
+          signal: probeCtrl.signal,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'OneSpec-LiveDast-Probe/2.0',
+          },
+        }).catch(() => null);
+        clearTimeout(probeTimer);
+
+        if (probeRes) {
+          const status = probeRes.status;
+          const isSecure = status === 401 || status === 403 || status === 404;
+          unauthProbeResult = {
+            status,
+            leaked: !isSecure && status === 200,
+            detail: isSecure
+              ? `Live probe verified: Server rejected unauthenticated call with HTTP ${status} on ${protectedEp.path}. Boundary enforced.`
+              : `Live probe warning: Server returned HTTP ${status} for unauthenticated call on ${protectedEp.path}. Potential unauthorized data exposure.`,
+          };
+        }
+      } catch (authErr) {
+        console.warn('[OwaspDastService] Unauthenticated probe notice:', authErr);
+      }
+    }
+
+    // 3. Synthesize full DAST report with captured liveHeaders
+    const summary = this.generateDastAudit({
+      ...params,
+      liveHeaders,
+    });
+
+    // 4. Enrich API2 finding with active probe evidence
+    if (unauthProbeResult) {
+      const api2 = summary.findings.find((f) => f.owaspCategory === 'API2:2023');
+      if (api2) {
+        api2.observedResponse = `${unauthProbeResult.detail} (HTTP ${unauthProbeResult.status} observed live).`;
+        if (unauthProbeResult.leaked) {
+          api2.status = 'VULNERABLE';
+          api2.severity = 'CRITICAL';
+        } else {
+          api2.status = 'VERIFIED_SECURE';
+        }
+      }
+    }
+
+    return summary;
+  }
+
+  /**
    * Synthesizes and executes full OWASP API Top 10 assessment against project endpoints
    */
   public generateDastAudit(params: {

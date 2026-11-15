@@ -176,7 +176,18 @@ export function QuickExportToolbar({
         <span>RBAC Matrix (JSON)</span>
       </a>
 
-      {/* 6. Master ISO Handover Bundle (.zip) */}
+      {/* 6. Self-Healing Git Patch (.patch) */}
+      <a
+        href={`/api/sdlc/automation-bundle?format=git-patch${projectParam}`}
+        download={`${slug}-remediation.patch`}
+        className="h-7 px-2.5 bg-[#111317] hover:bg-[#16191F] border border-[#22262E] hover:border-[#10B981] text-[#EDEDED] rounded-[3px] flex items-center gap-1.5 cursor-pointer transition-colors"
+        title="Download Autonomous Unified Git Remediation Patch & Runbook (.patch)"
+      >
+        <span className="text-[12px]">🩹</span>
+        <span>Self-Healing Git Patch (.patch)</span>
+      </a>
+
+      {/* 7. Master ISO Handover Bundle (.zip) */}
       <a
         href={`/api/sdlc/export-all-bundle?format=zip${projectParam}&locale=${locale}`}
         download={`OneSpec_Master_ISO_Bundle_${slug}.zip`}

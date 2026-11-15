@@ -136,6 +136,38 @@ export function computeNextSemanticVersion(
   return `v${major}.${minor}.${patch + 1}`;
 }
 
+export function cleanProjectDisplayName(rawName?: string, targetUrl?: string): string {
+  let name = (rawName || '').trim();
+  if (!name && targetUrl) {
+    try {
+      const u = new URL(targetUrl);
+      name = u.hostname.split('.')[0] || 'Project';
+    } catch {
+      name = 'Project';
+    }
+  }
+
+  // Remove trailing page titles e.g. "Mobospace - Home", "ERP - Dashboard", "Mobospace | Beranda"
+  name = name.replace(/\s*[-–—|]\s*(home|dashboard|beranda|login|sign\s*in|masuk|index)\b/gi, '').trim();
+
+  // If name has hyphens or underscores (e.g. mobospace-sandbox or Mobospace-sandbox)
+  if (name.includes('-') || name.includes('_')) {
+    const parts = name.split(/[-_]+/).filter(Boolean);
+    const cleanedParts = parts.filter((p) => !/^(home|dashboard|beranda|index)$/i.test(p));
+    if (cleanedParts.length > 0) {
+      name = cleanedParts
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+    }
+  } else if (/^[a-z0-9]+$/i.test(name) && name.length > 2) {
+    if (name === name.toLowerCase()) {
+      name = name.charAt(0).toUpperCase() + name.slice(1);
+    }
+  }
+
+  return name || 'Active Project';
+}
+
 export class WorkspaceVaultService {
   private static instance: WorkspaceVaultService;
 
@@ -165,6 +197,10 @@ export class WorkspaceVaultService {
       .toLowerCase()
       .slice(0, 64);
     return cleaned || `project-${Date.now()}`;
+  }
+
+  public cleanProjectDisplayName(rawName?: string, targetUrl?: string): string {
+    return cleanProjectDisplayName(rawName, targetUrl);
   }
 
   public extractMetricsFromState(state: CompiledSdlcState): {
@@ -655,8 +691,10 @@ export class WorkspaceVaultService {
   }): SavedProjectRecord {
     this.ensureVaultDirectories();
     const { compiledState, createSnapshot = true, versionLabel } = params;
-    const projectName = (params.projectName || compiledState.appName || 'Active Project').trim();
     const targetUrl = (params.targetUrl || compiledState.targetUrl || 'http://localhost:3000/').trim();
+    const rawProjectName = (params.projectName || compiledState.appName || 'Active Project').trim();
+    const projectName = cleanProjectDisplayName(rawProjectName, targetUrl);
+    compiledState.appName = projectName;
     const projectType: VaultProjectType =
       params.projectType ||
       (targetUrl.startsWith('greenfield://')
@@ -667,9 +705,81 @@ export class WorkspaceVaultService {
         ? 'GIT_REPO'
         : 'EXISTING_WEB');
 
-    const projectId = this.slugifyProjectId(params.projectId || projectName || targetUrl);
+    const canonicalKey = (raw: string) => {
+      try {
+        if (raw.startsWith('http://') || raw.startsWith('https://')) {
+          const u = new URL(raw);
+          const hp = `${u.hostname.toLowerCase()}${u.port ? ':' + u.port : ''}`;
+          if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+            const seg = u.pathname.split('/').filter(Boolean)[0] || '';
+            return seg && !/^(login|home|dashboard)$/i.test(seg) ? `${hp}/${seg.toLowerCase()}` : hp;
+          }
+          return hp;
+        }
+      } catch {}
+      return raw.toLowerCase().replace(/\/+$/, '');
+    };
+    const existingByUrl = this.readIndexFile().find(
+      (e) => canonicalKey(e.targetUrl) === canonicalKey(targetUrl)
+    );
+    const projectId = existingByUrl?.projectId || this.slugifyProjectId(params.projectId || projectName || targetUrl);
     const projectFilePath = path.join(PROJECTS_DIR, `${projectId}.json`);
     const existingRecord = this.getProject(projectId);
+
+    if (existingRecord?.latestState) {
+      const prevMods = existingRecord.latestState.discoveredFeatureModules || [];
+      const currMods = compiledState.discoveredFeatureModules || [];
+
+      // Smart Module Union: if previous state had more modules, never lose them due to partial scan
+      if (prevMods.length > currMods.length) {
+        const currRoutes = new Set(currMods.map((m) => (m.routePath || '').toLowerCase()));
+        const preservedMods = prevMods.filter((m) => !currRoutes.has((m.routePath || '').toLowerCase()));
+        const mergedMods = [...currMods, ...preservedMods].map((mod, idx) => ({
+          ...mod,
+          moduleId: `MOD-${String(idx + 1).padStart(2, '0')}`,
+        }));
+        compiledState.discoveredFeatureModules = mergedMods;
+        if (compiledState.discoveryResult) {
+          (compiledState.discoveryResult as any).featureModules = mergedMods;
+        }
+      }
+
+      // Monotonically enrich apiEndpoints
+      const prevApis = existingRecord.latestState.discoveryResult?.apiEndpoints || (existingRecord.latestState as any).apiEndpoints || [];
+      const currApis = compiledState.discoveryResult?.apiEndpoints || (compiledState as any).apiEndpoints || [];
+      const currApiKeys = new Set(currApis.map((a: any) => `${a.method || ''} ${(a.path || a.endpoint || '').toLowerCase()}`));
+      const missingApis = prevApis.filter((a: any) => !currApiKeys.has(`${a.method || ''} ${(a.path || a.endpoint || '').toLowerCase()}`));
+      if (missingApis.length > 0) {
+        const enrichedApis = [...currApis, ...missingApis];
+        if (compiledState.discoveryResult) {
+          compiledState.discoveryResult.apiEndpoints = enrichedApis;
+        }
+        (compiledState as any).apiEndpoints = enrichedApis;
+      }
+
+      // Monotonically enrich databaseTables
+      const prevTables = existingRecord.latestState.databaseTables || existingRecord.latestState.discoveryResult?.databaseTables || [];
+      const currTables = compiledState.databaseTables || compiledState.discoveryResult?.databaseTables || [];
+      const currTableNames = new Set(currTables.map((t: any) => (t.tableName || '').toLowerCase()));
+      const missingTables = prevTables.filter((t: any) => !currTableNames.has((t.tableName || '').toLowerCase()));
+      if (missingTables.length > 0) {
+        const enrichedTables = [...currTables, ...missingTables];
+        compiledState.databaseTables = enrichedTables;
+        if (compiledState.discoveryResult) {
+          compiledState.discoveryResult.databaseTables = enrichedTables;
+        }
+      }
+
+      // Monotonically enrich userManuals
+      const prevManuals = (existingRecord.latestState as any).userManuals || [];
+      const currManuals = (compiledState as any).userManuals || [];
+      const currManualRoutes = new Set(currManuals.map((m: any) => (m.routePath || '').toLowerCase()));
+      const missingManuals = prevManuals.filter((m: any) => !currManualRoutes.has((m.routePath || '').toLowerCase()));
+      if (missingManuals.length > 0) {
+        (compiledState as any).userManuals = [...currManuals, ...missingManuals];
+      }
+    }
+
     const existingSnapshots = existingRecord?.snapshots || [];
 
     let updatedSnapshots = [...existingSnapshots];

@@ -185,7 +185,7 @@ const renderCards = (mod: BlueprintModuleInput, x: number, y: number, width: num
 
 /**
  * Render a 1280x720 dark enterprise UI blueprint for a feature module.
- * Returns a `data:image/svg+xml;utf8,...` URL that every browser renders crisply.
+ * Returns a `data:image/svg+xml;base64,...` URL that every browser renders crisply.
  */
 export function buildFeatureModuleBlueprintSvgDataUrl(
   mod: BlueprintModuleInput,
@@ -352,15 +352,21 @@ export function buildFeatureModuleBlueprintSvgDataUrl(
     parts.join('') +
     `</svg>`;
 
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  const base64 =
+    typeof Buffer !== 'undefined'
+      ? Buffer.from(svg, 'utf8').toString('base64')
+      : btoa(unescape(encodeURIComponent(svg)));
+  return `data:image/svg+xml;base64,${base64}`;
 }
 
 /**
- * True when a screenshot data URL is missing, an SVG (already a blueprint), or a
- * suspiciously tiny JPEG/PNG that compresses to near-uniform white.
+ * True when a screenshot data URL is missing, invalid, un-base64-encoded SVG,
+ * or a suspiciously tiny JPEG/PNG that compresses to near-uniform white.
  */
 export function isBlankOrMissingScreenshot(dataUrl: string | undefined | null): boolean {
-  if (!dataUrl) return true;
-  if (dataUrl.startsWith('data:image/svg+xml')) return false;
-  return dataUrl.length < 6500;
+  if (!dataUrl || typeof dataUrl !== 'string') return true;
+  if (!dataUrl.startsWith('data:image/')) return true;
+  if (dataUrl.startsWith('data:image/svg+xml;utf8')) return true;
+  if (dataUrl.startsWith('data:image/svg+xml;base64,')) return false;
+  return dataUrl.length < 1500;
 }

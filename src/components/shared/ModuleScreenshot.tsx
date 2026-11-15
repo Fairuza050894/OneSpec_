@@ -31,15 +31,25 @@ export function ModuleScreenshot({
   title,
   showSourceBadge = true,
 }: ModuleScreenshotProps) {
-  const initialSrc = isBlankOrMissingScreenshot(src) ? blueprintDataUrl : (src as string);
+  const fallbackSvg =
+    blueprintDataUrl ||
+    'data:image/svg+xml;base64,' +
+      (typeof btoa !== 'undefined'
+        ? btoa(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#0B0C0E"/><text x="640" y="360" fill="#64748B" font-family="sans-serif" font-size="20" text-anchor="middle">Module Visual Mockup</text></svg>`
+          )
+        : '');
+
+  const isInvalid = !src || typeof src !== 'string' || isBlankOrMissingScreenshot(src);
+  const initialSrc = isInvalid ? fallbackSvg : (src as string);
   const [resolvedSrc, setResolvedSrc] = useState(initialSrc);
-  const [usedBlueprint, setUsedBlueprint] = useState(initialSrc === blueprintDataUrl);
+  const [usedBlueprint, setUsedBlueprint] = useState(initialSrc === fallbackSvg);
   const requestRef = useRef(0);
 
   useEffect(() => {
     const requestId = ++requestRef.current;
     if (isBlankOrMissingScreenshot(src)) {
-      setResolvedSrc(blueprintDataUrl);
+      setResolvedSrc(fallbackSvg);
       setUsedBlueprint(true);
       return;
     }
@@ -52,33 +62,33 @@ export function ModuleScreenshot({
     void detectBlankRasterDataUrl(candidate).then((verdict) => {
       if (cancelled || requestId !== requestRef.current) return;
       if (verdict === 'BLANK') {
-        setResolvedSrc(blueprintDataUrl);
+        setResolvedSrc(fallbackSvg);
         setUsedBlueprint(true);
       }
     });
     return () => {
       cancelled = true;
     };
-  }, [src, blueprintDataUrl]);
+  }, [src, fallbackSvg]);
 
   return (
-    <div className="relative w-full">
+    <div className="relative w-full min-h-[260px] bg-slate-950 flex items-center justify-center">
       <img
         src={resolvedSrc}
         alt={alt}
         title={title}
         data-screenshot-source={usedBlueprint ? 'blueprint' : 'capture'}
-        className={className}
+        className={`w-full min-h-[260px] bg-slate-950 object-contain block ${className || ''}`}
         onError={(event) => {
           const img = event.currentTarget;
           if (img.dataset.blueprintFallback === '1') return;
           img.dataset.blueprintFallback = '1';
-          img.src = blueprintDataUrl;
+          img.src = fallbackSvg;
           setUsedBlueprint(true);
         }}
       />
       {showSourceBadge && usedBlueprint && (
-        <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-[2px] bg-[#0B0C0E]/90 border border-[#22262E] text-[9px] font-mono font-bold uppercase tracking-wide text-[#10B981] pointer-events-none">
+        <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-[2px] bg-[#0B0C0E]/90 border border-[#22262E] text-[9px] font-mono font-bold uppercase tracking-wide text-[#10B981] pointer-events-none z-10">
           ISO 26514 Blueprint
         </span>
       )}

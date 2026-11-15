@@ -433,7 +433,29 @@ ${tables || '- Primary entity table'}
               <h3 className="font-bold text-[#EDEDED] mb-2">CTO BUS-FACTOR &amp; ROI SCORECARD</h3>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-[#A1A1A1]">
                 <span>Bus-factor coverage <b className="text-[#10B981] tabular-nums">{portfolio.productCatalogCards.length ? Math.round(portfolio.productCatalogCards.reduce((sum, card) => sum + card.ctoGovernanceScorecard.busFactorEliminationPercent, 0) / portfolio.productCatalogCards.length) : 0}%</b></span>
-                <span>Freshness <b className="text-[#EDEDED]">{portfolio.productCatalogCards.every((card) => card.ctoGovernanceScorecard.documentationFreshnessSla === '100% SYNCED WITH LATEST SCAN') ? '100% SYNCED WITH LATEST SCAN' : 'STALE / UNKNOWN'}</b></span>
+                {(() => {
+                  const latestScanMs = portfolio.productCatalogCards.reduce((max, card) => {
+                    const dateStr = card.lastScanAt || card.lastUpdated;
+                    const t = dateStr ? new Date(dateStr).getTime() : 0;
+                    return !isNaN(t) && t > max ? t : max;
+                  }, 0);
+                  const hoursDiff = latestScanMs > 0 ? (Date.now() - latestScanMs) / (1000 * 60 * 60) : 0;
+                  const isLiveToday = hoursDiff < 24;
+                  const isThisWeek = hoursDiff < 168;
+                  const label = isLiveToday
+                    ? 'SYNCHRONIZED · LIVE TODAY'
+                    : isThisWeek
+                    ? 'ACTIVE · THIS WEEK'
+                    : 'SYNCHRONIZED · ARCHIVED';
+                  return (
+                    <span>
+                      Freshness{' '}
+                      <b className={isLiveToday ? 'text-[#10B981]' : isThisWeek ? 'text-[#38BDF8]' : 'text-[#EDEDED]'}>
+                        {label}
+                      </b>
+                    </span>
+                  );
+                })()}
                 <span>Portfolio hours <b className="text-[#EDEDED] tabular-nums">{portfolio.totalManHoursSaved}</b> · BA {portfolio.totalManHoursSavedByRole.ba} · Architect {portfolio.totalManHoursSavedByRole.architect} · QA {portfolio.totalManHoursSavedByRole.sdetQa} · Writer {portfolio.totalManHoursSavedByRole.techWriter}</span>
                 <span>Cost savings <b className="text-[#EDEDED] tabular-nums">Rp {portfolio.totalEstimatedSavingsIdr.toLocaleString('id-ID')} / ${portfolio.totalEstimatedSavingsUsd.toLocaleString('en-US')}</b></span>
                 <span>P0 tests <b className="text-[#EDEDED] tabular-nums">{portfolio.totalP0SmokeTests}</b></span>

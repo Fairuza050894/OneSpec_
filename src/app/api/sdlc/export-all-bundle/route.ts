@@ -7,6 +7,7 @@ import { modernDocumentExporter } from '@/services/modernDocumentExporter';
 import { automationBundleExportService } from '@/services/automationBundleExportService';
 import { rbacDifferentialMatrixService } from '@/services/rbacDifferentialMatrixService';
 import { triModalDiscoveryService } from '@/services/triModalDiscoveryService';
+import { selfHealingPatchService } from '@/services/selfHealingPatchService';
 import { createZip } from '@/lib/xlsxWriter';
 import { sanitizeFeatureModuleScreenshots } from '@/lib/featureModuleScreenshotSanitizer';
 import { isBlankRasterDataUrl } from '@/services/screenshotIntegrityService';
@@ -163,6 +164,7 @@ async function handleExportBundle(req: NextRequest) {
         { filename: `04_OneSpec_Postman_${slug}.postman_collection.json`, description: 'Postman v2.1 Collection & Contract Tests' },
         { filename: `05_OneSpec_RBAC_Matrix_${slug}.json`, description: 'Multi-Persona RBAC Differential Security Matrix' },
         { filename: `06_OneSpec_OpenAPI_3.1_${slug}.json`, description: 'Canonical OpenAPI 3.1.0 Endpoint Specification' },
+        { filename: `07_OneSpec_Remediation_Patch_${slug}.patch`, description: 'Unified Git Remediation Patch & Runbook (.patch)' },
       ],
       metrics: {
         featureModulesCount: (exportState.discoveredFeatureModules || []).length,
@@ -183,6 +185,8 @@ async function handleExportBundle(req: NextRequest) {
       });
     }
 
+    const remediationPatch = selfHealingPatchService.generateUnifiedGitPatch(exportState);
+
     // Build Master ZIP Archive
     const zipFiles: Array<{ name: string; content: string | Uint8Array }> = [
       { name: `01_OneSpec_QA_Workbook_${slug}.xlsx`, content: xlsxBytes },
@@ -191,6 +195,7 @@ async function handleExportBundle(req: NextRequest) {
       { name: `04_OneSpec_Postman_${slug}.postman_collection.json`, content: postmanJson },
       { name: `05_OneSpec_RBAC_Matrix_${slug}.json`, content: JSON.stringify(rbacMatrix, null, 2) },
       { name: `06_OneSpec_OpenAPI_3.1_${slug}.json`, content: JSON.stringify(openApiSpec, null, 2) },
+      { name: `07_OneSpec_Remediation_Patch_${slug}.patch`, content: remediationPatch },
       { name: `00_ISO_Audit_Handover_Manifest_${slug}.json`, content: JSON.stringify(manifest, null, 2) },
     ];
 

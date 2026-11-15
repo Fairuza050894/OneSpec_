@@ -70,6 +70,8 @@ flowchart TD
         E4["🚀 Postman Collection v2.1 (.json)"]
         E5["🛡️ Multi-Persona RBAC Differential Matrix (.json)"]
         E6["🔒 Merkle Audit Vault Snapshots (SHA-256)"]
+        E7["🩹 Autonomous Git Remediation Patch (.patch)"]
+        E8["🚦 CI/CD Release Gatekeeper API (/api/sdlc/ci-gate)"]
     end
 
     INGESTION --> CRAWLER
@@ -239,6 +241,39 @@ To run autonomous deep harvesting directly from the command line:
 ```bash
 node scripts/deep-harvest-cli.mjs https://target-app.example.com
 ```
+
+---
+
+## 8. Enterprise CI/CD Gatekeeper & Autonomous Remediation
+
+### 8.1 CI/CD Release & ISO Compliance Gatekeeper API (`/api/sdlc/ci-gate`)
+Automated quality gatekeeper for GitHub Actions & GitLab CI pipelines. Evaluates 5 absolute ISO/OWASP gates and returns an immutable SHA-256 Merkle Audit Seal:
+
+- **Gate 1 (`iso29148_RequirementsParity`):** 100% of discovered modules bound to BRD/SyRS specifications.
+- **Gate 2 (`iso29119_QaPassRate`):** Automated QA Pass Rate >= 85%.
+- **Gate 3 (`iso26514_ZeroUndocumentedControls`):** 100% of modules have complete 9-Section documentation and visual callout pins.
+- **Gate 4 (`owasp2023_ZeroCriticalVulnerabilities`):** Zero critical OWASP vulnerabilities and verified multi-persona RBAC matrix.
+- **Gate 5 (`iso5055_SreReadinessScore`):** SRE Production Readiness Review score >= 80%.
+
+```bash
+# Query release status for CI/CD pipeline
+curl -s "http://localhost:3000/api/sdlc/ci-gate?projectId=mobospace-home" | jq .
+
+# Pipeline step enforcement (returns 422 if blocked)
+curl -f -X POST "http://localhost:3000/api/sdlc/ci-gate?enforceStatus=true" \
+  -H "Content-Type: application/json" \
+  -d '{"projectId":"mobospace-home"}'
+```
+
+### 8.2 Autonomous Git Remediation Patch Generator (`.patch`)
+Generates production-grade Unified Git Patches and Markdown Runbooks (`docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md`) ready to apply via `git apply`:
+- **OWASP API Top 10 Fixes:** Tenant isolation middleware (API1), mass assignment Zod strict DTOs (API3), rate limiters (API4), security headers & restricted CORS (API8).
+- **Stage 4 SQL Bottleneck Remediation:** High-performance PostgreSQL/MySQL composite index DDL scripts (`CREATE INDEX CONCURRENTLY IF NOT EXISTS ...`).
+- **Gap Audit & Anomaly Guards:** Strict input validation contracts preventing unvalidated entity mutations.
+
+Accessible via:
+- Endpoint: `GET /api/sdlc/automation-bundle?format=git-patch`
+- UI Toolbar: **`🩹 Self-Healing Git Patch (.patch)`** button in Step 08, Step 09, and Step 12.
 
 ---
 

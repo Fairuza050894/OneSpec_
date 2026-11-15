@@ -673,6 +673,7 @@ export interface DiscoveredApiEndpoint {
   queryParameters?: Record<string, { type: string; required?: boolean; example?: string }>;
   requestBodySchema?: Record<string, unknown> | null;
   responseSchemas?: Record<string, unknown>;
+  responseSchema?: Record<string, unknown> | any;
   linkedTestCaseIds: string[]; // e.g. ["TC-001", "TC-002", "TC-003"]
   linkedRequirementId: string; // e.g. "REQ-US-01"
   authRequired?: boolean;
