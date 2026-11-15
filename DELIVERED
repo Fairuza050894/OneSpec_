@@ -46,5 +46,15 @@
 | **OpenAPI 3.1.0 Rich Response Schemas** | **PASS** | `triModalDiscoveryService.ts`: Respons HTTP 200 menyertakan schema & example nyata; kontrak terstandar untuk HTTP 400, 401, 403, 422, dan 500 |
 | **Live Active DAST Ingress Probe** | **PASS** | `owaspDastService.ts`: `executeLiveActiveDastAudit()` melakukan request `HEAD`/`GET` live headers dan unauthenticated probe terhadap endpoint terproteksi (API2:2023) |
 | **Autonomous Git Remediation Patch** | **PASS** | `selfHealingPatchService.ts`: Menghasilkan Unified Git Patch (`.patch`) dan Markdown Runbook untuk celah BOLA (API1), Mass Assignment (API3), Rate Limiter (API4), Security Headers (API8), Stage 4 SQL Index DDL, dan DTO guards. Downloadable via `/api/sdlc/automation-bundle?format=git-patch` & UI buttons |
-| **Full Typecheck (Zero Errors)** | **PASS** | `npx tsc --noEmit` keluar dengan kode 0 (0 error di seluruh proyek) |
-| **Knowledge Graph Synchronization** | **PASS** | `graphify update .` menghasilkan 1258 nodes, 3263 edges, 90 communities (100% AST extraction) |
+
+### Block 6 — 6 Surgical Hardening Upgrades (Enterprise Checkpoint)
+| Item Tugas | Status | Implementasi & Bukti Teknis |
+|---|---|---|
+| **1. Playwright E2E Generator Hardening** | **PASS** | `automationBundleExportService.ts`: Asersi DOM `toBeAttached({ timeout: 5000 })` dan live HTTP request probe `apiRes.status() < 500` menggantikan placeholder sinkron `expect(primaryLocator).toBeDefined()`. |
+| **2. Dynamic CORS Evidence & Active DAST Integration** | **PASS** | `owaspDastService.ts`: Evaluasi dinamis `isWildcardCreds`, `isWildcard`, missing CSP pada `API8:2023`. Rute `dast-probe`, `runner/execute`, dan `sdlc/crawl` terhubung ke `executeLiveActiveDastAudit()`. |
+| **3. Cross-Subdomain API Key, `pageerror` & `sessionStorage`** | **PASS** | `deepSpaHarvester.ts`: Deduplikasi rute lintas-subdomain `[hostname]/path`, `page.on('pageerror')` kontinu hingga 8 anomali, dumping & restorasi `sessionStorage` SPA via initScript. `.gitignore` diperbarui untuk `.onespec-session-storage.json`. |
+| **4. AST Scanner Internal Vault & Cache Folder Exclusion** | **PASS** | `reaBridge.ts`: Pengecualian direktori `.onespec-vault`, `.onespec-*`, `.turbo`, `.vercel`, `coverage`, `migrations`, `__pycache__` mempercepat AST scan lokal. |
+| **5. Automatic Vault Duplicate Compaction** | **PASS** | `workspaceVaultService.ts`: Helper `getCanonicalTargetKey(raw)` dan `compactDuplicateEntries()` berjalan di `listProjects()`, menggabungkan snapshot ke pemenang modul terbanyak dan membersihkan entri duplikat. |
+| **6. Autonomous Self-Healing Git Patch Generator & UI Button** | **PASS** | `selfHealingPatchService.ts`, `automation-bundle/route.ts` (`attachment; filename="${slug}-self-healing-remediation.patch"`), dan tombol unduh `🩹 Git Patch (.patch)` di `QuickExportToolbar.tsx` serta header Step 08 dan Step 09. |
+| **Full Typecheck (Zero Errors)** | **PASS** | `npx tsc --noEmit` keluar dengan kode 0 (0 error di seluruh repositori). |
+| **Knowledge Graph Synchronization** | **PASS** | `graphify update .` tersinkronisasi (1264 nodes, 3279 edges, 91 communities). |

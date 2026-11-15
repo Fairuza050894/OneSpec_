@@ -566,15 +566,32 @@ export async function POST(req: NextRequest) {
   const passedCount = functionalResults.filter((r) => r.verdict === 'PASSED').length;
   const failedCount = functionalResults.length - passedCount;
 
-  // 7. Live OWASP DAST Audit using Real Captured Headers
-  const owaspDastSummary = owaspDastService.generateDastAudit({
-    targetUrl,
-    appName,
-    apiEndpoints,
-    databaseTables: [],
-    validationRules: [],
-    liveHeaders: capturedResponseHeaders,
-  });
+  // 7. Live OWASP DAST Audit using Real Captured Headers & Empirical Probe
+  const owaspDastSummary = /^https?:\/\//i.test(targetUrl)
+    ? await owaspDastService.executeLiveActiveDastAudit({
+        targetUrl,
+        appName,
+        apiEndpoints,
+        databaseTables: [],
+        validationRules: [],
+      }).catch(() =>
+        owaspDastService.generateDastAudit({
+          targetUrl,
+          appName,
+          apiEndpoints,
+          databaseTables: [],
+          validationRules: [],
+          liveHeaders: capturedResponseHeaders,
+        })
+      )
+    : owaspDastService.generateDastAudit({
+        targetUrl,
+        appName,
+        apiEndpoints,
+        databaseTables: [],
+        validationRules: [],
+        liveHeaders: capturedResponseHeaders,
+      });
 
   return NextResponse.json({
     success: true,

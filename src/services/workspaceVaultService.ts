@@ -660,8 +660,107 @@ export class WorkspaceVaultService {
     } catch {}
   }
 
+  private getCanonicalTargetKey(raw: string): string {
+    const trimmed = (raw || '').trim();
+    try {
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        const u = new URL(trimmed);
+        const hp = `${u.hostname.toLowerCase()}${u.port ? ':' + u.port : ''}`;
+        if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
+          const seg = u.pathname.split('/').filter(Boolean)[0] || '';
+          return seg && !/^(login|home|dashboard)$/i.test(seg) ? `${hp}/${seg.toLowerCase()}` : hp;
+        }
+        return hp;
+      }
+    } catch {}
+    return trimmed.toLowerCase().replace(/\/+$/, '');
+  }
+
+  private compactDuplicateEntries(): void {
+    const entries = this.readIndexFile();
+    if (entries.length <= 1) return;
+
+    const groups = new Map<string, ProjectIndexEntry[]>();
+    for (const e of entries) {
+      const key = this.getCanonicalTargetKey(e.targetUrl);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(e);
+    }
+
+    let modified = false;
+    const finalEntries: ProjectIndexEntry[] = [];
+
+    for (const [, group] of groups.entries()) {
+      if (group.length <= 1) {
+        finalEntries.push(group[0]);
+        continue;
+      }
+
+      modified = true;
+      group.sort((a, b) => {
+        if (b.latestModulesCount !== a.latestModulesCount) {
+          return b.latestModulesCount - a.latestModulesCount;
+        }
+        if (b.latestApisCount !== a.latestApisCount) {
+          return b.latestApisCount - a.latestApisCount;
+        }
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+
+      const winner = group[0];
+      const losers = group.slice(1);
+      const winnerRecord = this.getProject(winner.projectId);
+
+      if (winnerRecord) {
+        winnerRecord.projectName = cleanProjectDisplayName(winnerRecord.projectName, winnerRecord.targetUrl);
+        winner.projectName = winnerRecord.projectName;
+        if (winnerRecord.latestState) {
+          winnerRecord.latestState.appName = winnerRecord.projectName;
+        }
+
+        winnerRecord.snapshots = winnerRecord.snapshots || [];
+        const existingSnapIds = new Set(winnerRecord.snapshots.map((s) => s.snapshotId));
+
+        for (const loser of losers) {
+          const loserRecord = this.getProject(loser.projectId);
+          if (loserRecord?.snapshots && Array.isArray(loserRecord.snapshots)) {
+            for (const snap of loserRecord.snapshots) {
+              if (!existingSnapIds.has(snap.snapshotId)) {
+                winnerRecord.snapshots.push(snap);
+                existingSnapIds.add(snap.snapshotId);
+              }
+            }
+          }
+          const loserPath = path.join(PROJECTS_DIR, `${this.slugifyProjectId(loser.projectId)}.json`);
+          if (fs.existsSync(loserPath)) {
+            try {
+              fs.unlinkSync(loserPath);
+            } catch {}
+          }
+        }
+
+        winnerRecord.snapshots.sort(
+          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+        winner.snapshotCount = winnerRecord.snapshots.length;
+
+        const winnerPath = path.join(PROJECTS_DIR, `${this.slugifyProjectId(winner.projectId)}.json`);
+        try {
+          fs.writeFileSync(winnerPath, JSON.stringify(winnerRecord, null, 2), 'utf8');
+        } catch {}
+      }
+
+      finalEntries.push(winner);
+    }
+
+    if (modified) {
+      this.writeIndexFile(finalEntries);
+    }
+  }
+
   public listProjects(): ProjectIndexEntry[] {
     this.bootstrapFromLegacyCacheIfEmpty();
+    this.compactDuplicateEntries();
     return this.readIndexFile().sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
@@ -705,22 +804,8 @@ export class WorkspaceVaultService {
         ? 'GIT_REPO'
         : 'EXISTING_WEB');
 
-    const canonicalKey = (raw: string) => {
-      try {
-        if (raw.startsWith('http://') || raw.startsWith('https://')) {
-          const u = new URL(raw);
-          const hp = `${u.hostname.toLowerCase()}${u.port ? ':' + u.port : ''}`;
-          if (u.hostname === '127.0.0.1' || u.hostname === 'localhost') {
-            const seg = u.pathname.split('/').filter(Boolean)[0] || '';
-            return seg && !/^(login|home|dashboard)$/i.test(seg) ? `${hp}/${seg.toLowerCase()}` : hp;
-          }
-          return hp;
-        }
-      } catch {}
-      return raw.toLowerCase().replace(/\/+$/, '');
-    };
     const existingByUrl = this.readIndexFile().find(
-      (e) => canonicalKey(e.targetUrl) === canonicalKey(targetUrl)
+      (e) => this.getCanonicalTargetKey(e.targetUrl) === this.getCanonicalTargetKey(targetUrl)
     );
     const projectId = existingByUrl?.projectId || this.slugifyProjectId(params.projectId || projectName || targetUrl);
     const projectFilePath = path.join(PROJECTS_DIR, `${projectId}.json`);

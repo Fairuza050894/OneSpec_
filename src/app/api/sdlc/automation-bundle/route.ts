@@ -57,7 +57,7 @@ export async function GET(request: Request) {
         status: 200,
         headers: {
           'Content-Type': 'text/x-diff; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${slug}-remediation.patch"`,
+          'Content-Disposition': `attachment; filename="${slug}-self-healing-remediation.patch"`,
         },
       });
     }

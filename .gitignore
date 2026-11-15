@@ -34,6 +34,7 @@ pnpm-debug.log*
 .onespec-vault/
 .onespec-workspace-cache.json
 .onespec-auth-state.json
+.onespec-session-storage.json
 .onespec-*backup*/
 .onespec-backup-*
 .onespec-ui-backup-*

@@ -420,18 +420,30 @@ export class ReaBridgeService {
     }
 
     // 3. Recursive Codebase AST Scan
+    const ignoredDirs = new Set([
+      'node_modules',
+      '.git',
+      '.next',
+      'dist',
+      'build',
+      'out',
+      '.onespec-vault',
+      '.turbo',
+      '.vercel',
+      'coverage',
+      'migrations',
+      '__pycache__',
+    ]);
+
     const scanDir = (current: string) => {
       if (!fs.existsSync(current)) return;
       const entries = fs.readdirSync(current, { withFileTypes: true });
 
       for (const entry of entries) {
         if (
-          entry.name === 'node_modules' ||
-          entry.name === '.git' ||
-          entry.name === '.next' ||
-          entry.name === 'dist' ||
-          entry.name === 'build' ||
-          entry.name === 'out'
+          ignoredDirs.has(entry.name) ||
+          entry.name.startsWith('.onespec-') ||
+          (entry.isDirectory() && entry.name.startsWith('.') && entry.name !== '.github')
         ) {
           continue;
         }

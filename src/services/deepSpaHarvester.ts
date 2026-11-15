@@ -16,6 +16,7 @@ import type {
 } from '@/types/sdlc';
 
 const AUTH_STATE_PATH = path.resolve(process.cwd(), '.onespec-auth-state.json');
+const SESSION_STATE_PATH = path.resolve(process.cwd(), '.onespec-session-storage.json');
 
 export async function captureInstantCdpScreenshot(page: any): Promise<string | undefined> {
   try {
@@ -164,6 +165,25 @@ export async function runDeepSpaHarvester(
       ignoreHTTPSErrors: true,
     });
     await context.addInitScript('window.__name = window.__name || function(fn){ return fn; };');
+    if (fs.existsSync(SESSION_STATE_PATH)) {
+      try {
+        const rawSession = fs.readFileSync(SESSION_STATE_PATH, 'utf8');
+        const parsedSession = JSON.parse(rawSession);
+        if (parsedSession && typeof parsedSession === 'object' && Object.keys(parsedSession).length > 0) {
+          const serializedPayload = JSON.stringify(parsedSession);
+          await context.addInitScript(`(() => {
+            try {
+              const dump = ${serializedPayload};
+              for (const [k, v] of Object.entries(dump)) {
+                if (typeof v === 'string') window.sessionStorage.setItem(k, v);
+              }
+            } catch {}
+          })()`);
+        }
+      } catch (sessionErr) {
+        console.warn('[DeepSpaHarvester] Could not restore sessionStorage:', sessionErr);
+      }
+    }
     await context.route(/fonts\.googleapis\.com|fonts\.gstatic\.com|google-analytics|googletagmanager/, (r: any) =>
       r.abort()
     );
@@ -197,7 +217,8 @@ export async function runDeepSpaHarvester(
 
         if (isXhrOrFetch || isJson || isApiLike) {
           const method = req.method().toUpperCase();
-          const key = `${method} ${u.pathname}`;
+          const displayPath = u.origin !== origin ? `[${u.hostname}]${u.pathname}` : u.pathname;
+          const key = `${method} ${displayPath}`;
           const startTime = reqStartMap.get(req);
           const latencyMs = startTime ? Math.max(8, Date.now() - startTime) : 38;
 
@@ -238,11 +259,11 @@ export async function runDeepSpaHarvester(
               activeRouteAnomalies.push({
                 type: 'HTTP_ERROR',
                 severity: resp.status() >= 500 ? 'CRITICAL' : 'MAJOR',
-                title: `HTTP ${resp.status()} Error on ${method} ${u.pathname}`,
+                title: `HTTP ${resp.status()} Error on ${method} ${displayPath}`,
                 expectedBehavior: 'HTTP 200/201 OK response from server',
-                actualBehavior: `Server returned HTTP ${resp.status()} on ${method} ${u.pathname}`,
-                technicalEvidence: `${method} ${u.pathname} -> HTTP ${resp.status()} (${latencyMs}ms)`,
-                stepsToReproduce: [`Execute API call ${method} ${u.pathname}`],
+                actualBehavior: `Server returned HTTP ${resp.status()} on ${method} ${displayPath}`,
+                technicalEvidence: `${method} ${displayPath} -> HTTP ${resp.status()} (${latencyMs}ms)`,
+                stepsToReproduce: [`Execute API call ${method} ${displayPath}`],
               });
             }
           }
@@ -256,19 +277,19 @@ export async function runDeepSpaHarvester(
               activeRouteAnomalies.push({
                 type: 'SLOW_RESPONSE',
                 severity: 'MINOR',
-                title: `Slow API Response (${latencyMs}ms) on ${method} ${u.pathname}`,
+                title: `Slow API Response (${latencyMs}ms) on ${method} ${displayPath}`,
                 expectedBehavior: 'Response latency < 1500ms SLA',
-                actualBehavior: `Observed ${latencyMs}ms latency on ${method} ${u.pathname}`,
-                technicalEvidence: `${method} ${u.pathname} (${latencyMs}ms)`,
-                stepsToReproduce: [`Measure network latency on ${method} ${u.pathname}`],
+                actualBehavior: `Observed ${latencyMs}ms latency on ${method} ${displayPath}`,
+                technicalEvidence: `${method} ${displayPath} (${latencyMs}ms)`,
+                stepsToReproduce: [`Measure network latency on ${method} ${displayPath}`],
               });
             }
           }
 
-          if (activeRouteApis.length < 25 && !activeRouteApis.some((a) => a.method === method && a.path === u.pathname)) {
+          if (activeRouteApis.length < 25 && !activeRouteApis.some((a) => a.method === method && a.path === displayPath)) {
             activeRouteApis.push({
               method: (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method) ? method : 'GET') as any,
-              path: u.pathname,
+              path: displayPath,
               status: resp.status(),
               latencyMs,
             });
@@ -278,11 +299,11 @@ export async function runDeepSpaHarvester(
             apiMap.set(key, {
               id: `EP-${String(apiMap.size + 1).padStart(3, '0')}`,
               method: (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method) ? method : 'GET') as any,
-              path: u.pathname,
+              path: displayPath,
               controllerPath: 'live-network-xhr',
               lineNumber: 1,
-              handlerName: `${method.toLowerCase()}_${u.pathname.replace(/[^a-zA-Z0-9]/g, '_')}`,
-              summary: `${method} ${u.pathname} (HTTP ${resp.status()})`,
+              handlerName: `${method.toLowerCase()}_${displayPath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+              summary: `${method} ${displayPath} (HTTP ${resp.status()})`,
               description: `Intercepted live API call (${u.origin})`,
               queryParameters: queryParams,
               requestBodySchema: reqBodySchema,
@@ -664,6 +685,17 @@ export async function runDeepSpaHarvester(
         }
         await page.waitForTimeout(1800);
         await context.storageState({ path: AUTH_STATE_PATH }).catch(() => {});
+        const sessionDump = await page.evaluate(`(() => {
+          const out = {};
+          for (let i = 0; i < window.sessionStorage.length; i++) {
+            const k = window.sessionStorage.key(i);
+            if (k) out[k] = window.sessionStorage.getItem(k);
+          }
+          return out;
+        })()`).catch(() => ({}));
+        if (sessionDump && Object.keys(sessionDump).length > 0) {
+          fs.writeFileSync(SESSION_STATE_PATH, JSON.stringify(sessionDump, null, 2), 'utf8');
+        }
       }
     } else if (existingLoginMod) {
       featureModules.push(existingLoginMod);
@@ -964,7 +996,7 @@ export async function runDeepSpaHarvester(
           });
         }
       };
-      page.once('pageerror', pageErrorHandler);
+      page.on('pageerror', pageErrorHandler);
 
       const consoleErrorHandler = (msg: any) => {
         try {

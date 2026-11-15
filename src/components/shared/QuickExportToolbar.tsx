@@ -179,12 +179,12 @@ export function QuickExportToolbar({
       {/* 6. Self-Healing Git Patch (.patch) */}
       <a
         href={`/api/sdlc/automation-bundle?format=git-patch${projectParam}`}
-        download={`${slug}-remediation.patch`}
-        className="h-7 px-2.5 bg-[#111317] hover:bg-[#16191F] border border-[#22262E] hover:border-[#10B981] text-[#EDEDED] rounded-[3px] flex items-center gap-1.5 cursor-pointer transition-colors"
-        title="Download Autonomous Unified Git Remediation Patch & Runbook (.patch)"
+        download={`${slug}-self-healing-remediation.patch`}
+        className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/80 transition flex items-center gap-1"
+        title="Download Autonomous Self-Healing Unified Git Patch (.patch)"
       >
-        <span className="text-[12px]">🩹</span>
-        <span>Self-Healing Git Patch (.patch)</span>
+        <span>🩹</span>
+        <span>Git Patch (.patch)</span>
       </a>
 
       {/* 7. Master ISO Handover Bundle (.zip) */}

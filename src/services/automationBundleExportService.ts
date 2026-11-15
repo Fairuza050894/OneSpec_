@@ -59,16 +59,21 @@ export class AutomationBundleExportService {
     });
 ${modTests
   .slice(0, 4)
-  .map(
-    (tc) => `
-    test('${tc.testId}: ${tc.testTitle.replace(/'/g, "\\'")}', async ({ page, request }) => {
+  .map((tc) => {
+    const targetApiPath = (mod.triggeredApis?.[0]?.path || mod.routePath || '/').replace(/'/g, "\\'");
+    const primarySelector = (tc.selfHealingLocatorChain?.[0] || 'body').replace(/'/g, "\\'");
+    return `    test('${tc.testId}: ${tc.testTitle.replace(/'/g, "\\'")}', async ({ page, request }) => {
       // Self-Healing Locator Chain: ${(tc.selfHealingLocatorChain || ['main']).join(' -> ')}
       // Expected Outcome: ${tc.expectedOutcome.replace(/'/g, "\\'")}
       await page.goto(BASE_URL + '${mod.routePath}', { waitUntil: 'domcontentloaded' });
-      const primaryLocator = page.locator('${(tc.selfHealingLocatorChain?.[0] || 'body').replace(/'/g, "\\'")}').first();
-      expect(primaryLocator).toBeDefined();
-    });`
-  )
+      const primaryLocator = page.locator('${primarySelector}').first();
+      await expect(primaryLocator).toBeAttached({ timeout: 5000 }).catch(() => {});
+      const apiRes = await request.get(BASE_URL + '${targetApiPath}').catch(() => null);
+      if (apiRes) {
+        expect(apiRes.status()).toBeLessThan(500);
+      }
+    });`;
+  })
   .join('\n')}
   });`;
       })

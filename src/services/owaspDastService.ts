@@ -358,7 +358,13 @@ export class OwaspDastService {
       title: 'CORS Pre-Flight Wildcard & Origin Verification',
       description: 'Tests whether CORS response headers allow wildcard (*) origins with Allow-Credentials: true.',
       attackPayloadSnippet: 'OPTIONS /api HTTP/1.1\nOrigin: https://evil-attacker.com\nAccess-Control-Request-Method: POST',
-      observedResponse: 'Gateway enforces strict origin reflection. Disallows credentials with wildcard origins.',
+      observedResponse: isWildcardCreds
+        ? 'CRITICAL MISCONFIGURATION: Access-Control-Allow-Origin: * combined with Access-Control-Allow-Credentials: true.'
+        : isWildcard
+        ? 'WARNING: Permissive wildcard CORS header (Access-Control-Allow-Origin: *) detected on gateway.'
+        : hasLiveHeaders && !cspVal
+        ? 'WARNING: Live target response is missing Content-Security-Policy (CSP) header.'
+        : 'Gateway enforces strict origin reflection and disallows credentials with wildcard origins.',
       remediationAction: 'Configure strict CORS origin whitelist rather than wildcard (*).',
       remediationPatchSnippet: 'cors: {\n  origin: ["https://app.domain.com"],\n  credentials: true\n}',
       cweMapping: 'CWE-942: Permissive Cross-Origin Resource Sharing (CORS)',

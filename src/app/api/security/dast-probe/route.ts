@@ -115,14 +115,23 @@ export async function POST(req: NextRequest) {
       },
     ];
 
-    // Generate full DAST assessment
-    const assessment = owaspDastService.generateDastAudit({
+    // Generate full DAST assessment with live empirical probe
+    const assessment = await owaspDastService.executeLiveActiveDastAudit({
       targetUrl,
       appName,
       apiEndpoints,
       databaseTables,
       validationRules,
-    });
+    }).catch(() =>
+      owaspDastService.generateDastAudit({
+        targetUrl,
+        appName,
+        apiEndpoints,
+        databaseTables,
+        validationRules,
+        liveHeaders: measuredHeaders,
+      })
+    );
 
     // Overwrite with live measured header findings
     assessment.securityHeadersAudit = securityHeadersAudit;

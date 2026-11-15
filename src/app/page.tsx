@@ -3932,12 +3932,12 @@ The system provides deterministic transaction processing, input validation, and 
                   <div className="flex items-center gap-2">
                     <a
                       href={`/api/sdlc/automation-bundle?format=git-patch${activeVaultProjectId ? `&projectId=${activeVaultProjectId}` : ''}`}
-                      download={`${(compiledSdlcState?.appName || 'onespec').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-remediation.patch`}
-                      className="h-7 px-2.5 bg-[#111317] hover:bg-[#16191F] border border-[#22262E] hover:border-[#10B981] text-[#EDEDED] rounded-[3px] flex items-center gap-1.5 font-mono text-[11px] cursor-pointer transition-colors"
-                      title="Download Autonomous Unified Git Remediation Patch & Runbook (.patch)"
+                      download={`${(compiledSdlcState?.appName || 'onespec').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-self-healing-remediation.patch`}
+                      className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/80 transition flex items-center gap-1"
+                      title="Download Autonomous Self-Healing Unified Git Patch (.patch)"
                     >
-                      <span className="text-[12px]">🩹</span>
-                      <span>Self-Healing Git Patch (.patch)</span>
+                      <span>🩹</span>
+                      <span>Git Patch (.patch)</span>
                     </a>
                     <div className="text-[11px] font-mono text-[#707070] hidden 2xl:inline whitespace-nowrap">
                       {copy.step08.subtitle}
@@ -4024,12 +4024,12 @@ The system provides deterministic transaction processing, input validation, and 
                 <div className="flex items-center gap-2">
                   <a
                     href={`/api/sdlc/automation-bundle?format=git-patch${activeVaultProjectId ? `&projectId=${activeVaultProjectId}` : ''}`}
-                    download={`${(compiledSdlcState?.appName || 'onespec').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-remediation.patch`}
-                    className="h-7 px-2.5 bg-[#111317] hover:bg-[#16191F] border border-[#22262E] hover:border-[#10B981] text-[#EDEDED] rounded-[3px] flex items-center gap-1.5 font-mono text-[11px] cursor-pointer transition-colors"
-                    title="Download Autonomous Unified Git Remediation Patch & Runbook (.patch)"
+                    download={`${(compiledSdlcState?.appName || 'onespec').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-self-healing-remediation.patch`}
+                    className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/80 transition flex items-center gap-1"
+                    title="Download Autonomous Self-Healing Unified Git Patch (.patch)"
                   >
-                    <span className="text-[12px]">🩹</span>
-                    <span>Self-Healing Git Patch (.patch)</span>
+                    <span>🩹</span>
+                    <span>Git Patch (.patch)</span>
                   </a>
                   <p className="text-[11.5px] text-[#707070] font-mono truncate hidden xl:inline">{copy.step09.subtitle}</p>
                 </div>

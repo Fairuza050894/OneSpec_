@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { blindCrawlerService } from '@/services/blindCrawlerService';
 import { synthesizeFullSdlcFromCrawl } from '@/services/sdlcCompiler';
 import { workspaceVaultService } from '@/services/workspaceVaultService';
+import { owaspDastService } from '@/services/owaspDastService';
 import type { BlindCrawlConfig } from '@/types/sdlc';
 
 export const maxDuration = 300;
@@ -50,6 +51,24 @@ export async function POST(req: NextRequest) {
 
     // 2. Synthesize Full ISO-Standard SDLC State across Steps 01-12
     const compiledState = synthesizeFullSdlcFromCrawl(crawlResult);
+
+    // 2.1 Empirical Live Active DAST Probe against real server headers & unauthenticated boundary
+    if (/^https?:\/\//i.test(targetUrl)) {
+      try {
+        const liveDast = await owaspDastService.executeLiveActiveDastAudit({
+          targetUrl,
+          appName: compiledState.appName,
+          apiEndpoints: compiledState.discoveryResult?.apiEndpoints || [],
+          databaseTables: compiledState.discoveryResult?.databaseTables || [],
+          validationRules: compiledState.validationRules || [],
+          discoveredFeatureModules: compiledState.discoveredFeatureModules || [],
+          gapAuditItems: compiledState.gapAuditItems || [],
+        });
+        compiledState.owaspDastSummary = liveDast;
+      } catch (dastErr) {
+        console.warn('[SDLC CRAWL ROUTE] Live DAST active probe notice:', dastErr);
+      }
+    }
 
     // 3. Persist into Workspace Vault for immediate export availability
     try {
