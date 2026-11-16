@@ -70,7 +70,7 @@ export class UnifiedReportGenerator {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OneSpec SDLC Studio — Unified QA & Performance Report</title>
+  <title>OneSpec SDLC Studio | Unified QA & Performance Report</title>
   <style>
     :root {
       --bg-canvas: #0B0C0E;
@@ -215,7 +215,7 @@ export class UnifiedReportGenerator {
 <body>
   <div class="header-bar">
     <div>
-      <div class="brand-title">OneSpec SDLC Studio — Standalone Unified QA &amp; Load Report</div>
+      <div class="brand-title">OneSpec SDLC Studio | Standalone Unified QA &amp; Load Report</div>
       <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
         Project: <strong style="color: var(--text-main);">${projectName}</strong> · Source: <code style="color: #60A5FA;">${sourceIdentifier}</code> · Ref: <code>${gitRefOrFile}</code>
       </div>
@@ -576,7 +576,7 @@ export class UnifiedReportGenerator {
       return { modName, pagePath: items[0]?.pagePath || '/', total: items.length, passed, failed, avgLatency, statuses, signOff, testIds: items.map((i) => i.testId).join(', ') };
     });
 
-    return `# OneSpec SDLC Studio — Unified QA & Performance Report
+    return `# OneSpec SDLC Studio | Unified QA & Performance Report
 **Project:** ${projectName}  
 **Source Target:** \`${sourceIdentifier}\` (\`${gitRefOrFile}\`)  
 **Generated At:** ${generatedAt}  

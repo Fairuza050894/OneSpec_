@@ -537,7 +537,7 @@ export class WorkspaceVaultService {
 
     const deltaSign = passRateDelta > 0 ? `+${passRateDelta}%` : `${passRateDelta}%`;
     const plainDiffSummary =
-      `Peralihan versi ${prevVersion} ➔ ${newVersion} (${autoChangeRequestId} — ${changeClassification}): ` +
+      `Peralihan versi ${prevVersion} -> ${newVersion} (${autoChangeRequestId} | ${changeClassification}): ` +
       `QA pass rate berubah ${deltaSign} (kini ${curr.passRatePercent}%). ` +
       `${addedButtonsAndActions.length > 0 ? `+${addedButtonsAndActions.length} tombol/aksi UI baru (${addedButtonsAndActions.slice(0, 2).join(', ')}). ` : ''}` +
       `${addedSubTabs.length > 0 ? `+${addedSubTabs.length} sub-tab baru (${addedSubTabs.slice(0, 2).join(', ')}). ` : ''}` +
@@ -547,7 +547,7 @@ export class WorkspaceVaultService {
       `${bugsResolved.length} bug teratasi.`;
 
     const plainDiffSummaryEn =
-      `Version transition ${prevVersion} ➔ ${newVersion} (${autoChangeRequestId} — ${changeClassification}): ` +
+      `Version transition ${prevVersion} -> ${newVersion} (${autoChangeRequestId} | ${changeClassification}): ` +
       `QA pass rate shifted ${deltaSign} (now ${curr.passRatePercent}%). ` +
       `${addedButtonsAndActions.length > 0 ? `+${addedButtonsAndActions.length} new button(s)/action(s) (${addedButtonsAndActions.slice(0, 2).join(', ')}). ` : ''}` +
       `${addedSubTabs.length > 0 ? `+${addedSubTabs.length} new sub-tab(s) (${addedSubTabs.slice(0, 2).join(', ')}). ` : ''}` +
@@ -558,8 +558,8 @@ export class WorkspaceVaultService {
 
     // Formal Administrative Audit Narratives
     const administrativeAuditNarrativeId =
-      `[BERITA ACARA AUDIT PERUBAHAN SISTEM — ISO 9001:2015 KLAUSUL 7.5 & ITIL CR]\n` +
-      `ID Perubahan: ${autoChangeRequestId} | Klasifikasi: ${changeClassification} | Versi: ${prevVersion} ➔ ${newVersion}\n` +
+      `[BERITA ACARA AUDIT PERUBAHAN SISTEM | ISO 9001:2015 KLAUSUL 7.5 & ITIL CR]\n` +
+      `ID Perubahan: ${autoChangeRequestId} | Klasifikasi: ${changeClassification} | Versi: ${prevVersion} -> ${newVersion}\n` +
       `Waktu Evaluasi: ${new Date().toISOString()}\n\n` +
       `1. Latar Belakang Perubahan & Dampak Ruang Lingkup:\n` +
       `- Penambahan Tombol & Kontrol UI: ${addedButtonsAndActions.length} item baru terdeteksi pada katalog kontrol.\n` +
@@ -572,8 +572,8 @@ export class WorkspaceVaultService {
       `3. Rekomendasi Auditor: Rilis ${newVersion} disetujui untuk pengujian tahap akhir (UAT Sign-Off).`;
 
     const administrativeAuditNarrativeEn =
-      `[FORMAL SYSTEM CHANGE MANAGEMENT AUDIT RECEIPT — ISO 9001:2015 CLAUSE 7.5 & ITIL CR]\n` +
-      `Change Request ID: ${autoChangeRequestId} | Classification: ${changeClassification} | Version: ${prevVersion} ➔ ${newVersion}\n` +
+      `[FORMAL SYSTEM CHANGE MANAGEMENT AUDIT RECEIPT | ISO 9001:2015 CLAUSE 7.5 & ITIL CR]\n` +
+      `Change Request ID: ${autoChangeRequestId} | Classification: ${changeClassification} | Version: ${prevVersion} -> ${newVersion}\n` +
       `Evaluation Timestamp: ${new Date().toISOString()}\n\n` +
       `1. Change Background & Scope of Impact:\n` +
       `- UI Buttons & Actions: ${addedButtonsAndActions.length} new control(s) identified across feature modules.\n` +
@@ -740,7 +740,7 @@ export class WorkspaceVaultService {
         }
 
         winnerRecord.snapshots.sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
         );
         winner.snapshotCount = winnerRecord.snapshots.length;
 
@@ -1096,7 +1096,7 @@ export class WorkspaceVaultService {
       `BERITA ACARA AUDIT PERUBAHAN SISTEM & DOKUMENTASI (ISO 9001:2015 KLAUSUL 7.5 / ITIL CHANGE MANAGEMENT)\n` +
       `========================================================================================\n` +
       `ID Permintaan Perubahan (CR) : ${autoChangeRequestId}\n` +
-      `Transisi Snapshot             : ${snapA.snapshotId} (${previousVersion}) ➔ ${snapB.snapshotId} (${newVersion})\n` +
+      `Transisi Snapshot             : ${snapA.snapshotId} (${previousVersion}) -> ${snapB.snapshotId} (${newVersion})\n` +
       `Klasifikasi Perubahan         : ${changeClassification}\n` +
       `Tingkat Kualitas & QA Pass    : Dari ${snapA.passRatePercent}% menjadi ${snapB.passRatePercent}% (Pergeseran: ${deltaSign})\n\n` +
       `1. RINGKASAN STRUKTURAL 1:1:\n` +
@@ -1114,7 +1114,7 @@ export class WorkspaceVaultService {
       `FORMAL SYSTEM & DOCUMENTATION AUDIT LEDGER (ISO 9001:2015 CLAUSE 7.5 / ITIL CHANGE MANAGEMENT)\n` +
       `========================================================================================\n` +
       `Change Request Identifier   : ${autoChangeRequestId}\n` +
-      `Snapshot Transition         : ${snapA.snapshotId} (${previousVersion}) ➔ ${snapB.snapshotId} (${newVersion})\n` +
+      `Snapshot Transition         : ${snapA.snapshotId} (${previousVersion}) -> ${snapB.snapshotId} (${newVersion})\n` +
       `Change Classification       : ${changeClassification}\n` +
       `Quality Assurance Metric    : From ${snapA.passRatePercent}% to ${snapB.passRatePercent}% (Delta: ${deltaSign})\n\n` +
       `1. 1:1 STRUCTURAL MUTATION SUMMARY:\n` +
@@ -1130,7 +1130,7 @@ export class WorkspaceVaultService {
 
     return {
       comparedAgainstSnapshotId: snapA.snapshotId,
-      comparedAgainstLabel: `${snapA.versionLabel} ➔ ${snapB.versionLabel}`,
+      comparedAgainstLabel: `${snapA.versionLabel} -> ${snapB.versionLabel}`,
       comparedAgainstTimestamp: snapA.timestamp,
       previousVersion,
       newVersion,

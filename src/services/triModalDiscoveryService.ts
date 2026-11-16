@@ -9,7 +9,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { reaBridge } from './reaBridge';
+import { reaBridge, type DiscoveredUiSurface, type ReaRouteDeclaration, type ReaTableDefinition } from './reaBridge';
 import { synthesizeFullSdlcFromCrawl, type CompiledSdlcState } from './sdlcCompiler';
 import { blindCrawlerService } from './blindCrawlerService';
 import type {
@@ -24,6 +24,8 @@ import type {
   TriModalDiscoveryResult,
   BlindCrawlResult,
   ValidationRuleContract,
+  FeatureModuleSurface,
+  ScreenControlCatalogItem,
 } from '@/types/sdlc';
 
 export interface TriModalDiscoveryExtendedResult extends TriModalDiscoveryResult {
@@ -154,7 +156,7 @@ export class TriModalDiscoveryService {
       const apiEndpoints = this.synthesizeApiEndpoints(baseAnalysis.routes, appName);
       const openApiSpec = this.generateOpenApi31Spec(apiEndpoints, config.repositoryUrl);
       const databaseTables = this.extractDatabaseErd(baseAnalysis.databaseSchemas, appName);
-      const domTraceability = this.synthesizeDomTraceability(apiEndpoints, databaseTables, baseAnalysis.domSelectors);
+      let domTraceability = this.synthesizeDomTraceability(apiEndpoints, databaseTables, baseAnalysis.domSelectors);
 
       const discoveryResult: TriModalDiscoveryResult = {
         mode: 'MODE_A_GIT',
@@ -223,13 +225,37 @@ export class TriModalDiscoveryService {
         ...domInputContracts.filter((d) => !astBackendContracts.some((a) => a.fieldName.toLowerCase() === d.fieldName.toLowerCase())),
       ];
 
+      domTraceability = this.synthesizeDomTraceability(
+        apiEndpoints,
+        databaseTables,
+        baseAnalysis.domSelectors,
+        generatedValidationContracts
+      );
+      discoveryResult.domTraceability = domTraceability;
+
+      const featureModules = this.synthesizeFeatureModulesFromAst(
+        baseAnalysis.discoveredUiSurfaces,
+        baseAnalysis.routes,
+        baseAnalysis.databaseSchemas,
+        appName,
+        config.repositoryUrl
+      );
+
       const pseudoCrawlResult: BlindCrawlResult = {
         targetUrl: config.repositoryUrl,
         appName,
         crawledAt: new Date().toISOString(),
         harvestedAt: Date.now(),
         durationMs: Date.now() - startTime,
-        discoveredPages: Array.from(new Set(['/', ...apiEndpoints.filter((e) => e.method === 'GET').map((e) => e.path)])),
+        discoveredPages: Array.from(
+          new Set([
+            '/',
+            ...featureModules.map((m) => m.routePath),
+            ...baseAnalysis.routes.filter((r) => r.method === 'GET' && !r.path.startsWith('/api')).map((r) => r.path),
+          ])
+        ),
+        featureModules,
+        discoveredFeatureModules: featureModules,
         discoveredForms: [
           {
             formId: `${repoNameMatch.toLowerCase()}-form`,
@@ -284,7 +310,24 @@ export class TriModalDiscoveryService {
     const apiEndpoints = this.synthesizeApiEndpoints(baseAnalysis.routes, appName);
     const openApiSpec = this.generateOpenApi31Spec(apiEndpoints, `local://${targetDir}`);
     const databaseTables = this.extractDatabaseErd(baseAnalysis.databaseSchemas, appName);
-    const domTraceability = this.synthesizeDomTraceability(apiEndpoints, databaseTables, baseAnalysis.domSelectors);
+
+    const astBackendContracts: ValidationRuleContract[] = (baseAnalysis.extractedBackendRules || []).map((r, idx) => ({
+      ruleId: `VR-AST-${String(idx + 1).padStart(2, '0')}`,
+      userStoryId: 'REQ-US-01',
+      fieldName: r.fieldOrGuardName,
+      dataType: r.constraintExpression.includes('number') || r.minNumber !== undefined ? 'number' : 'string',
+      constraintExpression: r.constraintExpression,
+      errorCode: `ERR_${r.ruleCategory}_${String(idx + 1).padStart(2, '0')}`,
+      httpStatus: r.httpStatus,
+      exactUiErrorString: r.errorMessage.startsWith('[AST') ? r.errorMessage : `[AST ${r.sourceFile}:${r.lineNumber}] ${r.errorMessage}`,
+    }));
+
+    const domTraceability = this.synthesizeDomTraceability(
+      apiEndpoints,
+      databaseTables,
+      baseAnalysis.domSelectors,
+      astBackendContracts
+    );
 
     const discoveryResult: TriModalDiscoveryResult = {
       mode: 'MODE_B_LOCAL',
@@ -305,13 +348,29 @@ export class TriModalDiscoveryService {
       localInputNames.push(`${cleanApp}_user`, `${cleanApp}_key`);
     }
 
+    const featureModules = this.synthesizeFeatureModulesFromAst(
+      baseAnalysis.discoveredUiSurfaces,
+      baseAnalysis.routes,
+      baseAnalysis.databaseSchemas,
+      appName,
+      `local://${targetDir}`
+    );
+
     const pseudoCrawlResult: BlindCrawlResult = {
       targetUrl: `local://${targetDir}`,
       appName,
       crawledAt: new Date().toISOString(),
       harvestedAt: Date.now(),
       durationMs: Date.now() - startTime,
-      discoveredPages: Array.from(new Set(['/', ...apiEndpoints.filter((e) => e.method === 'GET').map((e) => e.path)])),
+      discoveredPages: Array.from(
+        new Set([
+          '/',
+          ...featureModules.map((m) => m.routePath),
+          ...baseAnalysis.routes.filter((r) => r.method === 'GET' && !r.path.startsWith('/api')).map((r) => r.path),
+        ])
+      ),
+      featureModules,
+      discoveredFeatureModules: featureModules,
       discoveredForms: [
         {
           formId: 'local-form',
@@ -329,17 +388,6 @@ export class TriModalDiscoveryService {
       extractedApis: apiEndpoints,
       inferredBusinessRules: [],
       inferredValidationContracts: (() => {
-        const astBackendContracts: ValidationRuleContract[] = (baseAnalysis.extractedBackendRules || []).map((r, idx) => ({
-          ruleId: `VR-AST-${String(idx + 1).padStart(2, '0')}`,
-          userStoryId: 'REQ-US-01',
-          fieldName: r.fieldOrGuardName,
-          dataType: r.constraintExpression.includes('number') || r.minNumber !== undefined ? 'number' : 'string',
-          constraintExpression: r.constraintExpression,
-          errorCode: `ERR_${r.ruleCategory}_${String(idx + 1).padStart(2, '0')}`,
-          httpStatus: r.httpStatus,
-          exactUiErrorString: r.errorMessage.startsWith('[AST') ? r.errorMessage : `[AST ${r.sourceFile}:${r.lineNumber}] ${r.errorMessage}`,
-        }));
-
         const domInputContracts: ValidationRuleContract[] = localInputNames.map((name, idx) => ({
           ruleId: `VR-DOM-${String(idx + 1).padStart(2, '0')}`,
           userStoryId: 'REQ-US-01',
@@ -371,6 +419,90 @@ export class TriModalDiscoveryService {
   }
 
   /**
+   * Strict Read-Only Live Postgres Metadata Introspector
+   * Standards: ISO/IEC 27001 & PostgreSQL System Catalog (information_schema)
+   */
+  public introspectLivePostgresCatalog(dbUri: string): DatabaseErdTable[] | null {
+    if (!dbUri || (!dbUri.startsWith('postgres://') && !dbUri.startsWith('postgresql://'))) {
+      return null;
+    }
+    try {
+      const sqlQuery = `SELECT json_agg(row_to_json(t)) FROM (
+        SELECT 
+          c.table_name,
+          c.column_name,
+          c.data_type,
+          c.is_nullable,
+          COALESCE(bool_or(tc.constraint_type = 'PRIMARY KEY'), false) AS is_primary_key,
+          COALESCE(bool_or(tc.constraint_type = 'FOREIGN KEY'), false) AS is_foreign_key,
+          MAX(CASE WHEN tc.constraint_type = 'FOREIGN KEY' THEN ccu.table_name END) AS fk_target_table,
+          MAX(CASE WHEN tc.constraint_type = 'FOREIGN KEY' THEN ccu.column_name END) AS fk_target_column
+        FROM information_schema.columns c
+        LEFT JOIN information_schema.key_column_usage kcu
+          ON c.table_schema = kcu.table_schema
+          AND c.table_name = kcu.table_name
+          AND c.column_name = kcu.column_name
+        LEFT JOIN information_schema.table_constraints tc
+          ON kcu.constraint_name = tc.constraint_name
+          AND kcu.table_schema = tc.table_schema
+        LEFT JOIN information_schema.constraint_column_usage ccu
+          ON tc.constraint_name = ccu.constraint_name
+          AND tc.table_schema = ccu.table_schema
+        WHERE c.table_schema = 'public'
+        GROUP BY c.table_name, c.column_name, c.data_type, c.is_nullable, c.ordinal_position
+        ORDER BY c.table_name, c.ordinal_position
+      ) t;`;
+
+      const stdout = execFileSync('psql', [dbUri, '-t', '-A', '-c', sqlQuery], {
+        env: {
+          ...process.env,
+          PGOPTIONS: '-c default_transaction_read_only=on',
+          PGCONNECT_TIMEOUT: '5',
+        },
+        timeout: 5000,
+        encoding: 'utf8',
+      });
+
+      if (!stdout || !stdout.trim()) return null;
+      const rawRows = JSON.parse(stdout.trim());
+      if (!Array.isArray(rawRows) || rawRows.length === 0) return null;
+
+      const tableMap = new Map<string, DatabaseErdTable>();
+      for (const row of rawRows) {
+        if (!tableMap.has(row.table_name)) {
+          tableMap.set(row.table_name, {
+            id: `TBL-${String(tableMap.size + 1).padStart(3, '0')}`,
+            tableName: row.table_name,
+            columns: [],
+            primaryKeys: [],
+          });
+        }
+        const tbl = tableMap.get(row.table_name)!;
+        if (row.is_primary_key && !tbl.primaryKeys.includes(row.column_name)) {
+          tbl.primaryKeys.push(row.column_name);
+        }
+        tbl.columns.push({
+          name: row.column_name,
+          type: String(row.data_type || 'VARCHAR').toUpperCase(),
+          isPrimaryKey: Boolean(row.is_primary_key),
+          isForeignKey: Boolean(row.is_foreign_key || row.fk_target_table),
+          isNullable: row.is_nullable === 'YES',
+          foreignKeyTarget: row.fk_target_table
+            ? {
+                table: row.fk_target_table,
+                column: row.fk_target_column || 'id',
+              }
+            : undefined,
+        });
+      }
+      return Array.from(tableMap.values());
+    } catch (err: any) {
+      console.warn('[TriModalDiscovery] Live Postgres Catalog introspection notice (falling back to AST):', err?.message || err);
+      return null;
+    }
+  }
+
+  /**
    * Mode C: Live Staging URL + Read-Only Database URI (Hybrid Live-URL + Local/Repo AST Fusion)
    */
   public async discoverModeCStaging(
@@ -384,6 +516,18 @@ export class TriModalDiscoveryService {
           authType: 'NONE',
         });
         if (crawl) {
+          // Live Read-Only PostgreSQL Catalog Introspector (strict read-only, 5s timeout)
+          if (config.dbUri && (config.dbUri.startsWith('postgres://') || config.dbUri.startsWith('postgresql://'))) {
+            const liveTables = this.introspectLivePostgresCatalog(config.dbUri);
+            if (liveTables && liveTables.length > 0) {
+              const existingTableNames = new Set((crawl.databaseTables || []).map((t) => t.tableName.toLowerCase()));
+              crawl.databaseTables = [
+                ...liveTables,
+                ...(crawl.databaseTables || []).filter((t) => !existingTableNames.has(t.tableName.toLowerCase())),
+              ];
+            }
+          }
+
           // Hybrid Live-URL + Local Codebase AST Fusion: Introspect local backend repo / schemas
           let localScanPath: string | null = null;
           if (config.dbUri && !config.dbUri.startsWith('postgres') && !config.dbUri.startsWith('mysql') && !config.dbUri.startsWith('mongodb') && fs.existsSync(path.resolve(config.dbUri))) {
@@ -427,6 +571,17 @@ export class TriModalDiscoveryService {
             }
           }
 
+          crawl.domBindings = this.synthesizeDomTraceability(
+            crawl.extractedApis,
+            crawl.databaseTables,
+            (crawl.domBindings || []).map((b) => ({
+              selector: b.domSelector,
+              testId: b.dbTarget.includes('.') ? b.dbTarget.split('.')[1] : undefined,
+              tagName: b.ariaRole === 'textbox' ? 'input' : b.ariaRole === 'button' ? 'button' : 'element',
+            })),
+            crawl.inferredValidationContracts
+          );
+
           const compiledState = synthesizeFullSdlcFromCrawl(crawl);
           return {
             mode: 'MODE_C_STAGING',
@@ -448,11 +603,19 @@ export class TriModalDiscoveryService {
     }
 
     // Fallback using local schema introspection
+    let databaseTables: DatabaseErdTable[] = [];
+    if (config.dbUri && (config.dbUri.startsWith('postgres://') || config.dbUri.startsWith('postgresql://'))) {
+      const liveTables = this.introspectLivePostgresCatalog(config.dbUri);
+      if (liveTables && liveTables.length > 0) {
+        databaseTables = liveTables;
+      }
+    }
     const baseAnalysis = await reaBridge.performHeuristicAstScan(process.cwd());
     const apiEndpoints = this.synthesizeApiEndpoints(baseAnalysis.routes, 'Staging Target');
     const openApiSpec = this.generateOpenApi31Spec(apiEndpoints, config.stagingUrl);
-    const databaseTables = this.extractDatabaseErd(baseAnalysis.databaseSchemas, 'Staging Target');
-    const domTraceability = this.synthesizeDomTraceability(apiEndpoints, databaseTables, baseAnalysis.domSelectors);
+    if (databaseTables.length === 0) {
+      databaseTables = this.extractDatabaseErd(baseAnalysis.databaseSchemas, 'Staging Target');
+    }
     const astBackendContracts: ValidationRuleContract[] = (baseAnalysis.extractedBackendRules || []).map((r, idx) => ({
       ruleId: `VR-AST-${String(idx + 1).padStart(2, '0')}`,
       userStoryId: 'REQ-US-01',
@@ -463,6 +626,15 @@ export class TriModalDiscoveryService {
       httpStatus: r.httpStatus,
       exactUiErrorString: r.errorMessage.startsWith('[AST') ? r.errorMessage : `[AST ${r.sourceFile}:${r.lineNumber}] ${r.errorMessage}`,
     }));
+    const domTraceability = this.synthesizeDomTraceability(apiEndpoints, databaseTables, baseAnalysis.domSelectors, astBackendContracts);
+
+    const featureModules = this.synthesizeFeatureModulesFromAst(
+      baseAnalysis.discoveredUiSurfaces,
+      baseAnalysis.routes,
+      baseAnalysis.databaseSchemas,
+      'Staging Target',
+      config.stagingUrl
+    );
 
     const pseudoCrawlResult: BlindCrawlResult = {
       targetUrl: config.stagingUrl,
@@ -470,7 +642,15 @@ export class TriModalDiscoveryService {
       crawledAt: new Date().toISOString(),
       harvestedAt: Date.now(),
       durationMs: Date.now() - startTime,
-      discoveredPages: Array.from(new Set(['/', ...apiEndpoints.filter((e) => e.method === 'GET').map((e) => e.path)])),
+      discoveredPages: Array.from(
+        new Set([
+          '/',
+          ...featureModules.map((m) => m.routePath),
+          ...baseAnalysis.routes.filter((r) => r.method === 'GET' && !r.path.startsWith('/api')).map((r) => r.path),
+        ])
+      ),
+      featureModules,
+      discoveredFeatureModules: featureModules,
       discoveredForms: [
         {
           formId: 'staging-form',
@@ -804,7 +984,7 @@ export class TriModalDiscoveryService {
   /**
    * Extract database tables dynamically from scanned database schemas
    */
-  private extractDatabaseErd(schemas: any[], appName: string): DatabaseErdTable[] {
+  private extractDatabaseErd(schemas: any[], _appName?: string): DatabaseErdTable[] {
     const tables: DatabaseErdTable[] = [];
 
     if (schemas && schemas.length > 0) {
@@ -829,44 +1009,18 @@ export class TriModalDiscoveryService {
       }
     }
 
-    // Default clean application schema if zero database schemas found in repo
-    if (tables.length === 0) {
-      const cleanEntity = appName.replace(/[^a-zA-Z0-9]/g, '') || 'Application';
-      tables.push(
-        {
-          id: `${cleanEntity}Entity`,
-          tableName: `${cleanEntity}Entity`,
-          primaryKeys: ['id'],
-          columns: [
-            { name: 'id', type: 'String (UUID)', isPrimaryKey: true, isForeignKey: false, isNullable: false },
-            { name: 'name', type: 'String', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-            { name: 'status', type: 'String', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-            { name: 'createdAt', type: 'DateTime', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          ],
-        },
-        {
-          id: 'AuditRecord',
-          tableName: 'AuditRecord',
-          primaryKeys: ['id'],
-          columns: [
-            { name: 'id', type: 'String (UUID)', isPrimaryKey: true, isForeignKey: false, isNullable: false },
-            { name: 'action', type: 'String', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-            { name: 'timestamp', type: 'DateTime', isPrimaryKey: false, isForeignKey: false, isNullable: false },
-          ],
-        }
-      );
-    }
-
     return tables;
   }
 
   /**
-   * Synthesize DOM Selector & Traceability Map dynamically from scanned DOM elements
+   * Synthesize 1:1 4-Layer Data Lineage (UI Input <-> JSON Key <-> Backend DTO <-> DB Column)
+   * Standards: ISO/IEC/IEEE 29119-4/5:2022 & OpenAPI 3.1
    */
   private synthesizeDomTraceability(
     endpoints: DiscoveredApiEndpoint[],
     tables: DatabaseErdTable[],
-    domSelectors?: Array<{ selector: string; testId?: string; tagName: string }>
+    domSelectors?: Array<{ selector: string; testId?: string; tagName: string }>,
+    validationRules?: ValidationRuleContract[]
   ): DomTraceabilityBinding[] {
     const bindings: DomTraceabilityBinding[] = [];
     const primaryEp = endpoints[0] ? `${endpoints[0].method} ${endpoints[0].path}` : 'GET /';
@@ -874,17 +1028,88 @@ export class TriModalDiscoveryService {
 
     if (domSelectors && domSelectors.length > 0) {
       domSelectors.forEach((sel, idx) => {
-        const idName = sel.testId || `element_${idx + 1}`;
+        const idName = sel.testId || sel.selector.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '') || `element_${idx + 1}`;
+        const cleanName = idName.toLowerCase().replace(/^(?:btn_|input_|field_|modal_input_|txt_|select_)/, '').replace(/_id$/, '');
+
+        // Layer 2: Match JSON Key & API Endpoint (UI Input <-> JSON Key)
+        let matchedEp: DiscoveredApiEndpoint | undefined;
+        let matchedJsonKey = idName;
+
+        for (const ep of endpoints) {
+          if (ep.requestBodySchema && typeof ep.requestBodySchema === 'object') {
+            for (const key of Object.keys(ep.requestBodySchema)) {
+              const cleanKey = key.toLowerCase().replace(/_id$/, '');
+              if (cleanKey === cleanName || key.toLowerCase() === idName.toLowerCase()) {
+                matchedEp = ep;
+                matchedJsonKey = key;
+                break;
+              }
+            }
+          }
+          if (!matchedEp && ep.queryParameters) {
+            for (const key of Object.keys(ep.queryParameters)) {
+              if (key.toLowerCase() === cleanName || key.toLowerCase() === idName.toLowerCase()) {
+                matchedEp = ep;
+                matchedJsonKey = key;
+                break;
+              }
+            }
+          }
+          if (matchedEp) break;
+        }
+
+        // Layer 3: Match Backend DTO & Validation Contract (JSON Key <-> Backend DTO)
+        let matchedRule: ValidationRuleContract | undefined;
+        if (validationRules && validationRules.length > 0) {
+          matchedRule = validationRules.find((r) => {
+            const rField = r.fieldName.toLowerCase();
+            return (
+              rField === matchedJsonKey.toLowerCase() ||
+              rField === cleanName ||
+              rField === idName.toLowerCase() ||
+              r.constraintExpression.toLowerCase().includes(cleanName)
+            );
+          });
+        }
+
+        // Layer 4: Match Database Table & Column (Backend DTO <-> DB Column)
+        let matchedColTarget: { table: string; column: string } | undefined;
+        for (const tbl of tables) {
+          const col = tbl.columns.find((c) => {
+            const cName = c.name.toLowerCase();
+            return (
+              cName === matchedJsonKey.toLowerCase() ||
+              cName === cleanName ||
+              cName === idName.toLowerCase() ||
+              cName === `${cleanName}_id`
+            );
+          });
+          if (col) {
+            matchedColTarget = { table: tbl.tableName, column: col.name };
+            break;
+          }
+        }
+
+        const resolvedApi = matchedEp
+          ? `${matchedEp.method} ${matchedEp.path}`
+          : primaryEp;
+        const resolvedDb = matchedColTarget
+          ? `${matchedColTarget.table}.${matchedColTarget.column}`
+          : `${primaryTable}.${idName}`;
+        const resolvedRuleId = matchedRule
+          ? (matchedRule.ruleId.startsWith('VR-') ? matchedRule.ruleId.replace('VR-', 'BR-') : `BR-${matchedRule.ruleId}`)
+          : `BR-${String(Math.min(idx + 1, 99)).padStart(2, '0')}`;
+
         bindings.push({
           bindingId: `DOM-TRC-${String(idx + 1).padStart(3, '0')}`,
           userStoryId: 'REQ-US-01',
-          businessRuleId: `BR-${String(Math.min(idx + 1, 3)).padStart(2, '0')}`,
+          businessRuleId: resolvedRuleId,
           testCaseId: `TC-${String(idx + 1).padStart(3, '0')}`,
           domSelector: sel.selector,
           ariaRole: sel.tagName === 'input' ? 'textbox' : sel.tagName === 'button' ? 'button' : 'element',
           targetElement: `<${sel.tagName} ${sel.testId ? `data-testid="${sel.testId}"` : ''} />`,
-          apiEndpoint: primaryEp,
-          dbTarget: `${primaryTable}.${idName}`,
+          apiEndpoint: resolvedApi,
+          dbTarget: resolvedDb,
           parityStatus: 'BOUND_AND_VERIFIED',
         });
       });
@@ -906,6 +1131,223 @@ export class TriModalDiscoveryService {
     }
 
     return bindings;
+  }
+
+  /**
+   * Synthesize rich FeatureModuleSurface array from AST-discovered UI surfaces & routes
+   */
+  private synthesizeFeatureModulesFromAst(
+    discoveredSurfaces: DiscoveredUiSurface[] = [],
+    routes: ReaRouteDeclaration[] = [],
+    databaseSchemas: ReaTableDefinition[] = [],
+    appName: string,
+    targetUrl: string
+  ): FeatureModuleSurface[] {
+    const modules: FeatureModuleSurface[] = [];
+    const usedRoutes = new Set<string>();
+    let modCounter = 1;
+
+    // Helper: find most relevant database schema for a route or module name
+    const findMatchingSchema = (cleanRoute: string, modName: string): ReaTableDefinition | undefined => {
+      if (!databaseSchemas || databaseSchemas.length === 0) return undefined;
+      const cleanR = cleanRoute.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const cleanM = modName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return (
+        databaseSchemas.find((s) => {
+          const sTbl = s.tableName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return cleanR.includes(sTbl) || sTbl.includes(cleanR) || cleanM.includes(sTbl) || sTbl.includes(cleanM);
+        }) || databaseSchemas[(modCounter - 1) % databaseSchemas.length]
+      );
+    };
+
+    // 1. Process explicit UI surfaces extracted from view / page files
+    for (const s of discoveredSurfaces) {
+      const cleanRoute = s.routePath || '/';
+      if (usedRoutes.has(cleanRoute)) continue;
+      usedRoutes.add(cleanRoute);
+
+      const modId = `MOD-${String(modCounter).padStart(2, '0')}`;
+      modCounter++;
+
+      const matchingSchema = findMatchingSchema(cleanRoute, s.moduleName);
+
+      // Determine real table columns:
+      // Priority 1: HTML <th> or table headers from source code
+      // Priority 2: Real columns from matching database schema
+      // Priority 3: Fallback from inputs or minimal schema
+      let sampleCols: string[] = [];
+      let hasTable = false;
+      if (s.tableColumns && s.tableColumns.length > 0) {
+        sampleCols = s.tableColumns;
+        hasTable = true;
+      } else if (matchingSchema && matchingSchema.columns.length > 0) {
+        sampleCols = matchingSchema.columns.map((c) => c.name).slice(0, 8);
+        hasTable = true;
+      } else if (s.inputs.length > 0) {
+        sampleCols = ['id', ...s.inputs.map((i) => i.name).slice(0, 5), 'created_at'];
+        hasTable = true;
+      } else {
+        sampleCols = ['id', 'name', 'status', 'created_at'];
+        hasTable = false;
+      }
+
+      const controls: ScreenControlCatalogItem[] = [
+        ...s.buttons.map((btn, bIdx) => ({
+          controlId: `BTN-${modId}-${bIdx + 1}`,
+          controlName: btn,
+          controlType: 'PRIMARY_ACTION_BUTTON' as const,
+          screenLocation: 'Toolbar Pencarian & Filter' as const,
+          availableOptionsOrSample: btn,
+          xPercent: Math.min(90, 15 + bIdx * 15),
+          yPercent: 20,
+        })),
+        ...s.inputs.map((inp, iIdx) => ({
+          controlId: `INP-${modId}-${iIdx + 1}`,
+          controlName: inp.name,
+          controlType: (inp.type === 'select' ? 'FILTER_CONTROL' : 'MODAL_FORM_INPUT') as ScreenControlCatalogItem['controlType'],
+          screenLocation: 'Area Konten / Kartu Data' as const,
+          availableOptionsOrSample: inp.placeholder || inp.name,
+          xPercent: 50,
+          yPercent: Math.min(85, 30 + iIdx * 10),
+        })),
+      ];
+
+      let forms: FeatureModuleSurface['formsAndModals'] = [];
+      if (s.inputs.length > 0) {
+        forms = [
+          {
+            formTitle: `Formulir ${s.moduleName}`,
+            triggerButtonText: s.buttons[0] || 'Simpan / Submit',
+            inputs: s.inputs.map((inp) => ({
+              name: inp.name,
+              labelText: inp.name.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+              type: inp.type,
+              placeholder: inp.placeholder || inp.name,
+              required: inp.required ?? true,
+              selector: `input[name="${inp.name}"]`,
+            })),
+            submitButtonText: s.buttons[0] || 'Simpan / Submit',
+          },
+        ];
+      } else if (matchingSchema && matchingSchema.columns.length > 0) {
+        const nonPkCols = matchingSchema.columns.filter((c) => !c.isPrimaryKey);
+        const targetCols = nonPkCols.length > 0 ? nonPkCols : matchingSchema.columns;
+        forms = [
+          {
+            formTitle: `Formulir ${s.moduleName || matchingSchema.tableName}`,
+            triggerButtonText: 'Tambah Data',
+            inputs: targetCols.slice(0, 8).map((col) => ({
+              name: col.name,
+              labelText: col.name.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+              type: col.type.toLowerCase().includes('int') || col.type.toLowerCase().includes('number') ? 'number' : col.type.toLowerCase().includes('date') ? 'date' : 'text',
+              placeholder: `Masukkan ${col.name}...`,
+              required: !col.isNullable,
+              selector: `input[name="${col.name}"]`,
+            })),
+            submitButtonText: 'Simpan',
+          },
+        ];
+      }
+
+      const apis = s.triggeredApis.map((epPath) => ({
+        method: 'GET',
+        path: epPath,
+        status: 200,
+        latencyMs: 35,
+      }));
+
+      modules.push({
+        moduleId: modId,
+        moduleName: s.moduleName || `${appName} Module`,
+        routePath: cleanRoute,
+        fullUrl: targetUrl.startsWith('http') ? `${targetUrl.replace(/\/$/, '')}${cleanRoute}` : `${targetUrl}${cleanRoute}`,
+        pageHeading: s.headings[0] || s.moduleName,
+        hasDataTable: hasTable,
+        tableColumns: sampleCols,
+        sampleRowData: sampleCols.map((c, i) => i === 0 ? 'ITEM-001' : i === sampleCols.length - 1 ? 'AKTIF' : `${c} Sample`),
+        sampleRows: [
+          sampleCols.map((c, i) => i === 0 ? 'ITEM-001' : i === sampleCols.length - 1 ? 'AKTIF' : `${c} Data 1`),
+          sampleCols.map((c, i) => i === 0 ? 'ITEM-002' : i === sampleCols.length - 1 ? 'AKTIF' : `${c} Data 2`),
+        ],
+        toolbarButtons: s.buttons.length > 0 ? s.buttons : ['Tambah', 'Filter', 'Ekspor'],
+        screenControlsCatalog: controls,
+        formsAndModals: forms,
+        searchFilterSelectors: ['input[type="search"]', 'input[placeholder*="cari" i]', 'input'],
+        paginationControls: ['10', '25', '50'],
+        triggeredApis: apis,
+        observedAnomalies: [],
+        capturedAt: new Date().toISOString(),
+      });
+    }
+
+    // 2. Also incorporate GET routes that represent pages not covered by explicit view surfaces
+    const pageRoutes = routes.filter((r) => r.method === 'GET' && !r.path.startsWith('/api') && !usedRoutes.has(r.path));
+    for (const r of pageRoutes.slice(0, 15)) {
+      const cleanRoute = r.path;
+      usedRoutes.add(cleanRoute);
+
+      const modId = `MOD-${String(modCounter).padStart(2, '0')}`;
+      modCounter++;
+
+      const modName = cleanRoute === '/'
+        ? `${appName} Overview`
+        : cleanRoute.replace(/^\//, '').replace(/[-_/]+/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+      const matchingSchema = findMatchingSchema(cleanRoute, modName);
+      const realCols = matchingSchema && matchingSchema.columns.length > 0
+        ? matchingSchema.columns.map((c) => c.name).slice(0, 8)
+        : ['id', 'name', 'status', 'created_at'];
+
+      const nonPkCols = matchingSchema ? matchingSchema.columns.filter((c) => !c.isPrimaryKey) : [];
+      const formCols = nonPkCols.length > 0 ? nonPkCols : (matchingSchema?.columns || []);
+
+      modules.push({
+        moduleId: modId,
+        moduleName: modName,
+        routePath: cleanRoute,
+        fullUrl: targetUrl.startsWith('http') ? `${targetUrl.replace(/\/$/, '')}${cleanRoute}` : `${targetUrl}${cleanRoute}`,
+        pageHeading: modName,
+        hasDataTable: true,
+        tableColumns: realCols,
+        sampleRowData: realCols.map((c, i) => i === 0 ? '01' : i === 1 ? 'REC-001' : `${modName} Sample`),
+        sampleRows: [
+          realCols.map((c, i) => i === 0 ? '01' : i === 1 ? 'REC-001' : `${modName} Data 1`),
+          realCols.map((c, i) => i === 0 ? '02' : i === 1 ? 'REC-002' : `${modName} Data 2`),
+        ],
+        toolbarButtons: ['Tambah', 'Filter', 'Ekspor'],
+        screenControlsCatalog: [
+          { controlId: `BTN-${modId}-1`, controlName: 'Tambah Data', controlType: 'PRIMARY_ACTION_BUTTON', screenLocation: 'Toolbar Pencarian & Filter', availableOptionsOrSample: 'Tambah', xPercent: 20, yPercent: 20 },
+          { controlId: `INP-${modId}-1`, controlName: 'Pencarian', controlType: 'FILTER_CONTROL', screenLocation: 'Toolbar Pencarian & Filter', availableOptionsOrSample: 'Cari data...', xPercent: 50, yPercent: 20 },
+        ],
+        formsAndModals: [
+          {
+            formTitle: `Formulir ${modName}`,
+            triggerButtonText: 'Tambah Data',
+            inputs: formCols.length > 0
+              ? formCols.slice(0, 8).map((col) => ({
+                  name: col.name,
+                  labelText: col.name.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+                  type: col.type.toLowerCase().includes('int') || col.type.toLowerCase().includes('number') ? 'number' : col.type.toLowerCase().includes('date') ? 'date' : 'text',
+                  placeholder: `Masukkan ${col.name}...`,
+                  required: !col.isNullable,
+                  selector: `input[name="${col.name}"]`,
+                }))
+              : [
+                  { name: 'kode', labelText: 'Kode / Identifier', type: 'text', placeholder: 'KOD-001', required: true, selector: 'input[name="kode"]' },
+                  { name: 'nama', labelText: 'Nama / Deskripsi', type: 'text', placeholder: 'Nama Data', required: true, selector: 'input[name="nama"]' },
+                ],
+            submitButtonText: 'Simpan',
+          },
+        ],
+        searchFilterSelectors: ['input[type="search"]', 'input'],
+        paginationControls: ['10', '25', '50'],
+        triggeredApis: [{ method: 'GET', path: cleanRoute === '/' ? '/api/overview' : `/api${cleanRoute}`, status: 200, latencyMs: 25 }],
+        observedAnomalies: [],
+        capturedAt: new Date().toISOString(),
+      });
+    }
+
+    return modules;
   }
 }
 

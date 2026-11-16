@@ -3875,9 +3875,9 @@ The system provides deterministic transaction processing, input validation, and 
            * STEP 07: PLAYWRIGHT AUTOMATION & REA LIVE RUNNER (1-CLICK UNIFIED RUNNER)
            * ========================================================================= */}
           {activeStep === 7 && (
-            <div className="h-full flex flex-col space-y-2 min-h-0 overflow-hidden">
+            <div className="h-full flex flex-col space-y-2 min-h-0 overflow-y-auto pr-0.5">
               {/* Canvas Header */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-2 border-b border-[#22262E] shrink-0">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-1 border-b border-[#22262E] shrink-0">
                 <div>
                   <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight">
                     {copy.step07.title}
@@ -3887,8 +3887,9 @@ The system provides deterministic transaction processing, input validation, and 
                   </p>
                 </div>
               </div>
-              {/* Unified Full-Viewport Workbench */}
-              <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-0">
+
+              {/* Unified Full-Viewport Workbench (Master Command Bar & 4 Workspace Tabs) */}
+              <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-[520px]">
                 <LiveRunnerWorkbench
                   onSelectStage={handleSelectRunnerStage}
                   selectedStageId={selectedRunnerStage?.id}
@@ -3907,6 +3908,8 @@ The system provides deterministic transaction processing, input validation, and 
                   uatFlows={qaWorkbook.uatFlows}
                   discoveredModules={compiledSdlcState?.discoveredModules}
                   onExecutionSynced={handleSyncRunnerResults}
+                  compiledState={compiledSdlcState}
+                  activeVaultProjectId={activeVaultProjectId}
                 />
               </div>
             </div>

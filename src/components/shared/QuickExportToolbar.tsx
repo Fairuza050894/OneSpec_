@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   FileSpreadsheet,
   FileText,
@@ -9,6 +9,12 @@ import {
   ShieldCheck,
   RotateCw,
   Archive,
+  ChevronDown,
+  Sparkles,
+  Smartphone,
+  Cpu,
+  Layers,
+  FileCode,
 } from 'lucide-react';
 import type { CompiledSdlcState } from '@/services/sdlcCompiler';
 import { unifiedReportGenerator } from '@/services/unifiedReportGenerator';
@@ -28,6 +34,18 @@ export function QuickExportToolbar({
 }: QuickExportToolbarProps) {
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
+  const [isEcosystemOpen, setIsEcosystemOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsEcosystemOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const appName = compiledState?.appName || 'OneSpec_Project';
   const slug = appName.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'onespec';
@@ -197,6 +215,177 @@ export function QuickExportToolbar({
         <Archive className="h-3.5 w-3.5 text-[#60A5FA]" />
         <span>Master ISO Bundle (.zip)</span>
       </a>
+
+      {/* 8. 16-Tool AI QA & Automation Ecosystem Hub Dropdown */}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          type="button"
+          onClick={() => setIsEcosystemOpen(!isEcosystemOpen)}
+          className={`h-7 px-2.5 rounded-[3px] border flex items-center gap-1.5 cursor-pointer transition-colors font-bold ${
+            isEcosystemOpen
+              ? 'bg-[#1E1B4B] border-[#6366F1] text-[#A5B4FC]'
+              : 'bg-[#111317] hover:bg-[#16191F] border-[#312E81] hover:border-[#6366F1] text-[#C7D2FE]'
+          }`}
+          title="16-Tool AI QA Ecosystem Hub: Cypress, Selenium, Appium, REST-assured, Jira, TestRail, Promptfoo, Allure & AI Blueprint"
+        >
+          <Sparkles className="h-3.5 w-3.5 text-[#818CF8]" />
+          <span>⚡ AI QA & 16-Tool Hub</span>
+          <ChevronDown
+            className={`h-3 w-3 text-[#818CF8] transition-transform duration-150 ${
+              isEcosystemOpen ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+
+        {isEcosystemOpen && (
+          <div className="absolute right-0 top-full mt-1.5 w-80 bg-[#0E1015] border border-[#2A2E39] rounded-[4px] shadow-2xl p-2 z-50 flex flex-col gap-2">
+            <div className="flex items-center justify-between pb-1.5 border-b border-[#1F2430] px-1">
+              <span className="text-[10px] font-bold text-[#94A3B8] uppercase tracking-wider">
+                16-Tool Enterprise Ecosystem
+              </span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-700/50">
+                ISO 29119-5
+              </span>
+            </div>
+
+            {/* Group 1: Web & Mobile E2E */}
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] font-semibold text-[#64748B] px-1">
+                WEB & MOBILE E2E
+              </span>
+              <div className="grid grid-cols-1 gap-1">
+                <a
+                  href={`/api/sdlc/automation-bundle?format=cypress${projectParam}`}
+                  download={`${slug}-cypress.e2e.cy.ts`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#06B6D4] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <FileCode className="h-3 w-3 text-[#06B6D4]" />
+                    <span>Cypress E2E Suite</span>
+                  </span>
+                  <span className="text-[9px] text-[#94A3B8]">.cy.ts</span>
+                </a>
+                <a
+                  href={`/api/sdlc/automation-bundle?format=selenium${projectParam}`}
+                  download={`${slug}-selenium.webdriver.spec.ts`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#10B981] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Code2 className="h-3 w-3 text-[#10B981]" />
+                    <span>Selenium WebDriver</span>
+                  </span>
+                  <span className="text-[9px] text-[#94A3B8]">.spec.ts</span>
+                </a>
+                <a
+                  href={`/api/sdlc/automation-bundle?format=appium${projectParam}`}
+                  download={`${slug}-appium.mobile.spec.ts`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#F43F5E] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Smartphone className="h-3 w-3 text-[#F43F5E]" />
+                    <span>Appium Mobile Touch</span>
+                  </span>
+                  <span className="text-[9px] text-[#94A3B8]">.spec.ts</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Group 2: API & Contract Testing */}
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] font-semibold text-[#64748B] px-1">
+                API & CONTRACT
+              </span>
+              <a
+                href={`/api/sdlc/automation-bundle?format=rest-assured${projectParam}`}
+                download="ApiContractTest.java"
+                onClick={() => setIsEcosystemOpen(false)}
+                className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#EAB308] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Cpu className="h-3 w-3 text-[#EAB308]" />
+                  <span>REST-assured JUnit 5</span>
+                </span>
+                <span className="text-[9px] text-[#94A3B8]">.java</span>
+              </a>
+            </div>
+
+            {/* Group 3: Issue Tracking & TMS */}
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] font-semibold text-[#64748B] px-1">
+                ISSUE TRACKING & TMS
+              </span>
+              <div className="grid grid-cols-2 gap-1">
+                <a
+                  href={`/api/sdlc/automation-bundle?format=jira${projectParam}`}
+                  download={`${slug}-jira-issues.csv`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#38BDF8] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="truncate">Jira Import</span>
+                  <span className="text-[9px] text-[#94A3B8]">.csv</span>
+                </a>
+                <a
+                  href={`/api/sdlc/automation-bundle?format=testrail${projectParam}`}
+                  download={`${slug}-testrail-cases.csv`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#A855F7] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="truncate">TestRail Import</span>
+                  <span className="text-[9px] text-[#94A3B8]">.csv</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Group 4: AI Guardrails & CI/CD */}
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[9px] font-semibold text-[#64748B] px-1">
+                AI GUARDRAILS & CI/CD
+              </span>
+              <div className="grid grid-cols-1 gap-1">
+                <a
+                  href={`/api/sdlc/automation-bundle?format=promptfoo${projectParam}`}
+                  download="promptfooconfig.yaml"
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#818CF8] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="h-3 w-3 text-[#818CF8]" />
+                    <span>Promptfoo LLM Eval</span>
+                  </span>
+                  <span className="text-[9px] text-[#94A3B8]">.yaml</span>
+                </a>
+                <a
+                  href={`/api/sdlc/automation-bundle?format=allure${projectParam}`}
+                  download={`${slug}-onespec-devops-ci-bundle.json`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#F97316] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="h-3 w-3 text-[#F97316]" />
+                    <span>Allure & DevOps CI Bundle</span>
+                  </span>
+                  <span className="text-[9px] text-[#94A3B8]">.json</span>
+                </a>
+                <a
+                  href={`/api/sdlc/automation-bundle?format=ai-qa${projectParam}`}
+                  download={`${slug}-ai-augmented-qa-architecture.json`}
+                  onClick={() => setIsEcosystemOpen(false)}
+                  className="px-2 py-1 rounded bg-[#13161C] hover:bg-[#1C212B] border border-[#232834] hover:border-[#EC4899] text-[#E2E8F0] text-[10px] flex items-center justify-between transition-colors"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="h-3 w-3 text-[#EC4899]" />
+                    <span>AI QA Blueprint & 5 Guardrails</span>
+                  </span>
+                  <span className="text-[9px] text-[#94A3B8]">.json</span>
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

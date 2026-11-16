@@ -231,6 +231,12 @@ export interface StudioCopy {
     tabLiveTrace: string;
     tabScripts: string;
     tabCiCd: string;
+    tabLiveStream: string;
+    tabAiQa: string;
+    tabAutomationScripts: string;
+    tabEcosystemHub: string;
+    executeFullSuite: string;
+    patchReport: string;
     gatePass: string;
     gateFail: string;
     applyFix: string;
@@ -590,6 +596,12 @@ const EN_COPY: StudioCopy = {
     tabLiveTrace: '1. Live Execution Stream',
     tabScripts: '2. Scripts & Results (.spec.ts / .k6.js)',
     tabCiCd: '3. CI/CD Bundles',
+    tabLiveStream: 'Execution & Telemetry',
+    tabAiQa: 'Quality Intelligence (8)',
+    tabAutomationScripts: 'Generated Scripts',
+    tabEcosystemHub: 'CI/CD & Integrations (16)',
+    executeFullSuite: 'Run Test Suite',
+    patchReport: 'Git Patch (.patch)',
     gatePass: 'RELEASE GATE: PRODUCTION GO (SLOs PASS)',
     gateFail: 'RELEASE GATE: NO-GO (Bottleneck / Failure)',
     applyFix: 'Apply DB Fix',
@@ -949,6 +961,12 @@ const ID_COPY: StudioCopy = {
     tabLiveTrace: '1. Aliran Eksekusi Langsung',
     tabScripts: '2. Skrip & Hasil (.spec.ts / .k6.js)',
     tabCiCd: '3. Paket CI/CD',
+    tabLiveStream: 'Eksekusi & Telemetri',
+    tabAiQa: 'Intelijen Kualitas (8)',
+    tabAutomationScripts: 'Skrip Otomasi',
+    tabEcosystemHub: 'CI/CD & Integrasi (16)',
+    executeFullSuite: 'Jalankan Test Suite',
+    patchReport: 'Patch Git (.patch)',
     gatePass: 'GERBANG RILIS: LAYAK PRODUKSI (SLO TERPENUHI)',
     gateFail: 'GERBANG RILIS: DITAHAN (Bottleneck / Kegagalan)',
     applyFix: 'Terapkan Perbaikan DB',

@@ -29,6 +29,7 @@ pnpm-debug.log*
 
 # TypeScript build info
 *.tsbuildinfo
+tsconfig.tsbuildinfo
 
 # Local OneSpec Vault, Cache & Session State (ISO/IEC 27001 Security)
 .onespec-vault/

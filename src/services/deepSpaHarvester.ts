@@ -65,13 +65,69 @@ export async function waitForSpaDataReady(page: any, maxWaitMs = 2400): Promise<
 
 /**
  * Normalizes route paths (removes query strings, hashes, trailing slashes)
+ * Supports SPA hash-mode routing (/#/route or #/route)
  */
 export function normalizeRoutePath(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
-  let clean = raw.trim().split('?')[0].split('#')[0];
+  let str = raw.trim();
+
+  // Dukung Hash-mode SPA Routing (/#/route atau #/route)
+  // Periksa apakah URL menggunakan hash router SPA sebelum memotong #
+  const hashIdx = str.indexOf('#');
+  if (hashIdx !== -1) {
+    const afterHash = str.slice(hashIdx + 1);
+    if (afterHash.startsWith('/')) {
+      str = afterHash;
+    } else if (str.startsWith('/#/') || str.startsWith('#/')) {
+      str = str.replace(/^\/?#\/?/, '/');
+    }
+  }
+
+  let clean = str.split('?')[0].split('#')[0].trim();
   if (!clean.startsWith('/')) clean = `/${clean}`;
   if (clean.length > 1 && clean.endsWith('/')) clean = clean.slice(0, -1);
   return clean;
+}
+
+/**
+ * Recursively infers the JSON schema shape up to depth 4
+ */
+export function inferRecursiveJsonShape(obj: unknown, depth = 0): Record<string, any> {
+  if (depth > 4 || obj === null || obj === undefined) {
+    return { type: obj === null ? 'null' : typeof obj };
+  }
+  if (Array.isArray(obj)) {
+    if (obj.length === 0) return { type: 'array', items: 'unknown' };
+    const first = obj[0];
+    return {
+      type: 'array',
+      items: typeof first === 'object' && first !== null ? inferRecursiveJsonShape(first, depth + 1) : typeof first,
+    };
+  }
+  if (typeof obj === 'object') {
+    const shape: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, any>)) {
+      if (v === null || v === undefined) {
+        shape[k] = 'nullable';
+      } else if (Array.isArray(v)) {
+        if (v.length === 0) {
+          shape[k] = 'array[]';
+        } else {
+          const item = v[0];
+          shape[k] =
+            typeof item === 'object' && item !== null
+              ? [inferRecursiveJsonShape(item, depth + 1)]
+              : `${typeof item}[]`;
+        }
+      } else if (typeof v === 'object') {
+        shape[k] = inferRecursiveJsonShape(v, depth + 1);
+      } else {
+        shape[k] = typeof v;
+      }
+    }
+    return shape;
+  }
+  return { type: typeof obj };
 }
 
 export async function runDeepSpaHarvester(
@@ -113,7 +169,14 @@ export async function runDeepSpaHarvester(
     }
 
     const jsonDiscoveredRoutes = new Set<string>();
-    let activeRouteApis: Array<{ method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; path: string; status: number; latencyMs: number }> = [];
+    let activeRouteApis: Array<{
+      method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+      path: string;
+      status: number;
+      latencyMs: number;
+      triggerPhase?: 'INITIAL_LOAD' | 'SUB_TAB_SWITCH' | 'ACTION_BUTTON_CLICK';
+      triggerAction?: string;
+    }> = [];
     const featureModules: FeatureModuleSurface[] = [];
 
     // Deteksi Multi-Origin & Subdomain Backend (misal url_mobodfs) dari Auth State
@@ -193,6 +256,11 @@ export async function runDeepSpaHarvester(
       reqStartMap.set(req, Date.now());
     });
 
+    let currentCapturePhase: 'INITIAL_LOAD' | 'SUB_TAB_SWITCH' | 'ACTION_BUTTON_CLICK' = 'INITIAL_LOAD';
+    let currentTriggerLabel = 'Page Load';
+    let currentSubTabTriggeredApis: string[] = [];
+    let discoveredAuthContext: BlindCrawlResult['discoveredAuthContext'] = undefined;
+
     let activeRouteAnomalies: FeatureSurfaceAnomaly[] = [];
 
     // Sniffer Jaringan: Tangkap semua XHR/Fetch + Cross-Subdomain API + Bedah Isi JSON untuk Menu & Tabel DB!
@@ -222,14 +290,30 @@ export async function runDeepSpaHarvester(
           const startTime = reqStartMap.get(req);
           const latencyMs = startTime ? Math.max(8, Date.now() - startTime) : 38;
 
-          let reqBodySchema: Record<string, string> | undefined;
+          let reqBodySchema: Record<string, any> | undefined;
+          let graphQlOpName: string | undefined;
           try {
             const postData = req.postDataJSON?.();
             if (postData && typeof postData === 'object') {
-              reqBodySchema = {};
-              for (const [k, v] of Object.entries(postData)) reqBodySchema[k] = typeof v;
+              reqBodySchema = inferRecursiveJsonShape(postData);
+              if (postData.operationName && typeof postData.operationName === 'string') {
+                graphQlOpName = postData.operationName;
+              } else if (postData.query && typeof postData.query === 'string') {
+                const qm = /(query|mutation|subscription)\s+([a-zA-Z0-9_]+)/i.exec(postData.query);
+                if (qm) graphQlOpName = `${qm[1]} ${qm[2]}`;
+              }
             }
           } catch {}
+
+          if (!graphQlOpName && (u.pathname.toLowerCase().includes('/graphql') || method === 'POST')) {
+            try {
+              const rawText = req.postData?.();
+              if (rawText && rawText.includes('query')) {
+                const qm = /(query|mutation|subscription)\s+([a-zA-Z0-9_]+)/i.exec(rawText);
+                if (qm) graphQlOpName = `${qm[1]} ${qm[2]}`;
+              }
+            } catch {}
+          }
 
           let queryParams: Record<string, { type: string; required?: boolean; example?: string }> | undefined;
           if (u.searchParams && Array.from(u.searchParams.keys()).length > 0) {
@@ -286,15 +370,35 @@ export async function runDeepSpaHarvester(
             }
           }
 
-          if (activeRouteApis.length < 25 && !activeRouteApis.some((a) => a.method === method && a.path === displayPath)) {
+          if (currentCapturePhase === 'SUB_TAB_SWITCH') {
+            if (!currentSubTabTriggeredApis.includes(displayPath)) {
+              currentSubTabTriggeredApis.push(displayPath);
+            }
+          }
+
+          if (activeRouteApis.length < 35 && !activeRouteApis.some((a) => a.method === method && a.path === displayPath)) {
             activeRouteApis.push({
               method: (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(method) ? method : 'GET') as any,
               path: displayPath,
               status: resp.status(),
               latencyMs,
+              triggerPhase: currentCapturePhase,
+              triggerAction: currentTriggerLabel,
             });
           }
           const isSuccess2xx = resp.status() >= 200 && resp.status() < 300;
+          let responseSchemaData: Record<string, any> | undefined;
+          if (isSuccess2xx && jsonBody) {
+            responseSchemaData = typeof jsonBody === 'object' ? inferRecursiveJsonShape(jsonBody) : jsonBody;
+          }
+
+          const epSummary = graphQlOpName
+            ? `GraphQL: ${graphQlOpName} (HTTP ${resp.status()})`
+            : `${method} ${displayPath} (HTTP ${resp.status()})`;
+          const epHandler = graphQlOpName
+            ? `gql_${graphQlOpName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}`
+            : `${method.toLowerCase()}_${displayPath.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
           if (!apiMap.has(key)) {
             apiMap.set(key, {
               id: `EP-${String(apiMap.size + 1).padStart(3, '0')}`,
@@ -302,15 +406,17 @@ export async function runDeepSpaHarvester(
               path: displayPath,
               controllerPath: 'live-network-xhr',
               lineNumber: 1,
-              handlerName: `${method.toLowerCase()}_${displayPath.replace(/[^a-zA-Z0-9]/g, '_')}`,
-              summary: `${method} ${displayPath} (HTTP ${resp.status()})`,
+              handlerName: epHandler,
+              summary: epSummary,
               description: `Intercepted live API call (${u.origin})`,
               queryParameters: queryParams,
               requestBodySchema: reqBodySchema,
-              responseSchema: isSuccess2xx && jsonBody ? jsonBody : undefined,
+              responseSchema: responseSchemaData || (isSuccess2xx && jsonBody ? jsonBody : undefined),
               linkedTestCaseIds: [`TC-${String(apiMap.size + 1).padStart(3, '0')}`],
               linkedRequirementId: 'REQ-US-01',
               authRequired: true,
+              triggerPhase: currentCapturePhase,
+              triggerAction: currentTriggerLabel,
             });
           } else {
             const existing = apiMap.get(key);
@@ -321,8 +427,8 @@ export async function runDeepSpaHarvester(
               if (reqBodySchema && !existing.requestBodySchema) {
                 existing.requestBodySchema = reqBodySchema;
               }
-              if (isSuccess2xx && jsonBody && !existing.responseSchema) {
-                existing.responseSchema = jsonBody;
+              if (isSuccess2xx && responseSchemaData && !existing.responseSchema) {
+                existing.responseSchema = responseSchemaData;
               }
             }
           }
@@ -653,6 +759,115 @@ export async function runDeepSpaHarvester(
         }
         await waitForSpaDataReady(page, 2800);
 
+        // SPA State Store & JWT RBAC Claims X-Ray
+        try {
+          const authXRay = await page.evaluate(`(() => {
+            const parseJwt = (token) => {
+              try {
+                if (typeof token !== 'string') return null;
+                const parts = token.split('.');
+                if (parts.length !== 3) return null;
+                const base64Url = parts[1];
+                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                const jsonPayload = decodeURIComponent(
+                  atob(base64)
+                    .split('')
+                    .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                    .join('')
+                );
+                return JSON.parse(jsonPayload);
+              } catch {
+                return null;
+              }
+            };
+
+            let foundToken = null;
+            let source = 'localStorage';
+            let rawClaims = null;
+            let role = undefined;
+            let roles = [];
+            let permissions = [];
+            let tenant_id = undefined;
+
+            // 1. Search localStorage & sessionStorage
+            const storages = [
+              { type: 'localStorage', store: window.localStorage },
+              { type: 'sessionStorage', store: window.sessionStorage },
+            ];
+            for (const s of storages) {
+              if (!s.store) continue;
+              for (let i = 0; i < s.store.length; i++) {
+                const key = s.store.key(i) || '';
+                const val = s.store.getItem(key) || '';
+                if (/token|auth|jwt|access|bearer|user|session/i.test(key) || val.startsWith('ey')) {
+                  const claims = parseJwt(val);
+                  if (claims) {
+                    foundToken = val;
+                    source = s.type;
+                    rawClaims = claims;
+                    break;
+                  }
+                  try {
+                    const parsed = JSON.parse(val);
+                    if (parsed && typeof parsed === 'object') {
+                      for (const subVal of Object.values(parsed)) {
+                        if (typeof subVal === 'string' && subVal.startsWith('ey')) {
+                          const subClaims = parseJwt(subVal);
+                          if (subClaims) {
+                            foundToken = subVal;
+                            source = s.type;
+                            rawClaims = subClaims;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                  } catch {}
+                }
+              }
+              if (rawClaims) break;
+            }
+
+            // 2. Search Pinia / Vuex / Nuxt / Next / Inertia
+            if (!rawClaims) {
+              if (window.__NUXT__) {
+                source = 'nuxt';
+                const nStr = JSON.stringify(window.__NUXT__);
+                const m = /"ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+"/.exec(nStr);
+                if (m) rawClaims = parseJwt(m[0].replace(/"/g, ''));
+              } else if (window.__NEXT_DATA__) {
+                source = 'next';
+                const nStr = JSON.stringify(window.__NEXT_DATA__);
+                const m = /"ey[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+"/.exec(nStr);
+                if (m) rawClaims = parseJwt(m[0].replace(/"/g, ''));
+              }
+            }
+
+            if (rawClaims) {
+              role = rawClaims.role || rawClaims.user_role || rawClaims.role_name || (Array.isArray(rawClaims.roles) ? rawClaims.roles[0] : undefined);
+              if (Array.isArray(rawClaims.roles)) roles = rawClaims.roles;
+              else if (role) roles = [role];
+              if (Array.isArray(rawClaims.permissions)) permissions = rawClaims.permissions;
+              else if (Array.isArray(rawClaims.scopes)) permissions = rawClaims.scopes;
+              else if (typeof rawClaims.scope === 'string') permissions = rawClaims.scope.split(' ');
+              tenant_id = rawClaims.tenant_id || rawClaims.tenantId || rawClaims.company_id || rawClaims.org_id;
+            }
+
+            return {
+              role: typeof role === 'string' ? role : undefined,
+              roles: Array.isArray(roles) && roles.length ? roles : undefined,
+              permissions: Array.isArray(permissions) && permissions.length ? permissions : undefined,
+              tenant_id,
+              jwtClaims: rawClaims || undefined,
+              storageSource: source,
+            };
+          })()`).catch(() => null);
+
+          if (authXRay) {
+            discoveredAuthContext = authXRay;
+          }
+        } catch {}
+
         // Jika diarahkan ke /home atau /dashboard (atau rute non-login), pastikan menu sidebar dibuka penuh sebelum diekstrak
         const postLoginPath = await page.evaluate(`window.location.pathname`).catch(() => '');
         if (/\/home|\/dashboard/i.test(postLoginPath) || !/\/login|\/signin/i.test(postLoginPath)) {
@@ -769,7 +984,10 @@ export async function runDeepSpaHarvester(
           document.querySelectorAll('a[href], [data-route], [data-path], [to]').forEach((a) => {
             const href = a.getAttribute('href') || a.getAttribute('data-route') || a.getAttribute('data-path') || a.getAttribute('to') || '';
             try {
-              if (href.startsWith('/')) {
+              if (href.startsWith('/#/') || href.startsWith('#/')) {
+                const clean = '/' + href.replace(/^\/?#\/?/, '').split('?')[0].split('#')[0];
+                if (clean.length > 1 && !/logout|signout|keluar/i.test(clean)) collected.add(clean);
+              } else if (href.startsWith('/')) {
                 const clean = href.split('?')[0].split('#')[0];
                 if (clean.length > 1 && !/logout|signout|keluar/i.test(clean)) collected.add(clean);
               } else if (!href.startsWith('http') && href.length > 1 && !href.startsWith('#') && !href.startsWith('javascript:')) {
@@ -778,7 +996,12 @@ export async function runDeepSpaHarvester(
               } else {
                 const u = new URL(href, window.location.origin);
                 if (u.origin === window.location.origin && !/logout|signout|keluar/i.test(u.pathname)) {
-                  collected.add(u.pathname);
+                  if (u.hash && (u.hash.startsWith('#/') || u.hash.startsWith('#!/'))) {
+                    const cleanH = '/' + u.hash.replace(/^#\/?!?\/?/, '').split('?')[0];
+                    if (cleanH.length > 1 && !/logout|signout|keluar/i.test(cleanH)) collected.add(cleanH);
+                  } else {
+                    collected.add(u.pathname);
+                  }
                 }
               }
             } catch {}
@@ -936,7 +1159,7 @@ export async function runDeepSpaHarvester(
             .catch(() => false);
           if (clicked) {
             await page.waitForTimeout(350);
-            const curPath = new URL(page.url()).pathname;
+            const curPath = normalizeRoutePath(page.url());
             if (curPath && curPath !== '/login' && !clickDiscoveredRoutes.includes(curPath)) {
               clickDiscoveredRoutes.push(curPath);
             }
@@ -974,12 +1197,15 @@ export async function runDeepSpaHarvester(
     // Pastikan jika ada rute selain '/', kita memprioritaskan rute fitur nyata
     const routesToVisit = allCandidateRoutes.length > 0 ? allCandidateRoutes.slice(0, 40) : ['/home'];
 
+    // Deteksi apakah target menggunakan Hash-Mode SPA Routing (e.g. /#/route atau #/route)
+    const usesHashRouter = rawUrl.includes('#/') || (await page.evaluate(`Boolean(window.location.hash.startsWith('#/'))`).catch(() => false));
+
     // ------------------------------------------------------------------------
     // TAHAP 3: KUNJUNGI SETIAP RUTE FITUR & GREP SEMUA ELEMEN (TOMBOL, FILTER, SUB-TAB, MODAL, TABEL, KARTU & SCREENSHOT)
     // ------------------------------------------------------------------------
     for (let idx = 0; idx < routesToVisit.length; idx++) {
       const routePath = routesToVisit[idx];
-      const fullPageUrl = `${origin}${routePath}`;
+      const fullPageUrl = usesHashRouter ? `${origin}/#${routePath}` : `${origin}${routePath}`;
       activeRouteApis = [];
       activeRouteAnomalies = [];
 
@@ -1023,10 +1249,17 @@ export async function runDeepSpaHarvester(
         await Promise.race([
           (async () => {
             const navigatedViaSpa = await page
-              .evaluate(`((targetPath) => {
-                const link = document.querySelector('a[href="' + targetPath + '"]');
+              .evaluate(`(([targetPath, isHash]) => {
+                const hashTarget = '#/' + targetPath.replace(/^\\//, '');
+                const link = document.querySelector('a[href="' + targetPath + '"]') ||
+                  document.querySelector('a[href="' + hashTarget + '"]') ||
+                  document.querySelector('a[href="/#' + targetPath + '"]');
                 if (link) {
                   link.click();
+                  return true;
+                }
+                if (isHash) {
+                  window.location.hash = hashTarget;
                   return true;
                 }
                 const nuxtRoot = document.querySelector('#__nuxt') || document.querySelector('#app');
@@ -1036,7 +1269,7 @@ export async function runDeepSpaHarvester(
                   return true;
                 }
                 return false;
-              })(${JSON.stringify(routePath)})`)
+              })([${JSON.stringify(routePath)}, ${Boolean(usesHashRouter)}])`)
               .catch(() => false);
 
             if (!navigatedViaSpa) {
@@ -1056,17 +1289,27 @@ export async function runDeepSpaHarvester(
           continue;
         }
 
-        // Ambil link baru yang mungkin hanya muncul di halaman ini (BFS)
+        // Ambil link baru yang mungkin hanya muncul di halaman ini (BFS, termasuk SPA Hash Routes)
         const newlyFoundLinks: string[] = await page
           .evaluate(`(() => {
-            return Array.from(document.querySelectorAll('a[href]'))
+            return Array.from(document.querySelectorAll('a[href], [data-route], [data-path], [to]'))
               .map((a) => {
                 try {
-                  const u = new URL(a.getAttribute('href') || '', window.location.origin);
-                  return u.origin === window.location.origin ? u.pathname : '';
+                  const rawHref = a.getAttribute('href') || a.getAttribute('data-route') || a.getAttribute('data-path') || a.getAttribute('to') || '';
+                  if (rawHref.startsWith('/#/') || rawHref.startsWith('#/')) {
+                    return '/' + rawHref.replace(/^\\/?#\\/?/, '').split('?')[0];
+                  }
+                  const u = new URL(rawHref, window.location.origin);
+                  if (u.origin === window.location.origin) {
+                    if (u.hash && (u.hash.startsWith('#/') || u.hash.startsWith('#!/'))) {
+                      return '/' + u.hash.replace(/^#\\/?!?\\/?/, '').split('?')[0];
+                    }
+                    return u.pathname;
+                  }
+                  return '';
                 } catch { return ''; }
               })
-              .filter((p) => p && p.startsWith('/') && !/login|logout|_nuxt|_next|\./i.test(p));
+              .filter((p) => p && p.startsWith('/') && !/login|logout|_nuxt|_next|\\./i.test(p));
           })()`)
           .catch(() => []);
 
@@ -1175,6 +1418,10 @@ export async function runDeepSpaHarvester(
         const subTabsCatalog = [];
         for (const tName of (domSurface.tabNames || []).slice(0, 8)) {
           try {
+            currentCapturePhase = 'SUB_TAB_SWITCH';
+            currentTriggerLabel = `Sub-Tab: ${tName}`;
+            currentSubTabTriggeredApis = [];
+
             await page
               .evaluate(`((name) => {
                 const tabs = Array.from(document.querySelectorAll('[role="tab"], .el-tabs__item, .v-tab, [class*="tab-item" i], [class*="tabs" i] button'));
@@ -1212,9 +1459,13 @@ export async function runDeepSpaHarvester(
               description: `Sub-tab operasional "${tName}" pada modul ${domSurface.heading}`,
               columnsOrCards: tabDetails.columnsOrCards.length ? tabDetails.columnsOrCards : [tName],
               actionButtons: tabDetails.actionButtons,
+              triggeredApis: [...currentSubTabTriggeredApis],
             });
           } catch {}
         }
+        currentCapturePhase = 'INITIAL_LOAD';
+        currentTriggerLabel = 'Page Load';
+        currentSubTabTriggeredApis = [];
 
         // 4. Klik tombol "+ Tambah / Create / Add / Baru" untuk menyedot field di dalam Modal / Drawer Form (non-destruktif)
         const modalForms = [];
@@ -1223,7 +1474,10 @@ export async function runDeepSpaHarvester(
             'button:has-text("Tambah"), button:has-text("Create"), button:has-text("Add"), button:has-text("Buat"), button:has-text("Baru"), button:has-text("+")'
           );
           if (triggerBtn) {
+            currentCapturePhase = 'ACTION_BUTTON_CLICK';
             const trigLabel = ((await triggerBtn.textContent()) || '+ Tambah Data').replace(/\s+/g, ' ').trim();
+            currentTriggerLabel = `Modal Open: ${trigLabel}`;
+
             await triggerBtn.click({ timeout: 1500 }).catch(() => {});
             await page.waitForTimeout(450);
             const modalInputs = await page
@@ -1249,15 +1503,44 @@ export async function runDeepSpaHarvester(
                 });
               })()`)
               .catch(() => []);
+
+            const observedValidationMessages: string[] = [];
+            const isSafeEnv = /localhost|127\.0\.0\.1|staging|sandbox|dev|test/i.test(rawUrl);
+            if (isSafeEnv && modalInputs.length > 0) {
+              try {
+                const submitBtn = await page.$(
+                  '[role="dialog"] button[type="submit"], [role="dialog"] button:has-text("Simpan"), [role="dialog"] button:has-text("Save"), [role="dialog"] button:has-text("Submit"), .modal button[type="submit"], .modal button:has-text("Simpan"), .modal button:has-text("Save"), .modal button:has-text("Submit"), .el-dialog button[type="submit"], .el-dialog button:has-text("Simpan"), .v-dialog button[type="submit"]'
+                );
+                if (submitBtn) {
+                  await submitBtn.click({ timeout: 1000 }).catch(() => {});
+                  await page.waitForTimeout(350);
+                  const errMsgs = await page.evaluate(`(() => {
+                    const dialog = document.querySelector('[role="dialog"], .modal, .el-dialog, .v-dialog, [class*="modal" i]');
+                    if (!dialog) return [];
+                    const errEls = Array.from(dialog.querySelectorAll('.el-form-item__error, .v-messages__message, .invalid-feedback, [role="alert"], [class*="error" i]'));
+                    return errEls.map(el => (el.textContent || '').trim()).filter(t => t.length > 1 && t.length < 120);
+                  })()`).catch(() => []);
+                  if (Array.isArray(errMsgs)) {
+                    for (const m of errMsgs) {
+                      if (!observedValidationMessages.includes(m)) observedValidationMessages.push(m);
+                    }
+                  }
+                }
+              } catch {}
+            }
+
             if (modalInputs.length > 0) {
               modalForms.push({
                 formTitle: `Form ${trigLabel}`,
                 triggerButtonText: trigLabel,
                 inputs: modalInputs,
                 submitButtonText: 'Simpan / Submit',
+                observedValidationMessages: observedValidationMessages.length ? observedValidationMessages : undefined,
               });
             }
             await page.keyboard.press('Escape').catch(() => {});
+            currentCapturePhase = 'INITIAL_LOAD';
+            currentTriggerLabel = 'Page Load';
           }
         } catch {}
 
@@ -1354,17 +1637,7 @@ export async function runDeepSpaHarvester(
               : [],
           searchFilterSelectors: ['input[type="search"]', 'input', 'select'],
           paginationControls: ['10', '25', '50'],
-          triggeredApis:
-            activeRouteApis.length > 0
-              ? [...activeRouteApis]
-              : [
-                  {
-                    method: 'GET',
-                    path: `/api${routePath === '/' ? '/overview' : routePath}`,
-                    status: 200,
-                    latencyMs: 38,
-                  },
-                ],
+          triggeredApis: [...activeRouteApis],
           observedAnomalies: [...activeRouteAnomalies],
         });
       } catch (routeErr: any) {
@@ -1416,6 +1689,7 @@ export async function runDeepSpaHarvester(
       databaseTables: Array.from(dbTableMap.values()),
       featureModules,
       discoveredFeatureModules: featureModules,
+      discoveredAuthContext: discoveredAuthContext || initialResult.discoveredAuthContext,
     };
   } catch (err) {
     if (browser) {

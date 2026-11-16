@@ -26,3 +26,13 @@ Do NOT remove or downgrade any of the following enterprise modules:
 4. `rbacDifferentialMatrixService.ts`: Multi-Persona RBAC Differential Matrix (`Pancaran Internal` vs `Eksternal Partner` vs `Viewer` vs `Unauthenticated`).
 5. `automationBundleExportService.ts`: Executable Playwright (`.spec.ts`) & Postman Collection v2.1 (`.json`) generator served via `/api/sdlc/automation-bundle`.
 6. `unifiedReportGenerator.ts`: Full parity across 17-sheet `.xlsx` and 15-table `.xls` exports (including Table 13 SRE/CTO Bus-Factor, Table 14 Synthetic Test Data Factory, and Table 15 RBAC Differential Matrix).
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

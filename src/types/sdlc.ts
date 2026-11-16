@@ -450,6 +450,7 @@ export interface SubTabCatalogItem {
   description: string;
   columnsOrCards: string[];
   actionButtons: string[];
+  triggeredApis?: string[];
 }
 
 export type ScreenControlType =
@@ -527,6 +528,7 @@ export interface FeatureModuleSurface {
     triggerButtonText?: string;
     inputs: FeatureSurfaceInput[];
     submitButtonText: string;
+    observedValidationMessages?: string[];
   }>;
   triggeredApis: Array<{
     method: string;
@@ -535,6 +537,8 @@ export interface FeatureModuleSurface {
     latencyMs: number;
     requestSample?: string;
     responseSample?: string;
+    triggerPhase?: 'INITIAL_LOAD' | 'SUB_TAB_SWITCH' | 'ACTION_BUTTON_CLICK';
+    triggerAction?: string;
   }>;
   observedAnomalies: FeatureSurfaceAnomaly[];
   screenshotDataUrl?: string;
@@ -643,6 +647,14 @@ export interface BlindCrawlResult {
   discoveredFeatureModules?: FeatureModuleSurface[];
   featureModules?: FeatureModuleSurface[];
   scrapedHeadings?: string[];
+  discoveredAuthContext?: {
+    role?: string;
+    roles?: string[];
+    permissions?: string[];
+    tenant_id?: string | number;
+    jwtClaims?: Record<string, any>;
+    storageSource?: 'localStorage' | 'sessionStorage' | 'pinia' | 'vuex' | 'nuxt' | 'next' | 'inertia' | string;
+  };
 }
 export interface GitDiscoveryConfig {
   repositoryUrl: string;
@@ -677,6 +689,8 @@ export interface DiscoveredApiEndpoint {
   linkedTestCaseIds: string[]; // e.g. ["TC-001", "TC-002", "TC-003"]
   linkedRequirementId: string; // e.g. "REQ-US-01"
   authRequired?: boolean;
+  triggerPhase?: 'INITIAL_LOAD' | 'SUB_TAB_SWITCH' | 'ACTION_BUTTON_CLICK';
+  triggerAction?: string;
 }
 
 export interface DatabaseErdColumn {

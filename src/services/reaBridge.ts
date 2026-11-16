@@ -10,6 +10,9 @@ export interface ReaRouteDeclaration {
   handlerName?: string;
   validationSchema?: Record<string, unknown> | null;
   authRequired?: boolean;
+  sourceSnippet?: string;
+  linkedDbTables?: string[];
+  authContext?: string;
 }
 
 export interface ReaTableColumn {
@@ -49,7 +52,7 @@ export interface ReaExtractedBackendRule {
   sourceFile: string;
   lineNumber: number;
   fieldOrGuardName: string;
-  ruleCategory: 'ZOD_JOI_DTO' | 'CLASS_VALIDATOR' | 'BACKEND_IF_THROW_GUARD' | 'BACKEND_FORMULA_OR_TX';
+  ruleCategory: 'ZOD_JOI_DTO' | 'CLASS_VALIDATOR' | 'BACKEND_IF_THROW_GUARD' | 'BACKEND_FORMULA_OR_TX' | 'LARAVEL_VALIDATION';
   constraintExpression: string;
   httpStatus: number;
   errorMessage: string;
@@ -58,9 +61,29 @@ export interface ReaExtractedBackendRule {
   minLength?: number;
   maxLength?: number;
   enumValues?: string[];
+  sourceSnippet?: string;
+}
+
+export interface DiscoveredUiSurfaceInput {
+  name: string;
+  type: string;
+  placeholder?: string;
+  required?: boolean;
+}
+
+export interface DiscoveredUiSurface {
+  routePath: string;
+  moduleName: string;
+  sourceFile: string;
+  headings: string[];
+  tableColumns: string[];
+  buttons: string[];
+  inputs: DiscoveredUiSurfaceInput[];
+  triggeredApis: string[];
 }
 
 export interface ReaApplicationAnalysis {
+  discoveredUiSurfaces?: DiscoveredUiSurface[];
   extractedBackendRules?: ReaExtractedBackendRule[];
   projectPath: string;
   analyzedAt: string;
@@ -316,7 +339,33 @@ export class ReaBridgeService {
     const databaseSchemas: ReaTableDefinition[] = [];
     const domSelectors: ReaDomSelector[] = [];
     const extractedBackendRules: ReaExtractedBackendRule[] = [];
+    const discoveredUiSurfaces: DiscoveredUiSurface[] = [];
     let dependencies: Record<string, string> = {};
+    const routerFileMountPrefixes = new Map<string, string[]>();
+    const rulesByFileAndName = new Map<string, ReaExtractedBackendRule[]>();
+    const fileContentCache = new Map<string, string>();
+
+    const registerExtractedRule = (
+      rule: Omit<ReaExtractedBackendRule, 'sourceSnippet'>,
+      contentRef: string,
+      schemaNameHint?: string
+    ) => {
+      const rawLines = contentRef.split('\n');
+      const snippet = `${rule.sourceFile}:${rule.lineNumber}\n${rawLines.slice(Math.max(0, rule.lineNumber - 1), Math.min(rawLines.length, rule.lineNumber + 2)).join('\n')}`;
+      const fullRule: ReaExtractedBackendRule = {
+        ...rule,
+        sourceSnippet: snippet,
+      };
+      extractedBackendRules.push(fullRule);
+
+      if (schemaNameHint) {
+        if (!rulesByFileAndName.has(schemaNameHint)) rulesByFileAndName.set(schemaNameHint, []);
+        rulesByFileAndName.get(schemaNameHint)!.push(fullRule);
+      }
+      const baseFile = path.basename(rule.sourceFile).replace(/\.[^.]+$/, '');
+      if (!rulesByFileAndName.has(baseFile)) rulesByFileAndName.set(baseFile, []);
+      rulesByFileAndName.get(baseFile)!.push(fullRule);
+    };
 
     // 1. Inspect package.json
     const packageJsonPath = path.join(dirPath, 'package.json');
@@ -431,8 +480,12 @@ export class ReaBridgeService {
       '.turbo',
       '.vercel',
       'coverage',
-      'migrations',
       '__pycache__',
+      'vendor',
+      'storage',
+      'target',
+      'venv',
+      '.venv',
     ]);
 
     const scanDir = (current: string) => {
@@ -455,33 +508,35 @@ export class ReaBridgeService {
           const relPath = path.relative(dirPath, fullPath).replace(/\\/g, '/');
           const ext = path.extname(entry.name).toLowerCase();
 
-          // Next.js App Router (app/**/route.{ts,js} and app/**/page.{tsx,jsx})
+          // Next.js App Router ((src/)?app/**/route.{ts,js} and (src/)?app/**/page.{tsx,jsx})
           if (relPath.includes('app/') || relPath.startsWith('app/')) {
+            const cleanAppDir = path
+              .dirname(relPath)
+              .replace(/^(?:src\/)?app\/?/, '/')
+              .replace(/\/\([^)]+\)/g, '');
+            const resolvedRoutePath = cleanAppDir === '/.' || cleanAppDir === '' || cleanAppDir === '/' ? '/' : cleanAppDir.startsWith('/') ? cleanAppDir : `/${cleanAppDir}`;
+
             if (entry.name === 'route.ts' || entry.name === 'route.js') {
-              const dirOfRoute = path.dirname(relPath).replace(/^app\/?/, '/');
-              const routePath = dirOfRoute.startsWith('/') ? dirOfRoute : `/${dirOfRoute}`;
               const content = fs.readFileSync(fullPath, 'utf8');
               const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] as const;
               for (const m of methods) {
                 if (new RegExp(`export\\s+(?:async\\s+)?function\\s+${m}\\b`).test(content)) {
                   routes.push({
                     method: m,
-                    path: routePath === '/.' ? '/' : routePath,
+                    path: resolvedRoutePath,
                     controllerPath: relPath,
                     lineNumber: 1,
-                    handlerName: `${m.toLowerCase()}_${routePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                    handlerName: `${m.toLowerCase()}_${resolvedRoutePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
                   });
                 }
               }
             } else if (entry.name === 'page.tsx' || entry.name === 'page.jsx') {
-              const dirOfPage = path.dirname(relPath).replace(/^app\/?/, '/');
-              const pagePath = dirOfPage === '/.' || dirOfPage === '/' ? '/' : dirOfPage.startsWith('/') ? dirOfPage : `/${dirOfPage}`;
               routes.push({
                 method: 'GET',
-                path: pagePath,
+                path: resolvedRoutePath,
                 controllerPath: relPath,
                 lineNumber: 1,
-                handlerName: `page_${pagePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                handlerName: `page_${resolvedRoutePath.replace(/[^a-zA-Z0-9]/g, '_')}`,
               });
             }
           }
@@ -514,8 +569,52 @@ export class ReaBridgeService {
           }
 
           // Scan code files for route definitions and models
-          if (/\.(ts|tsx|js|jsx|go|py|php|java|sql|vue|html)$/.test(entry.name)) {
+          if (/\.(ts|tsx|js|jsx|go|py|php|java|sql|vue|svelte|html)$/.test(entry.name) || entry.name.endsWith('.blade.php')) {
             const content = fs.readFileSync(fullPath, 'utf8');
+            fileContentCache.set(relPath, content);
+
+            // Express / Fastify / Koa Cross-File Router Mount Discovery
+            const importMap = new Map<string, string>();
+            const importRegex = /(?:import\s+([a-zA-Z0-9_]+)\s+from\s+['"]([^'"]+)['"]|const\s+([a-zA-Z0-9_]+)\s*=\s*require\(\s*['"]([^'"]+)['"]\s*\))/g;
+            let im: RegExpExecArray | null;
+            while ((im = importRegex.exec(content)) !== null) {
+              const varName = im[1] || im[3];
+              const importPath = im[2] || im[4];
+              if (varName && importPath && importPath.startsWith('.')) {
+                const resolvedRel = path.normalize(path.join(path.dirname(relPath), importPath)).replace(/\\/g, '/');
+                importMap.set(varName, resolvedRel);
+              }
+            }
+
+            // app.use('/api/v1/orders', orderRouter) or router.use('/tariffs', tariffRoutes)
+            const appUseRegex = /(?:app|router)\.use\(\s*['"]([^'"]+)['"]\s*,\s*([a-zA-Z0-9_]+)\s*\)/g;
+            let aum: RegExpExecArray | null;
+            while ((aum = appUseRegex.exec(content)) !== null) {
+              const prefix = aum[1].replace(/\/+$/, '');
+              const varName = aum[2];
+              const targetRel = importMap.get(varName) || varName;
+              if (!routerFileMountPrefixes.has(targetRel)) routerFileMountPrefixes.set(targetRel, []);
+              routerFileMountPrefixes.get(targetRel)!.push(prefix);
+
+              const base = path.basename(targetRel).replace(/\.[^.]+$/, '');
+              if (!routerFileMountPrefixes.has(base)) routerFileMountPrefixes.set(base, []);
+              routerFileMountPrefixes.get(base)!.push(prefix);
+            }
+
+            // fastify.register(orderRoutes, { prefix: '/api/v1/orders' })
+            const fastifyRegRegex = /fastify\.register\(\s*([a-zA-Z0-9_]+)\s*,\s*\{\s*prefix\s*:\s*['"]([^'"]+)['"]/g;
+            let frm: RegExpExecArray | null;
+            while ((frm = fastifyRegRegex.exec(content)) !== null) {
+              const varName = frm[1];
+              const prefix = frm[2].replace(/\/+$/, '');
+              const targetRel = importMap.get(varName) || varName;
+              if (!routerFileMountPrefixes.has(targetRel)) routerFileMountPrefixes.set(targetRel, []);
+              routerFileMountPrefixes.get(targetRel)!.push(prefix);
+
+              const base = path.basename(targetRel).replace(/\.[^.]+$/, '');
+              if (!routerFileMountPrefixes.has(base)) routerFileMountPrefixes.set(base, []);
+              routerFileMountPrefixes.get(base)!.push(prefix);
+            }
 
             // Express / Fastify / Koa: app.(get|post|...) or router.(get|post|...) or fastify.(get|post|...)
             const nodeRouteRegex = /(?:fastify|app|router)\.(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/g;
@@ -534,18 +633,24 @@ export class ReaBridgeService {
               });
             }
 
-            // NestJS Decorators: @Get('path'), @Post('path'), etc.
+            // NestJS Decorators: @Controller('api/v1/orders') + @Get('summary'), etc.
+            const nestControllerMatch = /@Controller\(\s*(?:['"]([^'"]*)['"])?\s*\)/.exec(content);
+            const nestPrefix = nestControllerMatch && nestControllerMatch[1] ? nestControllerMatch[1].replace(/^\/+|\/+$/g, '') : '';
+
             const nestRouteRegex = /@(Get|Post|Put|Delete|Patch)\(\s*['"]([^'"]*)['"]\s*\)/g;
             while ((match = nestRouteRegex.exec(content)) !== null) {
               const methodStr = match[1].toUpperCase();
-              const subPath = match[2] || '';
+              const subPath = (match[2] || '').replace(/^\/+/, '');
               const validMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] as const;
               const validMethod = validMethods.includes(methodStr as (typeof validMethods)[number])
                 ? (methodStr as ReaRouteDeclaration['method'])
                 : 'GET';
+              const resolvedPath = nestPrefix
+                ? `/${nestPrefix}${subPath ? `/${subPath}` : ''}`
+                : (subPath ? `/${subPath}` : '/');
               routes.push({
                 method: validMethod,
-                path: subPath.startsWith('/') ? subPath : `/${subPath}`,
+                path: resolvedPath,
                 controllerPath: relPath,
                 lineNumber: content.substring(0, match.index).split('\n').length,
               });
@@ -579,16 +684,105 @@ export class ReaBridgeService {
               });
             }
 
-            // PHP routes: Route::(get|post|put|delete)('path')
-            const phpRouteRegex = /Route::(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/g;
+            // Laravel Route prefix group resolution: Route::prefix('v1/orders')->group(...) or Route::group(['prefix' => 'v1/orders'], ...)
+            const phpGroupRegex = /Route::(?:prefix\(\s*['"]([^'"]+)['"]\s*\)->group|group\(\s*\[[^\]]*['"]prefix['"]\s*=>\s*['"]([^'"]+)['"][^\]]*\])\s*,\s*(?:static\s+)?function\s*\([^)]*\)\s*\{([\s\S]*?)\}\s*\);/g;
+            let pgm: RegExpExecArray | null;
+            while ((pgm = phpGroupRegex.exec(content)) !== null) {
+              const groupPrefix = (pgm[1] || pgm[2] || '').replace(/^\/+|\/+$/g, '');
+              const groupBody = pgm[3];
+              const groupStartLine = content.substring(0, pgm.index).split('\n').length;
+              const innerRouteRegex = /Route::(get|post|put|delete|patch|any)\(\s*['"]([^'"]+)['"]/g;
+              let irm: RegExpExecArray | null;
+              while ((irm = innerRouteRegex.exec(groupBody)) !== null) {
+                const rawMethod = irm[1].toUpperCase();
+                const methodStr = rawMethod === 'ANY' ? 'ALL' : rawMethod;
+                let rSub = irm[2].startsWith('/') ? irm[2] : `/${irm[2]}`;
+                let fullR = `/${groupPrefix}${rSub === '/' ? '' : rSub}`;
+                if (relPath.includes('api.php') && !fullR.startsWith('/api')) {
+                  fullR = `/api${fullR}`;
+                }
+                routes.push({
+                  method: methodStr as ReaRouteDeclaration['method'],
+                  path: fullR,
+                  controllerPath: relPath,
+                  lineNumber: groupStartLine + groupBody.substring(0, irm.index).split('\n').length - 1,
+                });
+              }
+            }
+
+            // PHP routes: Route::(get|post|put|delete|patch|any)('path')
+            const phpRouteRegex = /Route::(get|post|put|delete|patch|any)\(\s*['"]([^'"]+)['"]/g;
             while ((match = phpRouteRegex.exec(content)) !== null) {
-              const methodStr = match[1].toUpperCase();
+              const rawMethod = match[1].toUpperCase();
+              const methodStr = rawMethod === 'ANY' ? 'ALL' : rawMethod;
+              let rPath = match[2].startsWith('/') ? match[2] : `/${match[2]}`;
+              if (relPath.includes('api.php') && !rPath.startsWith('/api')) {
+                rPath = `/api${rPath === '/' ? '' : rPath}`;
+              }
               routes.push({
                 method: methodStr as ReaRouteDeclaration['method'],
-                path: match[2].startsWith('/') ? match[2] : `/${match[2]}`,
+                path: rPath,
                 controllerPath: relPath,
                 lineNumber: content.substring(0, match.index).split('\n').length,
               });
+            }
+
+            // PHP Laravel Route::view('/path', 'view.name')
+            const phpViewRegex = /Route::view\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]/g;
+            let vm: RegExpExecArray | null;
+            while ((vm = phpViewRegex.exec(content)) !== null) {
+              const vPath = vm[1].startsWith('/') ? vm[1] : `/${vm[1]}`;
+              routes.push({
+                method: 'GET',
+                path: vPath,
+                controllerPath: relPath,
+                lineNumber: content.substring(0, vm.index).split('\n').length,
+                handlerName: `view_${vm[2].replace(/[^a-zA-Z0-9]/g, '_')}`,
+              });
+            }
+
+            // PHP Laravel Resource routes: Route::resource('name', ...) and Route::apiResource('name', ...)
+            const phpResourceRegex = /Route::(?:resource|apiResource)\(\s*['"]([^'"]+)['"]/g;
+            let resMatch: RegExpExecArray | null;
+            while ((resMatch = phpResourceRegex.exec(content)) !== null) {
+              const rawName = resMatch[1].trim();
+              let cleanName = rawName.replace(/^\/+/, '');
+              if (!cleanName.startsWith('api/')) {
+                cleanName = `api/${cleanName}`;
+              }
+              const basePath = `/${cleanName}`;
+              const lineNum = content.substring(0, resMatch.index).split('\n').length;
+
+              routes.push(
+                {
+                  method: 'GET',
+                  path: basePath,
+                  controllerPath: relPath,
+                  lineNumber: lineNum,
+                  handlerName: `get_${cleanName.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                },
+                {
+                  method: 'POST',
+                  path: basePath,
+                  controllerPath: relPath,
+                  lineNumber: lineNum,
+                  handlerName: `post_${cleanName.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                },
+                {
+                  method: 'PUT',
+                  path: `${basePath}/:id`,
+                  controllerPath: relPath,
+                  lineNumber: lineNum,
+                  handlerName: `put_${cleanName.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                },
+                {
+                  method: 'DELETE',
+                  path: `${basePath}/:id`,
+                  controllerPath: relPath,
+                  lineNumber: lineNum,
+                  handlerName: `delete_${cleanName.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                }
+              );
             }
 
             // Java Spring routes: @(GetMapping|PostMapping|PutMapping|DeleteMapping)("path")
@@ -601,6 +795,44 @@ export class ReaBridgeService {
                 controllerPath: relPath,
                 lineNumber: content.substring(0, match.index).split('\n').length,
               });
+            }
+
+            // Frontend Route Extraction (Vue Router & React Router)
+            if (/\.(ts|tsx|js|jsx|vue)$/.test(entry.name)) {
+              // Vue Router: path: '/dashboard' or path: "/master/items"
+              const vueRouterRegex = /path\s*:\s*['"](\/[a-zA-Z0-9_\-/]+)['"]/g;
+              let vrm: RegExpExecArray | null;
+              while ((vrm = vueRouterRegex.exec(content)) !== null) {
+                const rPath = vrm[1];
+                if (!rPath.startsWith('/api') && !routes.some((r) => r.path === rPath && r.method === 'GET')) {
+                  const lineNum = content.substring(0, vrm.index).split('\n').length;
+                  routes.push({
+                    method: 'GET',
+                    path: rPath,
+                    controllerPath: relPath,
+                    lineNumber: lineNum,
+                    handlerName: `vue_${rPath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                  });
+                }
+              }
+
+              // React Router: <Route path="/users" element={<Users />} />
+              const reactRouteRegex = /<Route\b[^>]*\bpath\s*=\s*['"](\/[a-zA-Z0-9_\-/:*]+)['"]/g;
+              let rrm: RegExpExecArray | null;
+              while ((rrm = reactRouteRegex.exec(content)) !== null) {
+                const rawPath = rrm[1];
+                const cleanPath = rawPath.split('/:')[0] || rawPath;
+                if (!cleanPath.startsWith('/api') && !routes.some((r) => r.path === cleanPath && r.method === 'GET')) {
+                  const lineNum = content.substring(0, rrm.index).split('\n').length;
+                  routes.push({
+                    method: 'GET',
+                    path: cleanPath,
+                    controllerPath: relPath,
+                    lineNumber: lineNum,
+                    handlerName: `react_${cleanPath.replace(/[^a-zA-Z0-9]/g, '_')}`,
+                  });
+                }
+              }
             }
 
             // Database Models: SQL CREATE TABLE with Full FK Extraction
@@ -763,8 +995,148 @@ export class ReaBridgeService {
               }
             }
 
+            // Deep Schema Extractor: Laravel Migrations (Schema::create('table_name', function (Blueprint $table) { ... }))
+            if (content.includes('Schema::create')) {
+              const schemaCreateRegex = /Schema::create\(\s*['"]([a-zA-Z0-9_]+)['"]\s*,\s*(?:static\s+)?function\s*\([^)]*\)[^{]*\{([\s\S]*?)\}\s*\);/g;
+              let sm: RegExpExecArray | null;
+              while ((sm = schemaCreateRegex.exec(content)) !== null) {
+                const tableName = sm[1];
+                const body = sm[2];
+                const cols: ReaTableColumn[] = [];
+                const pks: string[] = [];
+
+                // Parse $table method calls: $table->method('col', ...)->modifiers...;
+                const tableCallRegex = /\$table->([a-zA-Z0-9_]+)\(([^)]*)\)([^;\n]*)/g;
+                let cm: RegExpExecArray | null;
+                while ((cm = tableCallRegex.exec(body)) !== null) {
+                  const colMethod = cm[1];
+                  const argsRaw = cm[2].trim();
+                  const modifiers = cm[3] || '';
+
+                  // Skip non-column table directives
+                  if (['dropColumn', 'dropForeign', 'dropPrimary', 'dropUnique', 'dropIndex', 'index', 'unique', 'spatialIndex'].includes(colMethod) && !argsRaw) {
+                    continue;
+                  }
+
+                  // Handle $table->foreign('user_id')->references('id')->on('users')
+                  if (colMethod === 'foreign') {
+                    const fkColMatch = /['"]([a-zA-Z0-9_]+)['"]/.exec(argsRaw);
+                    const refTableMatch = /->on\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)/.exec(modifiers);
+                    const refColMatch = /->references\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)/.exec(modifiers);
+                    if (fkColMatch && refTableMatch) {
+                      const col = cols.find((c) => c.name.toLowerCase() === fkColMatch[1].toLowerCase());
+                      if (col) {
+                        col.isForeignKey = true;
+                        col.references = {
+                          table: refTableMatch[1],
+                          column: refColMatch ? refColMatch[1] : 'id',
+                        };
+                      }
+                    }
+                    continue;
+                  }
+
+                  // Handle $table->timestamps()
+                  if (colMethod === 'timestamps' || colMethod === 'timestampsTz') {
+                    cols.push(
+                      { name: 'created_at', type: 'TIMESTAMP', isNullable: true, isPrimaryKey: false, isForeignKey: false },
+                      { name: 'updated_at', type: 'TIMESTAMP', isNullable: true, isPrimaryKey: false, isForeignKey: false }
+                    );
+                    continue;
+                  }
+
+                  // Handle $table->softDeletes()
+                  if (colMethod === 'softDeletes' || colMethod === 'softDeletesTz') {
+                    cols.push({ name: 'deleted_at', type: 'TIMESTAMP', isNullable: true, isPrimaryKey: false, isForeignKey: false });
+                    continue;
+                  }
+
+                  // Handle $table->rememberToken()
+                  if (colMethod === 'rememberToken') {
+                    cols.push({ name: 'remember_token', type: 'VARCHAR(100)', isNullable: true, isPrimaryKey: false, isForeignKey: false });
+                    continue;
+                  }
+
+                  // Extract column name from first argument: $table->string('name', 100) -> name
+                  let colName = '';
+                  const colNameMatch = /['"]([a-zA-Z0-9_]+)['"]/.exec(argsRaw);
+                  if (colNameMatch) {
+                    colName = colNameMatch[1];
+                  } else if (colMethod === 'id') {
+                    colName = 'id';
+                  }
+
+                  if (!colName) continue;
+
+                  const isPk = colMethod === 'id' || colMethod === 'increments' || colMethod === 'bigIncrements' || /->primary\(\)/.test(modifiers);
+                  const isNull = /->nullable\(\)/.test(modifiers);
+
+                  // Handle foreignId and constrained: $table->foreignId('user_id')->constrained('users')
+                  let isFk = colMethod === 'foreignId' || colMethod === 'foreignUuid' || /_id$|Id$/.test(colName) || /->constrained/.test(modifiers) || /->references/.test(modifiers);
+                  let fkTargetTable: string | undefined;
+                  let fkTargetCol: string = 'id';
+
+                  const constrainedMatch = /->constrained\(\s*(?:['"]([a-zA-Z0-9_]+)['"])?\s*\)/.exec(modifiers);
+                  if (constrainedMatch) {
+                    isFk = true;
+                    if (constrainedMatch[1]) {
+                      fkTargetTable = constrainedMatch[1];
+                    } else if (colName.endsWith('_id')) {
+                      const base = colName.replace(/_id$/, '');
+                      fkTargetTable = base.endsWith('s') ? base : `${base}s`;
+                    }
+                  }
+
+                  const referencesMatch = /->references\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)(?:->on\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\))?/.exec(modifiers);
+                  if (referencesMatch) {
+                    isFk = true;
+                    fkTargetCol = referencesMatch[1] || 'id';
+                    if (referencesMatch[2]) {
+                      fkTargetTable = referencesMatch[2];
+                    }
+                  }
+
+                  if (isPk) pks.push(colName);
+
+                  const colDef: ReaTableColumn = {
+                    name: colName,
+                    type: colMethod.toUpperCase(),
+                    isNullable: isNull,
+                    isPrimaryKey: isPk,
+                    isForeignKey: isFk,
+                  };
+
+                  if (isFk && fkTargetTable) {
+                    colDef.references = {
+                      table: fkTargetTable,
+                      column: fkTargetCol,
+                    };
+                  }
+
+                  cols.push(colDef);
+                }
+
+                if (cols.length === 0) {
+                  cols.push({ name: 'id', type: 'BIGINT', isNullable: false, isPrimaryKey: true, isForeignKey: false });
+                  pks.push('id');
+                }
+
+                const existingTableIdx = databaseSchemas.findIndex((s) => s.tableName.toLowerCase() === tableName.toLowerCase());
+                if (existingTableIdx >= 0) {
+                  if (cols.length > databaseSchemas[existingTableIdx].columns.length) {
+                    databaseSchemas[existingTableIdx] = { tableName, columns: cols, indexes: [], primaryKeys: pks };
+                  }
+                } else {
+                  databaseSchemas.push({ tableName, columns: cols, indexes: [], primaryKeys: pks });
+                }
+              }
+            }
+
             // Deep Backend Validation & DTO Boundary Extractor (Zod & Joi)
             if (content.includes('z.object') || content.includes('Joi.object')) {
+              const zodSchemaMatch = /(?:const|let|var|type)\s+([a-zA-Z0-9_]+)\s*=\s*(?:z|Joi)\.object/.exec(content);
+              const currentZodSchemaName = zodSchemaMatch ? zodSchemaMatch[1] : undefined;
+
               const zodPropRegex = /([a-zA-Z0-9_]+)\s*:\s*z\.(string|number|boolean|enum|array|date)\(\)([^,\n}]*)/g;
               let zm: RegExpExecArray | null;
               while ((zm = zodPropRegex.exec(content)) !== null) {
@@ -798,20 +1170,24 @@ export class ReaBridgeService {
                   }
                 }
 
-                extractedBackendRules.push({
-                  sourceFile: relPath,
-                  lineNumber: lineNum,
-                  fieldOrGuardName: field,
-                  ruleCategory: 'ZOD_JOI_DTO',
-                  constraintExpression: `z.${zType}()${chain}`,
-                  httpStatus: 422,
-                  errorMessage: `[AST ${relPath}:${lineNum}] DTO Validation: ${field} must satisfy z.${zType}()${chain}`,
-                  minNumber,
-                  maxNumber,
-                  minLength,
-                  maxLength,
-                  enumValues,
-                });
+                registerExtractedRule(
+                  {
+                    sourceFile: relPath,
+                    lineNumber: lineNum,
+                    fieldOrGuardName: field,
+                    ruleCategory: 'ZOD_JOI_DTO',
+                    constraintExpression: `z.${zType}()${chain}`,
+                    httpStatus: 422,
+                    errorMessage: `[AST ${relPath}:${lineNum}] DTO Validation: ${field} must satisfy z.${zType}()${chain}`,
+                    minNumber,
+                    maxNumber,
+                    minLength,
+                    maxLength,
+                    enumValues,
+                  },
+                  content,
+                  currentZodSchemaName
+                );
               }
 
               // Extract z.enum(['A', 'B', 'C'])
@@ -822,21 +1198,28 @@ export class ReaBridgeService {
                 const rawVals = em[2];
                 const vals = Array.from(rawVals.matchAll(/['"]([^'"]+)['"]/g), (m) => m[1]);
                 const lineNum = content.substring(0, em.index).split('\n').length;
-                extractedBackendRules.push({
-                  sourceFile: relPath,
-                  lineNumber: lineNum,
-                  fieldOrGuardName: field,
-                  ruleCategory: 'ZOD_JOI_DTO',
-                  constraintExpression: `z.enum([${vals.map((v) => `'${v}'`).join(', ')}])`,
-                  httpStatus: 422,
-                  errorMessage: `[AST ${relPath}:${lineNum}] DTO Enum Validation: ${field} must be one of [${vals.join(', ')}]`,
-                  enumValues: vals,
-                });
+                registerExtractedRule(
+                  {
+                    sourceFile: relPath,
+                    lineNumber: lineNum,
+                    fieldOrGuardName: field,
+                    ruleCategory: 'ZOD_JOI_DTO',
+                    constraintExpression: `z.enum([${vals.map((v) => `'${v}'`).join(', ')}])`,
+                    httpStatus: 422,
+                    errorMessage: `[AST ${relPath}:${lineNum}] DTO Enum Validation: ${field} must be one of [${vals.join(', ')}]`,
+                    enumValues: vals,
+                  },
+                  content,
+                  currentZodSchemaName
+                );
               }
             }
 
             // Deep Backend Validation Extractor: ClassValidator (@Min, @Max, @MinLength, @MaxLength, @IsIn)
             if (content.includes('@Min(') || content.includes('@Max(') || content.includes('@MinLength(') || content.includes('@MaxLength(') || content.includes('@IsIn(')) {
+              const cvClassMatch = /class\s+([a-zA-Z0-9_]+)/.exec(content);
+              const currentCvClassName = cvClassMatch ? cvClassMatch[1] : undefined;
+
               const cvPropRegex = /@(Min|Max|MinLength|MaxLength|IsIn)\(([^)]*)\)[\s\S]*?(\w+)\s*[?!]?\s*:\s*([a-zA-Z0-9_]+)/g;
               let cvm: RegExpExecArray | null;
               while ((cvm = cvPropRegex.exec(content)) !== null) {
@@ -858,20 +1241,110 @@ export class ReaBridgeService {
                   enumValues = Array.from(arg.matchAll(/['"]([^'"]+)['"]/g), (m) => m[1]);
                 }
 
-                extractedBackendRules.push({
-                  sourceFile: relPath,
-                  lineNumber: lineNum,
-                  fieldOrGuardName: field,
-                  ruleCategory: 'CLASS_VALIDATOR',
-                  constraintExpression: `@${decorator}(${arg})`,
-                  httpStatus: 422,
-                  errorMessage: `[AST ${relPath}:${lineNum}] ClassValidator: ${field} constraint @${decorator}(${arg})`,
-                  minNumber,
-                  maxNumber,
-                  minLength,
-                  maxLength,
-                  enumValues,
-                });
+                registerExtractedRule(
+                  {
+                    sourceFile: relPath,
+                    lineNumber: lineNum,
+                    fieldOrGuardName: field,
+                    ruleCategory: 'CLASS_VALIDATOR',
+                    constraintExpression: `@${decorator}(${arg})`,
+                    httpStatus: 422,
+                    errorMessage: `[AST ${relPath}:${lineNum}] ClassValidator: ${field} constraint @${decorator}(${arg})`,
+                    minNumber,
+                    maxNumber,
+                    minLength,
+                    maxLength,
+                    enumValues,
+                  },
+                  content,
+                  currentCvClassName
+                );
+              }
+            }
+
+            // Deep Backend Validation Extractor: Laravel Validation Rules ('field' => 'required|numeric|min:1' or ['required', 'max:255'])
+            if (ext === '.php' || content.includes('validate') || content.includes('rules')) {
+              const laravelClassMatch = /class\s+([a-zA-Z0-9_]+)/.exec(content);
+              const currentLaravelClassName = laravelClassMatch ? laravelClassMatch[1] : undefined;
+
+              const laravelRuleRegex = /['"]([a-zA-Z0-9_.]+)['"]\s*=>\s*(?:['"]([^'"]+)['"]|\[([^\]]+)\])/g;
+              let lvm: RegExpExecArray | null;
+              while ((lvm = laravelRuleRegex.exec(content)) !== null) {
+                const field = lvm[1];
+                const rawStringRule = lvm[2];
+                const rawArrayRule = lvm[3];
+
+                let ruleTokens: string[] = [];
+                let ruleExpr = '';
+
+                if (rawStringRule !== undefined) {
+                  ruleTokens = rawStringRule.split('|').map((s) => s.trim()).filter(Boolean);
+                  ruleExpr = rawStringRule.trim();
+                } else if (rawArrayRule !== undefined) {
+                  const items = Array.from(rawArrayRule.matchAll(/['"]([^'"]+)['"]/g), (m) => m[1].trim());
+                  ruleTokens = items;
+                  ruleExpr = items.join('|');
+                }
+
+                const isValidationRule = ruleTokens.some((t) =>
+                  /^(required|nullable|string|numeric|integer|boolean|array|min:|max:|between:|email|unique|exists|in:|digits|date|regex)/i.test(t)
+                );
+                if (!isValidationRule || ruleTokens.length === 0) continue;
+
+                const lineNum = content.substring(0, lvm.index).split('\n').length;
+                let minNumber: number | undefined;
+                let maxNumber: number | undefined;
+                let minLength: number | undefined;
+                let maxLength: number | undefined;
+                let enumValues: string[] | undefined;
+
+                const isNumeric = ruleTokens.some((t) => /^(numeric|integer|digits)/i.test(t));
+
+                for (const token of ruleTokens) {
+                  const minMatch = /^min:(\d+(?:\.\d+)?)$/i.exec(token);
+                  if (minMatch) {
+                    if (isNumeric) minNumber = Number(minMatch[1]);
+                    else minLength = Number(minMatch[1]);
+                  }
+                  const maxMatch = /^max:(\d+(?:\.\d+)?)$/i.exec(token);
+                  if (maxMatch) {
+                    if (isNumeric) maxNumber = Number(maxMatch[1]);
+                    else maxLength = Number(maxMatch[1]);
+                  }
+                  const betweenMatch = /^between:(\d+),(\d+)$/i.exec(token);
+                  if (betweenMatch) {
+                    if (isNumeric) {
+                      minNumber = Number(betweenMatch[1]);
+                      maxNumber = Number(betweenMatch[2]);
+                    } else {
+                      minLength = Number(betweenMatch[1]);
+                      maxLength = Number(betweenMatch[2]);
+                    }
+                  }
+                  const inMatch = /^in:(.+)$/i.exec(token);
+                  if (inMatch) {
+                    enumValues = inMatch[1].split(',').map((s) => s.replace(/['"]/g, '').trim()).filter(Boolean);
+                  }
+                }
+
+                registerExtractedRule(
+                  {
+                    sourceFile: relPath,
+                    lineNumber: lineNum,
+                    fieldOrGuardName: field,
+                    ruleCategory: 'LARAVEL_VALIDATION',
+                    constraintExpression: ruleExpr,
+                    httpStatus: 422,
+                    errorMessage: `[AST ${relPath}:${lineNum}] Laravel Validation: ${field} must satisfy ${ruleExpr}`,
+                    minNumber,
+                    maxNumber,
+                    minLength,
+                    maxLength,
+                    enumValues,
+                  },
+                  content,
+                  currentLaravelClassName
+                );
               }
             }
 
@@ -883,15 +1356,18 @@ export class ReaBridgeService {
               const status = Number(gm[2] || gm[3] || 422);
               const errMsg = gm[4].trim();
               const lineNum = content.substring(0, gm.index).split('\n').length;
-              extractedBackendRules.push({
-                sourceFile: relPath,
-                lineNumber: lineNum,
-                fieldOrGuardName: cond.split(/[^a-zA-Z0-9_.]/)[0] || 'business_guard',
-                ruleCategory: 'BACKEND_IF_THROW_GUARD',
-                constraintExpression: `!( ${cond} )`,
-                httpStatus: status,
-                errorMessage: `[AST ${relPath}:${lineNum}] ${errMsg}`,
-              });
+              registerExtractedRule(
+                {
+                  sourceFile: relPath,
+                  lineNumber: lineNum,
+                  fieldOrGuardName: cond.split(/[^a-zA-Z0-9_.]/)[0] || 'business_guard',
+                  ruleCategory: 'BACKEND_IF_THROW_GUARD',
+                  constraintExpression: `!( ${cond} )`,
+                  httpStatus: status,
+                  errorMessage: `[AST ${relPath}:${lineNum}] ${errMsg}`,
+                },
+                content
+              );
             }
 
             // Extract Business Calculations and Formulas (BACKEND_FORMULA_OR_TX)
@@ -903,15 +1379,18 @@ export class ReaBridgeService {
               // Skip if it's string concatenation e.g. ' ' + or includes html/jsx
               if (/['"`]<|['"`]\s*\+|\+\s*['"`]/.test(expr) || expr.includes('require(') || expr.includes('import(')) continue;
               const lineNum = content.substring(0, fm.index).split('\n').length;
-              extractedBackendRules.push({
-                sourceFile: relPath,
-                lineNumber: lineNum,
-                fieldOrGuardName: varName,
-                ruleCategory: 'BACKEND_FORMULA_OR_TX',
-                constraintExpression: `${varName} = ${expr}`,
-                httpStatus: 200,
-                errorMessage: `[AST ${relPath}:${lineNum}] Calculated formula: ${varName} = ${expr}`,
-              });
+              registerExtractedRule(
+                {
+                  sourceFile: relPath,
+                  lineNumber: lineNum,
+                  fieldOrGuardName: varName,
+                  ruleCategory: 'BACKEND_FORMULA_OR_TX',
+                  constraintExpression: `${varName} = ${expr}`,
+                  httpStatus: 200,
+                  errorMessage: `[AST ${relPath}:${lineNum}] Calculated formula: ${varName} = ${expr}`,
+                },
+                content
+              );
             }
 
             // Extract Database Transactions (ACID Boundaries)
@@ -920,19 +1399,22 @@ export class ReaBridgeService {
             while ((tm = txRegex.exec(content)) !== null) {
               const lineNum = content.substring(0, tm.index).split('\n').length;
               const snippet = tm[0].trim();
-              extractedBackendRules.push({
-                sourceFile: relPath,
-                lineNumber: lineNum,
-                fieldOrGuardName: 'db_transaction_atomic',
-                ruleCategory: 'BACKEND_FORMULA_OR_TX',
-                constraintExpression: `ACID Boundary: ${snippet}...`,
-                httpStatus: 500,
-                errorMessage: `[AST ${relPath}:${lineNum}] ACID Transactional Boundary enforced via ${snippet}`,
-              });
+              registerExtractedRule(
+                {
+                  sourceFile: relPath,
+                  lineNumber: lineNum,
+                  fieldOrGuardName: 'db_transaction_atomic',
+                  ruleCategory: 'BACKEND_FORMULA_OR_TX',
+                  constraintExpression: `ACID Boundary: ${snippet}...`,
+                  httpStatus: 500,
+                  errorMessage: `[AST ${relPath}:${lineNum}] ACID Transactional Boundary enforced via ${snippet}`,
+                },
+                content
+              );
             }
 
-            // DOM and UI Input/Form harvest (.tsx, .jsx, .vue, .html)
-            if (/\.(tsx|jsx|vue|html)$/.test(entry.name)) {
+            // DOM and UI Input/Form harvest (.tsx, .jsx, .vue, .svelte, .blade.php, .html)
+            if (/\.(tsx|jsx|vue|svelte|html)$|\.blade\.php$/i.test(entry.name)) {
               const testIds = content.match(/data-testid=["']([^"']+)["']/g) || [];
               for (const item of testIds) {
                 const testId = item.replace(/data-testid=["']/, '').replace(/["']$/, '');
@@ -1017,6 +1499,122 @@ export class ReaBridgeService {
                   });
                 }
               }
+
+              // Static UI Surface Extractor per Page/View
+              const headings: string[] = [];
+              const headingRegex = /<(?:h1|h2|title)\b[^>]*>([\s\S]*?)<\/(?:h1|h2|title)>/gi;
+              let hm: RegExpExecArray | null;
+              while ((hm = headingRegex.exec(content)) !== null) {
+                const text = hm[1].replace(/<[^>]+>/g, '').trim();
+                if (text && text.length > 1 && text.length < 100 && !headings.includes(text)) {
+                  headings.push(text);
+                }
+              }
+
+              const tableColumns: string[] = [];
+              const thRegex = /<th\b[^>]*>([\s\S]*?)<\/th>/gi;
+              let thm: RegExpExecArray | null;
+              while ((thm = thRegex.exec(content)) !== null) {
+                const colText = thm[1].replace(/<[^>]+>/g, '').trim();
+                if (colText && colText.length > 0 && colText.length < 50 && !tableColumns.includes(colText)) {
+                  tableColumns.push(colText);
+                }
+              }
+              const elColRegex = /<el-table-column\b[^>]*label=["']([^"']+)["']/gi;
+              let elColMatch: RegExpExecArray | null;
+              while ((elColMatch = elColRegex.exec(content)) !== null) {
+                const label = elColMatch[1].trim();
+                if (label && !tableColumns.includes(label)) tableColumns.push(label);
+              }
+              const headerObjRegex = /\{\s*(?:text|title|label|key)\s*:\s*['"]([^'"]+)['"]/g;
+              let hom: RegExpExecArray | null;
+              while ((hom = headerObjRegex.exec(content)) !== null) {
+                const hVal = hom[1].trim();
+                if (hVal && hVal.length > 1 && hVal.length < 40 && !tableColumns.includes(hVal)) {
+                  tableColumns.push(hVal);
+                }
+              }
+
+              const buttons: string[] = [];
+              const btnRegex = /<(?:button|el-button|v-btn|x-button|x-primary-button|x-secondary-button|x-danger-button)\b([^>]*)>([\s\S]*?)<\/(?:button|el-button|v-btn|x-button|x-primary-button|x-secondary-button|x-danger-button)>/gi;
+              let bm: RegExpExecArray | null;
+              while ((bm = btnRegex.exec(content)) !== null) {
+                const btnAttrs = bm[1];
+                let btnText = bm[2].replace(/<[^>]+>/g, '').trim();
+                if (!btnText) {
+                  const ariaM = btnAttrs.match(/aria-label=["']([^"']+)["']/i);
+                  const titleM = btnAttrs.match(/title=["']([^"']+)["']/i);
+                  btnText = ariaM?.[1] || titleM?.[1] || '';
+                }
+                if (btnText && btnText.length > 0 && btnText.length < 50 && !buttons.includes(btnText)) {
+                  buttons.push(btnText);
+                }
+              }
+
+              const inputs: DiscoveredUiSurfaceInput[] = [];
+              const inputMatchRegex = /<(?:input|el-input|textarea|select|el-select|x-input|x-text-input|x-select|x-textarea)\b([^>]+)>/gi;
+              let inm: RegExpExecArray | null;
+              while ((inm = inputMatchRegex.exec(content)) !== null) {
+                const attrs = inm[1];
+                const nameM = attrs.match(/name=["']([^"']+)["']/i) || attrs.match(/v-model=["']([^"']+)["']/i);
+                const placeholderM = attrs.match(/placeholder=["']([^"']+)["']/i);
+                const typeM = attrs.match(/type=["']([^"']+)["']/i);
+                const rawTag = inm[0].slice(1).split(/\s+/)[0].toLowerCase();
+                const inputName = nameM?.[1] || placeholderM?.[1] || `field_${inputs.length + 1}`;
+                if (!inputs.some((i) => i.name === inputName)) {
+                  inputs.push({
+                    name: inputName,
+                    type: typeM?.[1] || (rawTag.includes('select') ? 'select' : rawTag.includes('textarea') ? 'textarea' : 'text'),
+                    placeholder: placeholderM?.[1],
+                    required: /required\b/i.test(attrs),
+                  });
+                }
+              }
+
+              const triggeredApis: string[] = [];
+              const apiCallRegex = /(?:fetch|axios\.(?:get|post|put|delete|patch)|\$http\.(?:get|post|put|delete|patch)|useFetch)\(\s*['"](\/api[^'"]+)['"]/g;
+              let apim: RegExpExecArray | null;
+              while ((apim = apiCallRegex.exec(content)) !== null) {
+                const ep = apim[1];
+                if (!triggeredApis.includes(ep)) triggeredApis.push(ep);
+              }
+              const rawApiRegex = /['"](\/api\/[a-zA-Z0-9_\-/]+)['"]/g;
+              let rawm: RegExpExecArray | null;
+              while ((rawm = rawApiRegex.exec(content)) !== null) {
+                const ep = rawm[1];
+                if (!triggeredApis.includes(ep)) triggeredApis.push(ep);
+              }
+
+              let pageRoute = '';
+              if (relPath.includes('pages/') || relPath.includes('views/')) {
+                pageRoute = '/' + relPath.replace(/^(?:src\/)?(?:pages|views)\//, '').replace(/\.(tsx|jsx|vue|svelte|blade\.php|html)$/, '').replace(/\/index$/, '');
+              } else if (relPath.includes('app/') || relPath.startsWith('app/')) {
+                const cleanAppDir = path
+                  .dirname(relPath)
+                  .replace(/^(?:src\/)?app\/?/, '/')
+                  .replace(/\/\([^)]+\)/g, '');
+                pageRoute = cleanAppDir === '/.' || cleanAppDir === '' || cleanAppDir === '/' ? '/' : cleanAppDir.startsWith('/') ? cleanAppDir : `/${cleanAppDir}`;
+                pageRoute = pageRoute.replace(/\/index$/, '');
+              } else {
+                pageRoute = '/' + path.basename(relPath).replace(/\.(tsx|jsx|vue|svelte|blade\.php|html)$/, '').toLowerCase();
+              }
+              if (pageRoute === '/.' || pageRoute === '') pageRoute = '/';
+              if (!pageRoute.startsWith('/')) pageRoute = `/${pageRoute}`;
+
+              const baseModuleName = headings[0] || path.basename(relPath).replace(/\.(tsx|jsx|vue|svelte|blade\.php|html)$/, '').replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+              if (headings.length > 0 || tableColumns.length > 0 || buttons.length > 0 || inputs.length > 0 || triggeredApis.length > 0) {
+                discoveredUiSurfaces.push({
+                  routePath: pageRoute,
+                  moduleName: baseModuleName,
+                  sourceFile: relPath,
+                  headings,
+                  tableColumns,
+                  buttons,
+                  inputs,
+                  triggeredApis,
+                });
+              }
             }
           }
         }
@@ -1024,15 +1622,129 @@ export class ReaBridgeService {
     };
 
     scanDir(dirPath);
+
+    // 1. Cross-File Router Mount Prefix Resolution
+    for (const route of routes) {
+      const fileRel = route.controllerPath;
+      const fileBase = path.basename(fileRel).replace(/\.[^.]+$/, '');
+      const prefixes = routerFileMountPrefixes.get(fileRel) || routerFileMountPrefixes.get(fileBase) || [];
+      for (const pfx of prefixes) {
+        const cleanPfx = pfx.startsWith('/') ? pfx : `/${pfx}`;
+        if (!route.path.startsWith(cleanPfx)) {
+          route.path = `${cleanPfx}${route.path === '/' ? '' : route.path.startsWith('/') ? route.path : `/${route.path}`}`;
+        }
+      }
+    }
+
+    // 2. Cross-File DTO/Zod Schema Binding, Call-Graph Table Linking, Auth Context & Source Snippets
+    for (const route of routes) {
+      const fileContent = fileContentCache.get(route.controllerPath);
+      if (!fileContent) continue;
+      const fileLines = fileContent.split('\n');
+      const startIdx = Math.max(0, route.lineNumber - 1);
+      const endIdx = Math.min(fileLines.length, route.lineNumber + 35);
+      const handlerBlock = fileLines.slice(startIdx, endIdx).join('\n');
+
+      // Audit source snippet (2-3 lines of raw declaration code)
+      route.sourceSnippet = `${route.controllerPath}:${route.lineNumber}\n${fileLines.slice(startIdx, Math.min(fileLines.length, startIdx + 3)).join('\n')}`;
+
+      // Cross-File DTO / Zod Schema Binding
+      if (!route.validationSchema) {
+        for (const [schemaName, schemaRules] of rulesByFileAndName.entries()) {
+          if (new RegExp(`\\b${schemaName}\\b`).test(handlerBlock)) {
+            const schemaObj: Record<string, string> = {};
+            for (const r of schemaRules) {
+              schemaObj[r.fieldOrGuardName] = r.constraintExpression;
+            }
+            route.validationSchema = schemaObj;
+            break;
+          }
+        }
+      }
+
+      // Call-Graph Table Linking
+      const linkedTables = new Set<string>();
+      // Prisma
+      const prismaRegex = /prisma\.([a-zA-Z0-9_]+)\.(?:find|create|update|delete|upsert|count|aggregate)/g;
+      let prm: RegExpExecArray | null;
+      while ((prm = prismaRegex.exec(handlerBlock)) !== null) {
+        linkedTables.add(prm[1]);
+      }
+      // Drizzle / Kysely / Knex / DB
+      const dbFromRegex = /(?:from|into|table)\(\s*['"]?([a-zA-Z0-9_]+)['"]?\s*\)/gi;
+      let dfm: RegExpExecArray | null;
+      while ((dfm = dbFromRegex.exec(handlerBlock)) !== null) {
+        linkedTables.add(dfm[1]);
+      }
+      // Laravel DB::table('...') or Schema::table('...')
+      const laravelDbRegex = /(?:DB::table|Schema::table)\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)/g;
+      let ldbm: RegExpExecArray | null;
+      while ((ldbm = laravelDbRegex.exec(handlerBlock)) !== null) {
+        linkedTables.add(ldbm[1]);
+      }
+      // SQL queries
+      const sqlTableRegex = /(?:FROM|JOIN|INTO|UPDATE)\s+["`]?([a-zA-Z0-9_]+)["`]?/gi;
+      let stm: RegExpExecArray | null;
+      while ((stm = sqlTableRegex.exec(handlerBlock)) !== null) {
+        const tbl = stm[1];
+        if (!/^(SELECT|WHERE|GROUP|ORDER|HAVING|SET|VALUES|AND|OR|ON|AS)$/i.test(tbl)) {
+          linkedTables.add(tbl);
+        }
+      }
+      if (linkedTables.size > 0) {
+        route.linkedDbTables = Array.from(linkedTables);
+      }
+
+      // Auth Context Detection
+      const authGuardRegex = /(?:auth(?:Middleware|Guard|Service)?|requireAuth|authenticate|jwt|passport\.authenticate|can:\s*['"]\w+['"]|role:\s*['"]\w+['"]|roles:\s*\[[^\]]+\]|IsAuthenticated|Authorize|auth:api|auth:sanctum)/i;
+      const authMatch = authGuardRegex.exec(handlerBlock);
+      if (authMatch) {
+        route.authRequired = true;
+        route.authContext = `Guard: ${authMatch[0]}`;
+      }
+    }
+
+    // Multi-Framework Detection
+    let detectedFramework = 'Node.js';
+    const hasComposer = fs.existsSync(path.join(dirPath, 'composer.json'));
+    const hasPom = fs.existsSync(path.join(dirPath, 'pom.xml'));
+    const hasGoMod = fs.existsSync(path.join(dirPath, 'go.mod'));
+    const hasRequirements = fs.existsSync(path.join(dirPath, 'requirements.txt')) || fs.existsSync(path.join(dirPath, 'pyproject.toml'));
+
+    if (hasComposer || databaseSchemas.some((s) => s.tableName.includes('_')) || routes.some((r) => r.controllerPath.endsWith('.php'))) {
+      detectedFramework = 'Laravel / PHP';
+    } else if (dependencies['nuxt'] || dependencies['@nuxt/core']) {
+      detectedFramework = 'Nuxt.js (Vue)';
+    } else if (dependencies['next']) {
+      detectedFramework = 'Next.js (React)';
+    } else if (dependencies['@nestjs/core']) {
+      detectedFramework = 'NestJS';
+    } else if (dependencies['vue']) {
+      detectedFramework = 'Vue.js SPA';
+    } else if (dependencies['react']) {
+      detectedFramework = 'React SPA';
+    } else if (dependencies['fastify']) {
+      detectedFramework = 'Fastify';
+    } else if (dependencies['express']) {
+      detectedFramework = 'Express.js';
+    } else if (hasGoMod) {
+      detectedFramework = 'Go (Backend)';
+    } else if (hasRequirements) {
+      detectedFramework = 'Python (FastAPI / Flask)';
+    } else if (hasPom) {
+      detectedFramework = 'Java / Spring Boot';
+    }
+
     return {
       projectPath: dirPath,
       analyzedAt: new Date().toISOString(),
-      framework: dependencies['next'] ? 'Next.js' : dependencies['fastify'] ? 'Fastify' : 'Node.js',
+      framework: detectedFramework,
       routes,
       databaseSchemas,
       domSelectors,
       dependencies,
       extractedBackendRules,
+      discoveredUiSurfaces,
     };
   }
 
