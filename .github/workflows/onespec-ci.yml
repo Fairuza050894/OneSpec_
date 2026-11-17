@@ -31,8 +31,8 @@ jobs:
           node-version: 20
           cache: 'pnpm'
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile || pnpm install
+      - name: Install Dependencies (Frozen Lockfile Enforcement)
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium

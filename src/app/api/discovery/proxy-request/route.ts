@@ -1,9 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  validateUrlForSsrf,
+  filterSafeCookiesForTarget,
+  verifyInternalOriginOrToken,
+  type StoredAuthCookie,
+} from '@/lib/serverSecurity';
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Enforce local origin or session token verification
+    const authCheck = verifyInternalOriginOrToken(req);
+    if (!authCheck.authorized) {
+      return NextResponse.json(
+        {
+          success: false,
+          status: 403,
+          statusText: 'Forbidden / Unauthorized Origin',
+          error: authCheck.reason || 'Unauthorized caller',
+          responseBody: authCheck.reason || 'Unauthorized caller',
+          schemaDrift: { hasDrift: false, missingKeys: [] },
+        },
+        { status: 403 }
+      );
+    }
+
     const body = (await req.json()) as {
       targetUrl?: string;
       method?: string;
@@ -13,6 +35,7 @@ export async function POST(req: NextRequest) {
       customHeaders?: Record<string, string>;
       useSavedAuth?: boolean;
       expectedResponseKeys?: string[];
+      allowedTargetHost?: string;
     };
 
     const baseUrl = (body.targetUrl || 'http://127.0.0.1:3000').trim().replace(/\/$/, '');
@@ -27,12 +50,29 @@ export async function POST(req: NextRequest) {
       fullUrl += (fullUrl.includes('?') ? '&' : '?') + qs;
     }
 
+    // 2. Strict SSRF Validation: Protocol check & private/metadata IP defense
+    const ssrfCheck = validateUrlForSsrf(fullUrl, [body.allowedTargetHost || '', baseUrl]);
+    if (!ssrfCheck.isValid) {
+      return NextResponse.json(
+        {
+          success: false,
+          status: 400,
+          statusText: 'Bad Request / SSRF Blocked',
+          error: ssrfCheck.error || 'SSRF verification failed',
+          responseBody: ssrfCheck.error || 'Destination host forbidden',
+          schemaDrift: { hasDrift: false, missingKeys: [] },
+        },
+        { status: 400 }
+      );
+    }
+
     const headers: Record<string, string> = {
       Accept: 'application/json, text/plain, */*',
       'User-Agent': 'OneSpec-ApiSandbox/1.0',
       ...(body.customHeaders || {}),
     };
 
+    // 3. Strict Cookie Isolation: Never attach session cookies across different domains/origins
     let authApplied = false;
     if (body.useSavedAuth !== false) {
       try {
@@ -40,8 +80,17 @@ export async function POST(req: NextRequest) {
         if (fs.existsSync(authPath)) {
           const parsed = JSON.parse(fs.readFileSync(authPath, 'utf8'));
           if (Array.isArray(parsed.cookies) && parsed.cookies.length > 0) {
-            headers['Cookie'] = parsed.cookies.map((c: { name: string; value: string }) => `${c.name}=${c.value}`).join('; ');
-            authApplied = true;
+            const safeCookies = filterSafeCookiesForTarget(
+              parsed.cookies as StoredAuthCookie[],
+              fullUrl,
+              body.targetUrl
+            );
+            if (safeCookies.length > 0) {
+              headers['Cookie'] = safeCookies
+                .map((c) => `${c.name}=${c.value}`)
+                .join('; ');
+              authApplied = true;
+            }
           }
         }
       } catch {}

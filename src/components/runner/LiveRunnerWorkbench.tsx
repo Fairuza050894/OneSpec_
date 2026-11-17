@@ -77,7 +77,7 @@ import type {
   CrawledModuleSummary,
 } from '@/types/sdlc';
 import type { SynthesizedRtmRow } from '@/services/rtmSynthesizer';
-import type { CompiledSdlcState } from '@/services/sdlcCompiler';
+import { computeUnifiedQualityMetrics, type CompiledSdlcState } from '@/services/sdlcCompiler';
 import type { InAppLiveQaExecutionReport } from '@/services/liveMultiToolExecutorService';
 import { toolProbeService, type ToolProbeResult } from '@/services/toolProbeService';
 import { automationSynthesizerService } from '@/services/automationSynthesizer';
@@ -258,6 +258,8 @@ export interface LiveRunnerWorkbenchProps {
   activeVaultProjectId?: string;
 }
 
+let streamLogIdCounter = 0;
+
 export function LiveRunnerWorkbench({
   onSelectStage,
   selectedStageId,
@@ -353,9 +355,6 @@ export function LiveRunnerWorkbench({
 
   // Copy Code Feedback
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
-  // Dynamic Release Gate State & Fix Action
-  const [dbMigrationApplied, setDbMigrationApplied] = useState(false);
 
   // Live Benchmark Traces and Telemetry
   const initialBenchmarkTraces = useMemo(() => {
@@ -548,7 +547,7 @@ export function LiveRunnerWorkbench({
       const timeStr = `${now.toTimeString().split(' ')[0]}.${String(now.getMilliseconds()).padStart(3, '0')}`;
       const newEntry: LiveStreamLogEntry = {
         ...entry,
-        id: `stream-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: `stream-${Date.now()}-${++streamLogIdCounter}`,
         timestamp: timeStr,
       };
       setLiveStreamLogs((prev) => [newEntry, ...prev.slice(0, 49)]);
@@ -914,7 +913,11 @@ export function LiveRunnerWorkbench({
     );
   }, [k6Code, effectiveProjectName, effectiveTargetUrl, discoveryResult]);
 
-  // Release Gate Status Evaluation
+  // Unified Quality Metrics & Release Gate Evaluation (Evidence Integrity)
+  const unifiedQuality = useMemo(() => {
+    return computeUnifiedQualityMetrics(effectiveCompiledState);
+  }, [effectiveCompiledState]);
+
   const hasObservedBottleneck = useMemo(
     () =>
       activeTrace.stages.some((s) => s.status === 'BOTTLENECK') ||
@@ -923,20 +926,54 @@ export function LiveRunnerWorkbench({
       !k6Metrics.thresholds.httpReqFailedPass,
     [activeTrace.stages, functionalResults, k6Metrics.thresholds]
   );
-  const isReleaseGatePassed = dbMigrationApplied || !hasObservedBottleneck;
 
-  const handleApplyMigration = () => {
-    setDbMigrationApplied(true);
+  const releaseGateVerdict = useMemo<'PRODUCTION_GO' | 'CONDITIONAL_GO' | 'NO_GO' | 'NOT_EXECUTED'>(() => {
+    if (unifiedQuality.totalCases > 0) {
+      if (hasObservedBottleneck && unifiedQuality.releaseGateStatus === 'PRODUCTION_GO') {
+        return 'CONDITIONAL_GO';
+      }
+      return unifiedQuality.releaseGateStatus;
+    }
+    return hasObservedBottleneck ? 'NO_GO' : 'PRODUCTION_GO';
+  }, [unifiedQuality, hasObservedBottleneck]);
+
+  const isReleaseGatePassed = releaseGateVerdict === 'PRODUCTION_GO';
+
+  const handleDownloadMigrationSql = () => {
+    const sqlContent = `-- OneSpec SDLC Studio — Automated Database Remediation Script
+-- Standard: ISO/IEC 25010 Reliability & Concurrency Guard
+-- Target: ${effectiveProjectName} (${effectiveTargetUrl})
+-- Generated At: ${new Date().toISOString()}
+
+BEGIN;
+
+-- 1. Foreign Key Performance Index (Eliminates Row-Lock Contention & Deadlocks)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_records_lookup 
+ON "Records"("id", "status");
+
+-- 2. Audit Timestamp Order Index
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_created_at 
+ON "AuditDiscrepancies"("created_at" DESC);
+
+COMMIT;
+`;
+    const blob = new Blob([sqlContent], { type: 'text/sql;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `V2__remediation_${effectiveProjectName.toLowerCase().replace(/[^a-z0-9]/g, '_')}.sql`;
+    link.click();
+    URL.revokeObjectURL(url);
+
     appendStreamLog({
-      engineOrTool: 'DATABASE MIGRATION',
+      engineOrTool: 'MIGRATION EXPORT',
       category: 'E2E_K6',
-      message: 'CREATE INDEX CONCURRENTLY idx_records_lookup ON "Records"("id", "status"); applied in 38ms.',
-      latencyMs: 38,
+      message: 'Exported verified SQL remediation script V2__remediation.sql (Index & Constraint DDL).',
+      latencyMs: 12,
       status: 'PASS',
     });
     if (onAppendLog) {
-      onAppendLog('[MIGRATION] SUCCESS: Migration applied in 38ms. Constraint/Index validated.');
-      onAppendLog('[RELEASE GATE] QUALITY LOCK MET: Gate flipped from BLOCKED (NO-GO) to PRODUCTION GO.');
+      onAppendLog('[MIGRATION EXPORT] Downloaded verified SQL migration script to apply in target DB environment.');
     }
   };
 
@@ -1137,14 +1174,22 @@ export function LiveRunnerWorkbench({
         <div className="flex items-center gap-2 min-w-0">
           <div
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border ${
-              isReleaseGatePassed
+              releaseGateVerdict === 'PRODUCTION_GO'
                 ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-400'
+                : releaseGateVerdict === 'CONDITIONAL_GO'
+                ? 'bg-amber-950/50 border-amber-700/60 text-amber-400'
+                : releaseGateVerdict === 'NOT_EXECUTED'
+                ? 'bg-zinc-900/50 border-zinc-700/60 text-zinc-400'
                 : 'bg-rose-950/50 border-rose-700/60 text-rose-400'
             }`}
           >
             <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-            <span>ISO 29119-3 • {isReleaseGatePassed ? 'PRODUCTION GO' : 'NO-GO'}</span>
+            <span>ISO 29119-3 • {releaseGateVerdict.replace(/_/g, ' ')}</span>
           </div>
+
+          <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 text-[10px] font-mono">
+            {unifiedQuality.provenance}
+          </span>
 
           <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-300 text-[11px] font-mono">
             {liveQaReport ? `${Math.min(liveQaReport.summary.enginesPassed, 4)}/4` : '4/4'} Engines Ready
@@ -1153,11 +1198,12 @@ export function LiveRunnerWorkbench({
           {!isReleaseGatePassed && (
             <button
               type="button"
-              onClick={handleApplyMigration}
-              className="h-6 px-2 bg-blue-600/30 border border-blue-500 text-blue-300 hover:bg-blue-600 hover:text-white rounded text-[10px] font-semibold cursor-pointer transition-colors whitespace-nowrap"
-              title="Apply composite index migration to resolve DB lock contention"
+              onClick={handleDownloadMigrationSql}
+              className="h-6 px-2 bg-blue-600/30 border border-blue-500 text-blue-300 hover:bg-blue-600 hover:text-white rounded text-[10px] font-semibold cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1"
+              title="Download verified SQL migration script to resolve DB lock contention"
             >
-              {copy.step07.applyFix}
+              <Download className="w-2.5 h-2.5" />
+              <span>Download Migration SQL</span>
             </button>
           )}
         </div>
@@ -1634,9 +1680,14 @@ export function LiveRunnerWorkbench({
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span className="truncate">04. AI Guardrails &amp; Grounding</span>
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono shrink-0">
-                  ISO 29119 PASS
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-blue-950/60 border border-blue-800/50 text-blue-300 font-mono">
+                    RULE_BASED_HEURISTIC
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono">
+                    ISO 29119 PASS
+                  </span>
+                </div>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
@@ -1731,22 +1782,18 @@ export function LiveRunnerWorkbench({
                     {
                       num: '04',
                       title: 'Database Persistence & Query Plan',
-                      badge: dbMigrationApplied ? 'NOMINAL · 8ms' : 'BOTTLENECK · 1,420ms',
-                      badgeColor: dbMigrationApplied
-                        ? 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60'
-                        : 'bg-rose-950/80 text-rose-300 border-rose-700/60',
+                      badge: 'INDEX ADVISABLE · 1,420ms (Target: <50ms)',
+                      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
                       icon: <Database className="h-3.5 w-3.5 text-amber-400" />,
                       target: 'SELECT * FROM "Records" WHERE "id" = $1 AND "status" = $2',
-                      exec: dbMigrationApplied
-                        ? 'Index scan via idx_records_lookup • Reduced from 1,420ms to 8ms under concurrency'
-                        : 'Sequential scan lock contention under concurrency (>200ms SLA breach)',
-                      isBottleneck: !dbMigrationApplied,
+                      exec: 'Sequential scan on unindexed foreign key column • Index migration recommended',
+                      isBottleneck: true,
                     },
                   ].map((stg) => (
                     <div
                       key={stg.num}
                       className={`p-2.5 bg-[#121620] border rounded-[3px] transition-all ${
-                        stg.isBottleneck ? 'border-rose-700/70 bg-rose-950/20' : 'border-[#22293C] hover:border-blue-500/60'
+                        stg.isBottleneck ? 'border-amber-700/70 bg-amber-950/20' : 'border-[#22293C] hover:border-blue-500/60'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 pb-1 border-b border-[#1D2436]">
@@ -1769,17 +1816,18 @@ export function LiveRunnerWorkbench({
                         </div>
                       </div>
                       {stg.isBottleneck && (
-                        <div className="mt-2 pt-1.5 border-t border-rose-900/50 flex items-center justify-between">
-                          <span className="text-[9px] text-rose-300 font-semibold flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
-                            <span>Lock contention detected on unindexed foreign key.</span>
+                        <div className="mt-2 pt-1.5 border-t border-amber-900/50 flex items-center justify-between">
+                          <span className="text-[9px] text-amber-300 font-semibold flex items-center gap-1">
+                            <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+                            <span>Remediation index advisable for foreign key lookup under concurrency.</span>
                           </span>
                           <button
                             type="button"
-                            onClick={handleApplyMigration}
-                            className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded-[2px] font-bold text-[9px] cursor-pointer"
+                            onClick={handleDownloadMigrationSql}
+                            className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded-[2px] font-bold text-[9px] cursor-pointer flex items-center gap-1"
                           >
-                            Apply DB Fix (idx_records)
+                            <Download className="h-2.5 w-2.5" />
+                            <span>Download Migration SQL</span>
                           </button>
                         </div>
                       )}
@@ -2216,9 +2264,14 @@ export function LiveRunnerWorkbench({
                   <ShieldCheck className="h-4 w-4 text-emerald-400" />
                   <span>5 AI Guardrails Verification Checklist</span>
                 </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/70 border border-emerald-700/60 text-emerald-300 font-bold">
-                  Active Security Lock
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-950/70 border border-blue-700/60 text-blue-300 font-mono font-bold">
+                    RULE_BASED_HEURISTIC
+                  </span>
+                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/70 border border-emerald-700/60 text-emerald-300 font-bold">
+                    Active Security Lock
+                  </span>
+                </div>
               </div>
 
               <div className="space-y-2">

@@ -6,6 +6,7 @@ import { reaBridge } from '../../services/reaBridge';
 import { triModalDiscoveryService } from '../../services/triModalDiscoveryService';
 import { unifiedReportGenerator } from '../../services/unifiedReportGenerator';
 import { blindCrawlerService } from '../../services/blindCrawlerService';
+import { filterSafeCookiesForTarget } from '../../lib/serverSecurity';
 import type {
   GitRefOption,
   UploadArchiveTelemetry,
@@ -468,7 +469,10 @@ export const discoveryRoutes: FastifyPluginAsync = async (fastify) => {
           const authRaw = fs.readFileSync(authStatePath, 'utf8');
           const parsed = JSON.parse(authRaw);
           if (Array.isArray(parsed.cookies) && parsed.cookies.length > 0) {
-            authCookieHeader = parsed.cookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+            const safeCookies = filterSafeCookiesForTarget(parsed.cookies, targetUrl, targetUrl);
+            if (safeCookies.length > 0) {
+              authCookieHeader = safeCookies.map((c: any) => `${c.name}=${c.value}`).join('; ');
+            }
           }
         }
       } catch {}

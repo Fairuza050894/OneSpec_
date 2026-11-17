@@ -163,6 +163,9 @@ export function DelphiConsensusWorkbench({
           <span className="badge-tag px-1.5 py-0.2 bg-[#059669]/20 text-[#10B981] font-bold text-[9.5px] whitespace-nowrap">
             CONVERGENCE: {summary.consensusScorePercent}%
           </span>
+          <span className="badge-tag px-1.5 py-0.2 bg-blue-950/70 border border-blue-700/60 text-blue-300 font-bold text-[9px] whitespace-nowrap">
+            RULE_BASED_HEURISTIC
+          </span>
           <span className="badge-tag px-1.5 py-0.2 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[9.5px] whitespace-nowrap">
             {summary.clearanceVerdict.replace(/_/g, ' ')}
           </span>

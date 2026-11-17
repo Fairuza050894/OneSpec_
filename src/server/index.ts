@@ -13,8 +13,12 @@ export async function createApp(): Promise<FastifyInstance> {
     },
   });
 
+  const allowedCorsOrigins = process.env.ONESPEC_CORS_ORIGINS
+    ? process.env.ONESPEC_CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : ['http://localhost:3000', 'http://127.0.0.1:3000'];
+
   await app.register(cors, {
-    origin: true,
+    origin: allowedCorsOrigins,
     credentials: true,
   });
 

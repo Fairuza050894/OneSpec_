@@ -1993,23 +1993,29 @@ export class BlindCrawlerService {
           });
         };
 
-        // Header / Sidebar menus
-        document.querySelectorAll('header a, header button, nav a, aside a, aside button').forEach((el) => {
-          if (!isVis(el)) return;
-          const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
-          if (!t || t.length < 2 || t.length > 45 || /logout|keluar|sign out/i.test(t)) return;
-          const r = el.getBoundingClientRect();
-          addCtrl(t, 'MENU_NAVIGATION', r.top <= 90 ? 'Header Atas' : 'Sidebar Kiri', el.getAttribute('href') || 'Dropdown / Route Menu', el);
-        });
-
-        // Page Sub-Tabs (below header)
+        // 1. Page Sub-Tabs (below header)
         document.querySelectorAll('[role="tab"], button.tab, .el-tabs__item, .ant-tabs-tab, .nav-tabs button, .nav-tabs a, main [role="tablist"] button, [role="main"] [role="tablist"] button').forEach((el) => {
           if (!isVis(el)) return;
           const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
           if (t && t.length <= 50) addCtrl(`Tab ${t}`, 'SUB_TAB', 'Baris Sub-Tab Halaman', `Sub-tab aktif: ${t}`, el);
         });
 
-        // Search & Filter controls
+        // 2. Toolbar & Primary Action buttons inside main area (Prioritas Pin Utama)
+        document.querySelectorAll('main button, [role="main"] button, .content button').forEach((btn) => {
+          if (!isVis(btn) || btn.closest('nav, aside, .sidebar, header')) return;
+          const t = (btn.textContent || '').trim().replace(/\s+/g, ' ');
+          if (!t || t.length > 50 || btn.getAttribute('role') === 'tab') return;
+          const isFilterBtn = /filter|cari|search|reset|baris|page|grid|table|card|view/i.test(t);
+          addCtrl(
+            t,
+            isFilterBtn ? 'FILTER_CONTROL' : 'PRIMARY_ACTION_BUTTON',
+            isFilterBtn ? 'Toolbar Pencarian & Filter' : 'Area Konten / Kartu Data',
+            isFilterBtn ? 'Membuka/menerapkan filter atau mengubah tampilan data' : `Aksi utama halaman (${t})`,
+            btn
+          );
+        });
+
+        // 3. Search & Filter controls inside content area
         searchCandidates.forEach((el) => {
           const tag = el.tagName.toLowerCase();
           const id = el.getAttribute('id') || '';
@@ -2026,19 +2032,19 @@ export class BlindCrawlerService {
           addCtrl(lbl, tag === 'select' ? 'FILTER_CONTROL' : 'SEARCH_INPUT', 'Toolbar Pencarian & Filter', optsSample || 'Input kata kunci / filter', el);
         });
 
-        // Toolbar & Primary Action buttons inside main
-        document.querySelectorAll('main button, [role="main"] button').forEach((btn) => {
-          if (!isVis(btn) || btn.closest('nav, aside, .sidebar, header')) return;
-          const t = (btn.textContent || '').trim().replace(/\s+/g, ' ');
-          if (!t || t.length > 50 || btn.getAttribute('role') === 'tab') return;
-          const isFilterBtn = /filter|cari|search|reset|baris|page|grid|table|card|view/i.test(t);
-          addCtrl(
-            t,
-            isFilterBtn ? 'FILTER_CONTROL' : 'PRIMARY_ACTION_BUTTON',
-            isFilterBtn ? 'Toolbar Pencarian & Filter' : 'Area Konten / Kartu Data',
-            isFilterBtn ? 'Membuka/menerapkan filter atau mengubah tampilan data' : `Aksi utama halaman (${t})`,
-            btn
-          );
+        // 4. Header & Sidebar Navigation (Diletakkan di urutan belakang, maksimal 2 tombol dari Header)
+        let headerCount = 0;
+        document.querySelectorAll('header a, header button, nav a, aside a, aside button').forEach((el) => {
+          if (!isVis(el)) return;
+          const t = (el.textContent || '').trim().replace(/\s+/g, ' ');
+          if (!t || t.length < 2 || t.length > 45 || /logout|keluar|sign out/i.test(t)) return;
+          const r = el.getBoundingClientRect();
+          const isTopHeader = r.top <= 90;
+          if (isTopHeader) {
+            if (headerCount >= 2) return;
+            headerCount++;
+          }
+          addCtrl(t, 'MENU_NAVIGATION', isTopHeader ? 'Header Atas' : 'Sidebar Kiri', el.getAttribute('href') || 'Dropdown / Route Menu', el);
         });
         // Data Cards or Table Summary
         if (cardItems.length > 0) {
@@ -2463,11 +2469,22 @@ export class BlindCrawlerService {
       }
     }
 
+    // 1. Lewati jika terdeteksi halaman 404 / Not Found / /home
+    const pageHeadingAndTitle = `${surfaceInfo.pageHeading || ''} ${resolvedModuleName || ''} ${currentRoutePath}`;
+    const is404NotFound = /halaman tidak ditemukan|404\s*not\s*found|page\s*not\s*found|tidak\s*ditemukan|error\s*404/i.test(pageHeadingAndTitle);
+    if (is404NotFound || currentRoutePath === '/home') {
+      console.warn(`[BlindCrawler] Skipping 404 / Not Found page at ${currentRoutePath}`);
+      return;
+    }
+
+    // 2. Pastikan posisi scroll berada di (0, 0) sebelum potret screenshot
+    await page.evaluate(() => { window.scrollTo(0, 0); }).catch(() => {});
+
     // Capture compressed JPEG screenshot of the settled feature screen for Visual User Manual & UAT Evidence
     const screenshotBuf = await page
-      .screenshot({ type: 'jpeg', quality: 50, fullPage: false })
+      .screenshot({ type: 'jpeg', quality: 75, fullPage: false, animations: 'disabled' })
       .catch(() => null);
-    const screenshotDataUrl = screenshotBuf
+    const screenshotDataUrl = screenshotBuf && screenshotBuf.length > 2500
       ? `data:image/jpeg;base64,${screenshotBuf.toString('base64')}`
       : undefined;
     const capturedAt = new Date().toISOString();
@@ -2849,9 +2866,36 @@ export class BlindCrawlerService {
         });
       }
 
-      const guaranteedSelects: DetectedLoginSelect[] = [...(rawProbe.detectedSelects as DetectedLoginSelect[])];
-      const hasAccessSelect = guaranteedSelects.some((s) => /pancaran|eksternal|role|domain|tipe|access/i.test(`${s.name} ${s.label}`));
-      if (!hasAccessSelect) {
+      let cleanTabs: DetectedLoginTab[] = [...(rawProbe.detectedTabs as DetectedLoginTab[] || [])];
+      let guaranteedSelects: DetectedLoginSelect[] = [...(rawProbe.detectedSelects as DetectedLoginSelect[] || [])];
+
+      const roleRegex = /pancaran|external|eksternal|internal|role|domain|tipe\s*akses|access/i;
+      const hasTabsAccess = cleanTabs.some((tab) =>
+        tab.options.some((opt) => roleRegex.test(opt)) || roleRegex.test(tab.label)
+      );
+      const hasSelectAccess = guaranteedSelects.some((s) =>
+        roleRegex.test(`${s.name} ${s.label}`) ||
+        s.options.some((opt) => roleRegex.test(`${opt.label} ${opt.value}`))
+      );
+
+      if (hasTabsAccess) {
+        // Tabs sudah mendeteksi pilihan Pancaran / External:
+        // JANGAN tambahkan dropdown fallback/heuristik, dan hapus selects duplikat.
+        guaranteedSelects = guaranteedSelects.filter((s) => {
+          const isRoleSel = roleRegex.test(`${s.name} ${s.label}`) ||
+            s.options.some((opt) => roleRegex.test(`${opt.label} ${opt.value}`));
+          return !isRoleSel;
+        });
+      } else if (hasSelectAccess) {
+        // Halaman asli menggunakan <select> / combobox tunggal:
+        // Tampilkan hanya di dropdowns dan bersihkan tabs duplikat.
+        cleanTabs = cleanTabs.filter((t) => {
+          const isRoleTab = roleRegex.test(t.label) ||
+            t.options.some((opt) => roleRegex.test(opt));
+          return !isRoleTab;
+        });
+      } else {
+        // Fallback jika tidak ada tabs maupun dropdowns
         guaranteedSelects.push({
           name: 'access_type',
           label: 'Tipe Akses / Domain Otorisasi (Pancaran / Eksternal)',
@@ -2862,24 +2906,20 @@ export class BlindCrawlerService {
             { label: 'Eksternal', value: 'Eksternal' },
           ],
         });
-      } else {
-        const targetSel = guaranteedSelects.find((s) => /pancaran|eksternal|role|domain|tipe|access/i.test(`${s.name} ${s.label}`));
-        if (targetSel && targetSel.options.length === 0) {
-          targetSel.options = [
-            { label: 'Pancaran', value: 'Pancaran' },
-            { label: 'Eksternal', value: 'Eksternal' },
-          ];
-        }
       }
 
       return {
         targetUrl: cleanTarget,
         requiresLogin: true,
         pageTitle,
-        detectedTabs: rawProbe.detectedTabs as DetectedLoginTab[],
+        detectedTabs: cleanTabs,
         detectedSelects: guaranteedSelects,
         detectedInputs: guaranteedInputs,
         submitButton: rawProbe.submitButton as DetectedSubmitButton | null,
+        tabs: cleanTabs,
+        dropdowns: guaranteedSelects,
+        selects: guaranteedSelects,
+        inputs: guaranteedInputs,
       };
     } finally {
       if (browser) {

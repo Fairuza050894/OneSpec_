@@ -55,6 +55,7 @@ import {
   Link2,
   Building2,
   Wrench,
+  Camera,
 } from 'lucide-react';
 import type {
   ValidationRuleContract,
@@ -99,7 +100,7 @@ import { GapAuditorWorkbench } from '@/components/audit/GapAuditorWorkbench';
 import { gapAuditorService } from '@/services/gapAuditorService';
 import { getDefaultErdTables, generateOpenApi31SpecClient } from '@/services/discoveryDefaults';
 import { automationSynthesizerService } from '@/services/automationSynthesizer';
-import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, type CompiledSdlcState } from '@/services/sdlcCompiler';
+import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, computeUnifiedQualityMetrics, type CompiledSdlcState } from '@/services/sdlcCompiler';
 import { architectureDeconstructorService, type UpstreamLinkedProjectInfo } from '@/services/architectureDeconstructor';
 import type { ChangeImpactAnalysisReport } from '@/services/changeImpactService';
 import type { ProjectIndexEntry, SavedProjectRecord, ProjectHistoricalSnapshot, RegressionDiffSummary, VaultProjectType } from '@/services/workspaceVaultService';
@@ -159,6 +160,36 @@ interface ExtractedEntity {
   status: 'EXTRACTED' | 'VALIDATED';
 }
 
+export function resolveModuleScreenshot(targetItem: any, state: CompiledSdlcState | null): string | undefined {
+  if (!targetItem && !state) return undefined;
+  const isCandidateValid = (val: unknown): val is string =>
+    typeof val === 'string' && val.startsWith('data:image/') && val.length > 2500;
+  const direct = targetItem?.screenshotDataUrl || targetItem?.screenshotUrl || targetItem?.screenshot;
+  if (isCandidateValid(direct)) return direct;
+  const targetModId = (targetItem?.moduleId || '').toLowerCase().trim();
+  const targetRoute = (targetItem?.routePath || targetItem?.pagePath || targetItem?.path || '')
+    .toLowerCase().replace(/^\/?#\/?/, '/').replace(/\/$/, '').trim();
+  if (state?.discoveredFeatureModules) {
+    const match = state.discoveredFeatureModules.find((m) => {
+      const mId = (m.moduleId || '').toLowerCase().trim();
+      const mRoute = (m.routePath || '').toLowerCase().replace(/^\/?#\/?/, '/').replace(/\/$/, '').trim();
+      return (targetModId && mId === targetModId) || (targetRoute && mRoute === targetRoute);
+    });
+    if (isCandidateValid(match?.screenshotDataUrl)) return match.screenshotDataUrl;
+  }
+  const manuals = (state as any)?.userManuals || (state?.knowledgeGraphSummary as any)?.featureUserGuides || [];
+  if (Array.isArray(manuals)) {
+    const match = manuals.find((m: any) => {
+      const mId = (m.moduleId || m.iso26514Manual?.moduleId || '').toLowerCase().trim();
+      const mRoute = (m.routePath || m.iso26514Manual?.routePath || '').toLowerCase().replace(/^\/?#\/?/, '/').replace(/\/$/, '').trim();
+      return (targetModId && mId === targetModId) || (targetRoute && mRoute === targetRoute);
+    });
+    const shot = match?.screenshotDataUrl || match?.iso26514Manual?.screenshotDataUrl;
+    if (isCandidateValid(shot)) return shot;
+  }
+  return undefined;
+}
+
 export default function OneSpecEngineeringWorkbench() {
   const { locale, setLocale, copy } = useStudioLocale();
   // Navigation State (Steps 1–7)
@@ -214,7 +245,8 @@ export default function OneSpecEngineeringWorkbench() {
   const [loginSurfaceProbe, setLoginSurfaceProbe] = useState<LoginSurfaceProbeResult | null>(null);
   const [dynamicFieldValues, setDynamicFieldValues] = useState<Record<string, string>>({});
   const [loginUsername, setLoginUsername] = useState<string>('admin');
-  const [loginPassword, setLoginPassword] = useState<string>('password123');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [isMaskSensitiveData, setIsMaskSensitiveData] = useState<boolean>(false);
   const [loginAccessType, setLoginAccessType] = useState<string>('Pancaran');
   const [showLoginPassword, setShowLoginPassword] = useState<boolean>(false);
   const [visiblePasswordSelectors, setVisiblePasswordSelectors] = useState<Record<string, boolean>>({});
@@ -237,6 +269,7 @@ export default function OneSpecEngineeringWorkbench() {
 
   // Tab 4: Unified Ingestion Execution State
   const [isAnalyzingSource, setIsAnalyzingSource] = useState<boolean>(false);
+  const [isRecapturingScreenshots, setIsRecapturingScreenshots] = useState<boolean>(false);
 
   // Dynamic Automation Assets (Step 07 Parity)
   const [compiledPipelineStages, setCompiledPipelineStages] = useState<ExecutionPipelineStage[]>([]);
@@ -554,6 +587,11 @@ The system provides deterministic transaction processing, input validation, and 
       businessRules: brdMatrixRows,
     });
   }, [compiledSdlcState, validationRules, activeWorkspace, blindTargetUrl, discoveryResult, brdMatrixRows]);
+
+  // Single Source of Truth Unified Quality & Release Readiness Metrics (ISO 29119)
+  const unifiedQualityMetrics = useMemo(() => {
+    return computeUnifiedQualityMetrics(compiledSdlcState || ({ rtmRows } as any));
+  }, [compiledSdlcState, rtmRows]);
   const qaWorkbook = useMemo(() => {
     const applyOverrides = (
       rawBugs: BugReportTicket[],
@@ -644,6 +682,25 @@ The system provides deterministic transaction processing, input validation, and 
     setTerminalLogs((prev) => [...prev.slice(-99), `[${new Date().toLocaleTimeString()}] ${msg}`]);
   }, []);
 
+  // Mask sensitive hostnames, IP addresses, and user identifiers for demo/presentation/screenshot mode
+  const maskSensitiveText = useCallback(
+    (text: string | null | undefined): string => {
+      if (!text) return '';
+      if (!isMaskSensitiveData) return text;
+      // Mask IP addresses (e.g. 10.10.15.75 -> 10.10.***.*** or 127.0.0.1 -> 127.0.***.***)
+      let masked = text.replace(
+        /\b(\d{1,3}\.\d{1,3}\.)\d{1,3}\.\d{1,3}\b/g,
+        '$1***.***'
+      );
+      // Mask username
+      if (loginUsername && loginUsername.length > 2 && text.includes(loginUsername)) {
+        masked = masked.replaceAll(loginUsername, `${loginUsername.slice(0, 2)}******`);
+      }
+      return masked;
+    },
+    [isMaskSensitiveData, loginUsername]
+  );
+
   const handleSelectRunnerStage = useCallback(
     (stage: ExecutionPipelineStage, trace: TestSuiteExecutionTrace) => {
       setSelectedRunnerStage(stage);
@@ -732,11 +789,13 @@ The system provides deterministic transaction processing, input validation, and 
     );
   }, []);
 
-  // Fetch helper with strict 45-second AbortController deadline so UI buttons can never hang
+  // Fetch helper with AbortController deadline (default 240s) so long-running crawls never hang UI
   const fetchWithTimeout = useCallback(
-    async (url: string, init: RequestInit = {}, timeoutMs = 45000): Promise<Response> => {
+    async (url: string, init: RequestInit = {}, timeoutMs = 240000): Promise<Response> => {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => {
+        controller.abort(new Error(`Fetch timeout after ${timeoutMs}ms for ${url}`));
+      }, timeoutMs);
       try {
         return await fetch(url, { ...init, signal: controller.signal });
       } finally {
@@ -765,7 +824,31 @@ The system provides deterministic transaction processing, input validation, and 
       try {
         localStorage.setItem('onespec_active_workspace_v2', JSON.stringify(compiled));
       } catch {
-        // Storage quota resilience
+        // Storage quota resilience: strip bulky screenshots to preserve lightweight state
+        try {
+          const stripped = {
+            ...compiled,
+            discoveredFeatureModules: compiled.discoveredFeatureModules?.map((m) => ({
+              ...m,
+              screenshotDataUrl: undefined,
+            })),
+            userManuals: (compiled as any).userManuals?.map((u: any) => ({
+              ...u,
+              screenshotDataUrl: undefined,
+              iso26514Manual: u.iso26514Manual ? { ...u.iso26514Manual, screenshotDataUrl: undefined } : undefined,
+            })),
+            knowledgeGraphSummary: compiled.knowledgeGraphSummary ? {
+              ...compiled.knowledgeGraphSummary,
+              featureUserGuides: (compiled.knowledgeGraphSummary as any).featureUserGuides?.map((g: any) => ({
+                ...g,
+                screenshotDataUrl: undefined,
+              })),
+            } : undefined,
+          };
+          localStorage.setItem('onespec_active_workspace_v2', JSON.stringify(stripped));
+        } catch {
+          // Fallback if local storage is completely disabled or full
+        }
       }
 
       // Persist to Multi-Project Permanent Vault (.onespec-vault/) unless loading from vault
@@ -797,7 +880,14 @@ The system provides deterministic transaction processing, input validation, and 
       }
 
       setActiveTargetBadge(compiled.badgeText || '');
-      setRawMoMNotes(compiled.rawMoMNotes || '');
+      // Preserve genuine user source requirement notes (never overwrite with autonomous zero-doc summary if user notes exist)
+      if (compiled.rawStakeholderNotes) {
+        setRawMoMNotes(compiled.rawStakeholderNotes);
+      } else if (compiled.hasSourceRequirements) {
+        setRawMoMNotes((prev) => (prev && !prev.startsWith('# [AUTONOMOUS ZERO-DOC') ? prev : compiled.rawMoMNotes || ''));
+      } else {
+        setRawMoMNotes(compiled.rawMoMNotes || '');
+      }
       setBlindTargetUrl(compiled.targetUrl || '');
       if (Array.isArray(compiled.extractedEntities) && compiled.extractedEntities.length > 0) {
         setExtractedEntities(compiled.extractedEntities as ExtractedEntity[]);
@@ -927,6 +1017,34 @@ The system provides deterministic transaction processing, input validation, and 
     },
     [activeVaultProjectId, fetchWithTimeout, handleSwitchVaultProject]
   );
+
+  // On-demand high-definition re-capture of screenshots across all discovered modules
+  const handleRecaptureScreenshots = useCallback(async () => {
+    if (isRecapturingScreenshots) return;
+    setIsRecapturingScreenshots(true);
+    appendTerminalLog('[RE-CAPTURE] Initiating headless Playwright re-capture for discovered modules...');
+    try {
+      const res = await fetch('/api/sdlc/recapture-screenshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeVaultProjectId || undefined,
+          targetUrl: compiledSdlcState?.targetUrl || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success && data?.compiledState) {
+        applyCompiledSdlcState(data.compiledState, { skipVaultWrite: true });
+        appendTerminalLog(`[RE-CAPTURE] Successfully re-captured ${data.updatedCount || 0} module screenshot(s).`);
+      } else {
+        appendTerminalLog(`[RE-CAPTURE] Warning: ${data?.error || 'Re-capture completed with no updates.'}`);
+      }
+    } catch (e: any) {
+      appendTerminalLog(`[RE-CAPTURE] Error re-capturing screenshots: ${e?.message || 'Network error'}`);
+    } finally {
+      setIsRecapturingScreenshots(false);
+    }
+  }, [isRecapturingScreenshots, activeVaultProjectId, compiledSdlcState, applyCompiledSdlcState, appendTerminalLog]);
 
   // Part 3: Link existing Vault project contracts into current project's Architecture & Integration Kit
   const handleLinkVaultIntegrationProject = useCallback(
@@ -1142,16 +1260,29 @@ The system provides deterministic transaction processing, input validation, and 
   const handleApproveReleaseSignOff = useCallback(
     (signOff: import('@/types/sdlc').ReleaseSignOffCertificate) => {
       if (!compiledSdlcState) return;
+      const updatedSigs = signOff.auditSignatures || compiledSdlcState.auditSignatures || [];
       const updatedState: CompiledSdlcState = {
         ...compiledSdlcState,
         releaseSignOff: signOff,
+        auditSignatures: updatedSigs,
       };
       applyCompiledSdlcState(updatedState, {
         projectId: activeVaultProjectId || undefined,
         createSnapshot: true,
         versionLabel: `Release Approved (${signOff.approvedBy})`,
       });
-      appendTerminalLog(`[RELEASE SIGN-OFF] Locked ${signOff.status} by ${signOff.approvedBy} (${signOff.roleTitle}).`);
+      if (activeVaultProjectId && updatedSigs.length > 0) {
+        fetch('/api/workspace/vault', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'APPEND_AUDIT_SIGNATURE',
+            projectId: activeVaultProjectId,
+            signature: updatedSigs[0],
+          }),
+        }).catch(() => {});
+      }
+      appendTerminalLog(`[RELEASE SIGN-OFF] Locked ${signOff.status || signOff.releaseGateStatus} by ${signOff.approvedBy} (${signOff.approverRole || signOff.roleTitle}).`);
     },
     [compiledSdlcState, applyCompiledSdlcState, activeVaultProjectId, appendTerminalLog]
   );
@@ -1242,7 +1373,7 @@ The system provides deterministic transaction processing, input validation, and 
             logs: Array.isArray(d.logs) ? d.logs : prev.logs,
           }));
           if (!d.isRunning && d.latestResult) {
-            const compiled = synthesizeFullSdlcFromCrawl(d.latestResult);
+            const compiled = synthesizeFullSdlcFromCrawl(d.latestResult, rawMoMNotes);
             applyCompiledSdlcState(compiled);
             appendTerminalLog(`[INTERACTIVE SESSION] Browser window closed. Synthesized SDLC specifications across Steps 01–12.`);
           }
@@ -1345,8 +1476,8 @@ The system provides deterministic transaction processing, input validation, and 
     appendTerminalLog(`[PROBE] Scanning URL & detecting adaptive login surface on: ${target}...`);
 
     try {
-      const res = await fetchWithTimeout(
-        '/api/discovery/blind-crawl',
+      let res = await fetchWithTimeout(
+        '/api/sdlc/login-probe',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1355,8 +1486,22 @@ The system provides deterministic transaction processing, input validation, and 
             targetUrl: target,
           }),
         },
-        45000
+        60000
       );
+      if (!res.ok) {
+        res = await fetchWithTimeout(
+          '/api/discovery/blind-crawl',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'PROBE_LOGIN_SURFACE',
+              targetUrl: target,
+            }),
+          },
+          60000
+        );
+      }
       const json = (await res.json()) as {
         success?: boolean;
         data?: LoginSurfaceProbeResult;
@@ -1370,13 +1515,25 @@ The system provides deterministic transaction processing, input validation, and 
       setLoginSurfaceProbe(probe);
 
       const initialValues: Record<string, string> = {};
+      let matchedTabAccessVal = '';
       for (const tabGroup of probe.detectedTabs) {
         if (tabGroup.options.length > 0) {
           initialValues[tabGroup.selector] = tabGroup.options[0];
+          if (
+            /pancaran|eksternal|external|internal|domain|role|tenant/i.test(tabGroup.options.join(' ')) ||
+            /access|role|domain|tipe|tenant/i.test(tabGroup.label || '')
+          ) {
+            matchedTabAccessVal = tabGroup.options[0];
+          }
         }
       }
+      if (matchedTabAccessVal) {
+        setLoginAccessType(matchedTabAccessVal);
+        initialValues['access_type'] = matchedTabAccessVal;
+        initialValues['accessRoleOrTenant'] = matchedTabAccessVal;
+      }
       for (const sel of probe.detectedSelects) {
-        initialValues[sel.selector] = '';
+        initialValues[sel.selector] = sel.options?.[0]?.value || '';
       }
       for (const inp of probe.detectedInputs) {
         initialValues[inp.selector] = '';
@@ -1427,6 +1584,7 @@ The system provides deterministic transaction processing, input validation, and 
         username: loginUsername,
         password: loginPassword,
         access_type: loginAccessType,
+        accessRoleOrTenant: loginAccessType,
         ...dynamicFieldValues,
       };
       if (loginSurfaceProbe) {
@@ -1453,10 +1611,11 @@ The system provides deterministic transaction processing, input validation, and 
             action: 'RUN_AUTO_ROBOT',
             targetUrl: target,
             dynamicFieldValues: mergedDynamicValues,
+            extraFields: mergedDynamicValues,
             probeResult: loginSurfaceProbe,
           }),
         },
-        150000
+        240000
       );
 
       if (!res.ok) {
@@ -1471,7 +1630,7 @@ The system provides deterministic transaction processing, input validation, and 
       const data: BlindCrawlResult = json.data;
       setBlindCrawlResult(data);
 
-      const compiled = synthesizeFullSdlcFromCrawl(data);
+      const compiled = synthesizeFullSdlcFromCrawl(data, rawMoMNotes);
       applyCompiledSdlcState(compiled);
 
       const formsCount = (data.discoveredForms || data.forms || []).length;
@@ -1549,7 +1708,7 @@ The system provides deterministic transaction processing, input validation, and 
             domBindings: [],
             extractedEntities,
           };
-          const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl);
+          const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl, rawMoMNotes);
           applyCompiledSdlcState(compiled);
           setBlindTargetUrl(gitRepoUrl);
           appendTerminalLog(`[GIT INGEST] SUCCESS: Generated full specifications across Steps 01–14.`);
@@ -1603,7 +1762,7 @@ The system provides deterministic transaction processing, input validation, and 
             domBindings: [],
             extractedEntities,
           };
-          const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl);
+          const compiled = synthesizeFullSdlcFromCrawl(pseudoCrawl, rawMoMNotes);
           applyCompiledSdlcState(compiled);
           setActiveStep(2);
         }
@@ -1701,7 +1860,7 @@ The system provides deterministic transaction processing, input validation, and 
       return;
     }
     try {
-      const compiled = synthesizeFullSdlcFromCrawl(interactiveSession.latestResult);
+      const compiled = synthesizeFullSdlcFromCrawl(interactiveSession.latestResult, rawMoMNotes);
       applyCompiledSdlcState(compiled);
       appendTerminalLog(
         `[INTERACTIVE SYNC] SUCCESS: Disinkronkan ${interactiveSession.pagesCount} halaman, ${interactiveSession.apisCount} API, ${interactiveSession.inputsCount} input/dropdown ke Steps 01–12.`
@@ -1767,7 +1926,7 @@ The system provides deterministic transaction processing, input validation, and 
         setBlindCrawlResult(crawlResult);
         if (crawlResult.targetUrl) setBlindTargetUrl(crawlResult.targetUrl);
 
-        const compiled = synthesizeFullSdlcFromCrawl(crawlResult);
+        const compiled = synthesizeFullSdlcFromCrawl(crawlResult, rawMoMNotes);
         applyCompiledSdlcState(compiled);
         setInteractiveNotice({
           type: 'success',
@@ -1963,6 +2122,31 @@ The system provides deterministic transaction processing, input validation, and 
             <Database className="h-3.5 w-3.5 text-[#3B82F6]" />
             <span className="hidden min-[1400px]:inline">{copy.header.seedData}</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setIsMaskSensitiveData((prev) => !prev)}
+            title={
+              isMaskSensitiveData
+                ? (locale === 'id' ? 'Nonaktifkan Penyamaran Host / User' : 'Disable Sensitive Host / User Masking')
+                : (locale === 'id' ? 'Samarkan Host / IP / User Sensitif untuk Presentasi & Screenshot' : 'Mask Sensitive Host / User for Demos & Screenshots')
+            }
+            className={`flex items-center gap-1.5 px-2 min-[1400px]:px-2.5 h-8 border text-[11px] font-mono rounded-[3px] transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              isMaskSensitiveData
+                ? 'bg-[#10B981]/20 border-[#10B981] text-[#10B981] font-bold'
+                : 'bg-[#111317] border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED]'
+            }`}
+          >
+            {isMaskSensitiveData ? (
+              <EyeOff className="h-3.5 w-3.5 text-[#10B981]" />
+            ) : (
+              <Eye className="h-3.5 w-3.5 text-[#707070]" />
+            )}
+            <span className="hidden min-[1280px]:inline">
+              {isMaskSensitiveData
+                ? (locale === 'id' ? 'Host & User Masked' : 'Host & User Masked')
+                : (locale === 'id' ? 'Mask Host/User' : 'Mask Sensitive Host/User')}
+            </span>
+          </button>
           <div
             className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[3px] font-mono text-[10.5px] h-8 shrink-0"
             role="group"
@@ -2036,6 +2220,8 @@ The system provides deterministic transaction processing, input validation, and 
                 }}
                 onSwitchToStudioMode={() => setWorkspaceMode('STUDIO')}
                 onAppendLog={appendTerminalLog}
+                onRecaptureScreenshots={handleRecaptureScreenshots}
+                isRecapturingScreenshots={isRecapturingScreenshots}
                 onSyncProject={async (rec) => {
                   appendTerminalLog(`[1:1 SYNC & AUTO-VERSION] Initiating structural re-scan & audit ledger for "${rec.projectName}" (${rec.projectId})...`);
                   try {
@@ -2329,8 +2515,19 @@ The system provides deterministic transaction processing, input validation, and 
                 </div>
               )}
 
-              {/* 4 Unified Source Selection Tabs */}
+              {/* 4 Unified Source Selection Tabs (Aligned with SDLC Lifecycle) */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-1 bg-[#111317] border border-[#22262E] p-1 rounded-[4px] font-mono text-[11px] shrink-0">
+                <button
+                  onClick={() => setStep1SourceTab('STAKEHOLDER_MOM')}
+                  className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
+                    step1SourceTab === 'STAKEHOLDER_MOM'
+                      ? 'bg-[#8B5CF6] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{copy.step01.tabNotes}</span>
+                </button>
                 <button
                   onClick={() => setStep1SourceTab('WEB_URL')}
                   className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
@@ -2363,17 +2560,6 @@ The system provides deterministic transaction processing, input validation, and 
                 >
                   <Folder className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{copy.step01.tabZipFolder}</span>
-                </button>
-                <button
-                  onClick={() => setStep1SourceTab('STAKEHOLDER_MOM')}
-                  className={`px-2.5 py-1.5 rounded-[3px] transition-colors cursor-pointer flex items-center justify-center gap-1.5 truncate ${
-                    step1SourceTab === 'STAKEHOLDER_MOM'
-                      ? 'bg-[#8B5CF6] text-white font-bold'
-                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                  }`}
-                >
-                  <FileText className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{copy.step01.tabNotes}</span>
                 </button>
               </div>
 
@@ -2444,7 +2630,7 @@ The system provides deterministic transaction processing, input validation, and 
                         </span>
                       </div>
                       <span className="text-[#707070] truncate max-w-[360px]">
-                        {loginSurfaceProbe?.targetUrl || blindTargetUrl || 'http://localhost:3000'}
+                        {maskSensitiveText(loginSurfaceProbe?.targetUrl || blindTargetUrl || 'http://localhost:3000')}
                       </span>
                     </div>
 
@@ -2455,173 +2641,201 @@ The system provides deterministic transaction processing, input validation, and 
                       </div>
                     )}
 
-                    {/* Detected Role / Access Switcher Tabs if probed */}
-                    {loginSurfaceProbe?.detectedTabs && loginSurfaceProbe.detectedTabs.length > 0 && (
-                      <div className="space-y-2">
-                        {loginSurfaceProbe.detectedTabs.map((tabGroup) => (
-                          <div key={tabGroup.selector} className="space-y-1">
-                            <label className="text-[10px] text-[#707070] uppercase font-bold block">
-                              {tabGroup.label}
-                            </label>
-                            <div className="flex flex-wrap items-center gap-1.5 bg-[#111317] border border-[#22262E] p-1 rounded-[3px]">
-                              {tabGroup.options.map((opt) => {
-                                const isSelected = dynamicFieldValues[tabGroup.selector] === opt;
-                                return (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() =>
+                    {/* Check if probed tabs already cover Access/Role (Pancaran / External) */}
+                    {(() => {
+                      const hasTabAccessControl = Boolean(
+                        loginSurfaceProbe?.detectedTabs?.some((t) =>
+                          t.options.some((opt) => /pancaran|eksternal|external|internal|domain|role|tenant/i.test(opt)) ||
+                          /access|role|domain|tipe|tenant/i.test(t.label || '')
+                        )
+                      );
+
+                      return (
+                        <>
+                          {/* Detected Role / Access Switcher Tabs if probed */}
+                          {loginSurfaceProbe?.detectedTabs && loginSurfaceProbe.detectedTabs.length > 0 && (
+                            <div className="space-y-2">
+                              {loginSurfaceProbe.detectedTabs.map((tabGroup) => (
+                                <div key={tabGroup.selector} className="space-y-1">
+                                  <label className="text-[10px] text-[#707070] uppercase font-bold block">
+                                    {tabGroup.label}
+                                  </label>
+                                  <div className="flex flex-wrap items-center gap-1.5 bg-[#111317] border border-[#22262E] p-1 rounded-[3px]">
+                                    {tabGroup.options.map((opt) => {
+                                      const isSelected =
+                                        dynamicFieldValues[tabGroup.selector] === opt ||
+                                        loginAccessType.toLowerCase() === opt.toLowerCase();
+                                      return (
+                                        <button
+                                          key={opt}
+                                          type="button"
+                                          onClick={() => {
+                                            setDynamicFieldValues((prev) => ({
+                                              ...prev,
+                                              [tabGroup.selector]: opt,
+                                              access_type: opt,
+                                              accessRoleOrTenant: opt,
+                                            }));
+                                            setLoginAccessType(opt);
+                                          }}
+                                          className={`px-3 py-1.5 rounded-[2px] text-[11px] transition-colors cursor-pointer ${
+                                            isSelected
+                                              ? 'bg-[#2563EB] text-white font-bold'
+                                              : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                                          }`}
+                                        >
+                                          {opt}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Guaranteed Inputs: Username, Password, and Access Type (conditionally rendered) */}
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                            {/* 1. Username / User ID */}
+                            <div className={`${hasTabAccessControl ? 'md:col-span-6' : 'md:col-span-4'} flex flex-col gap-1 min-w-0`}>
+                              <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
+                                <span>Username / User ID *</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={isMaskSensitiveData ? maskSensitiveText(loginUsername) : loginUsername}
+                                readOnly={isMaskSensitiveData}
+                                onChange={(e) => {
+                                  if (isMaskSensitiveData) return;
+                                  const val = e.target.value;
+                                  setLoginUsername(val);
+                                  if (loginSurfaceProbe) {
+                                    const userInp = loginSurfaceProbe.detectedInputs.find((i) =>
+                                      /user|email|login/i.test(`${i.name} ${i.label}`)
+                                    );
+                                    if (userInp) {
+                                      setDynamicFieldValues((prev) => ({ ...prev, [userInp.selector]: val }));
+                                    }
+                                  }
+                                }}
+                                placeholder="Username / NIP / Email..."
+                                className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
+                              />
+                            </div>
+
+                            {/* 2. Password / Kata Sandi */}
+                            <div className={`${hasTabAccessControl ? 'md:col-span-6' : 'md:col-span-4'} flex flex-col gap-1 min-w-0`}>
+                              <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
+                                <span>Password / Kata Sandi *</span>
+                              </label>
+                              <div className="relative w-full min-w-0 flex items-center">
+                                <input
+                                  type={showLoginPassword ? 'text' : 'password'}
+                                  value={loginPassword}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setLoginPassword(val);
+                                    if (loginSurfaceProbe) {
+                                      const passInp = loginSurfaceProbe.detectedInputs.find(
+                                        (i) => i.type === 'password' || /pass/i.test(i.name)
+                                      );
+                                      if (passInp) {
+                                        setDynamicFieldValues((prev) => ({ ...prev, [passInp.selector]: val }));
+                                      }
+                                    }
+                                  }}
+                                  placeholder={locale === 'id' ? 'Masukkan kata sandi...' : 'Enter password...'}
+                                  className="w-full min-w-0 h-9 px-2.5 pr-8 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => setShowLoginPassword((prev) => !prev)}
+                                  className="absolute right-2 text-[#707070] hover:text-[#EDEDED] cursor-pointer"
+                                  aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                                >
+                                  {showLoginPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* 3. Tipe Akses / Domain Otorisasi (Pancaran / Eksternal) - Sembunyikan jika tabs sudah menyediakan kontrol peran/akses */}
+                            {!hasTabAccessControl && (
+                              <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                                <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
+                                  <span>Tipe Akses / Domain *</span>
+                                </label>
+                                <select
+                                  value={loginAccessType}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setLoginAccessType(val);
+                                    setDynamicFieldValues((prev) => ({
+                                      ...prev,
+                                      access_type: val,
+                                      accessRoleOrTenant: val,
+                                    }));
+                                    if (loginSurfaceProbe) {
+                                      const sel = loginSurfaceProbe.detectedSelects.find((s) =>
+                                        /pancaran|eksternal|role|domain|access/i.test(`${s.name} ${s.label}`)
+                                      );
+                                      if (sel) {
+                                        setDynamicFieldValues((prev) => ({ ...prev, [sel.selector]: val }));
+                                      }
+                                    }
+                                  }}
+                                  className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer text-[11.5px]"
+                                >
+                                  <option value="Pancaran">Pancaran (Internal Domain)</option>
+                                  <option value="Eksternal">Eksternal (Partner / Vendor Domain)</option>
+                                  {loginSurfaceProbe?.detectedSelects
+                                    ?.flatMap((s) => s.options)
+                                    ?.filter(
+                                      (o) =>
+                                        o.value !== 'Pancaran' &&
+                                        o.value !== 'Eksternal' &&
+                                        o.value &&
+                                        o.value.trim() !== ''
+                                    )
+                                    ?.map((o, idx) => (
+                                      <option key={`${o.value}-${idx}`} value={o.value}>
+                                        {o.label || o.value}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            )}
+
+                            {/* Any extra detected inputs from surface probe beyond username/password */}
+                            {loginSurfaceProbe?.detectedInputs
+                              ?.filter(
+                                (inp) =>
+                                  inp.type !== 'password' &&
+                                  !/user|email|login|username|nip|nik/i.test(`${inp.name} ${inp.label} ${inp.placeholder}`)
+                              )
+                              ?.map((inp) => (
+                                <div key={inp.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
+                                  <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
+                                    {inp.label || inp.placeholder || inp.name}
+                                    {inp.required ? ' *' : ''}
+                                  </label>
+                                  <input
+                                    type={inp.type}
+                                    value={dynamicFieldValues[inp.selector] || ''}
+                                    onChange={(e) =>
                                       setDynamicFieldValues((prev) => ({
                                         ...prev,
-                                        [tabGroup.selector]: opt,
+                                        [inp.selector]: e.target.value,
                                       }))
                                     }
-                                    className={`px-3 py-1.5 rounded-[2px] text-[11px] transition-colors cursor-pointer ${
-                                      isSelected
-                                        ? 'bg-[#2563EB] text-white font-bold'
-                                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                );
-                              })}
-                            </div>
+                                    placeholder={inp.placeholder || inp.label || inp.name}
+                                    className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
+                                  />
+                                </div>
+                              ))}
                           </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* 3 Core Guaranteed Inputs: Username, Password, and Access Type (Pancaran / Eksternal) */}
-                    <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
-                      {/* 1. Username / User ID */}
-                      <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
-                        <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
-                          <span>Username / User ID *</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={loginUsername}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setLoginUsername(val);
-                            if (loginSurfaceProbe) {
-                              const userInp = loginSurfaceProbe.detectedInputs.find((i) =>
-                                /user|email|login/i.test(`${i.name} ${i.label}`)
-                              );
-                              if (userInp) {
-                                setDynamicFieldValues((prev) => ({ ...prev, [userInp.selector]: val }));
-                              }
-                            }
-                          }}
-                          placeholder="Username / NIP / Email..."
-                          className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
-                        />
-                      </div>
-
-                      {/* 2. Password / Kata Sandi */}
-                      <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
-                        <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
-                          <span>Password / Kata Sandi *</span>
-                        </label>
-                        <div className="relative w-full min-w-0 flex items-center">
-                          <input
-                            type={showLoginPassword ? 'text' : 'password'}
-                            value={loginPassword}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setLoginPassword(val);
-                              if (loginSurfaceProbe) {
-                                const passInp = loginSurfaceProbe.detectedInputs.find(
-                                  (i) => i.type === 'password' || /pass/i.test(i.name)
-                                );
-                                if (passInp) {
-                                  setDynamicFieldValues((prev) => ({ ...prev, [passInp.selector]: val }));
-                                }
-                              }
-                            }}
-                            placeholder="Kata Sandi / Password..."
-                            className="w-full min-w-0 h-9 px-2.5 pr-8 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowLoginPassword((prev) => !prev)}
-                            className="absolute right-2 text-[#707070] hover:text-[#EDEDED] cursor-pointer"
-                            aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
-                          >
-                            {showLoginPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* 3. Tipe Akses / Domain Otorisasi (Pancaran / Eksternal) */}
-                      <div className="md:col-span-4 flex flex-col gap-1 min-w-0">
-                        <label className="text-[10px] text-[#A1A1A1] uppercase font-bold truncate flex items-center gap-1">
-                          <span>Tipe Akses / Domain *</span>
-                        </label>
-                        <select
-                          value={loginAccessType}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setLoginAccessType(val);
-                            if (loginSurfaceProbe) {
-                              const sel = loginSurfaceProbe.detectedSelects.find((s) =>
-                                /pancaran|eksternal|role|domain|access/i.test(`${s.name} ${s.label}`)
-                              );
-                              if (sel) {
-                                setDynamicFieldValues((prev) => ({ ...prev, [sel.selector]: val }));
-                              }
-                            }
-                          }}
-                          className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer text-[11.5px]"
-                        >
-                          <option value="Pancaran">Pancaran (Internal Domain)</option>
-                          <option value="Eksternal">Eksternal (Partner / Vendor Domain)</option>
-                          {loginSurfaceProbe?.detectedSelects
-                            ?.flatMap((s) => s.options)
-                            ?.filter(
-                              (o) =>
-                                o.value !== 'Pancaran' &&
-                                o.value !== 'Eksternal' &&
-                                o.value &&
-                                o.value.trim() !== ''
-                            )
-                            ?.map((o, idx) => (
-                              <option key={`${o.value}-${idx}`} value={o.value}>
-                                {o.label || o.value}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-
-                      {/* Any extra detected inputs from surface probe beyond username/password */}
-                      {loginSurfaceProbe?.detectedInputs
-                        ?.filter(
-                          (inp) =>
-                            inp.type !== 'password' &&
-                            !/user|email|login|username|nip|nik/i.test(`${inp.name} ${inp.label} ${inp.placeholder}`)
-                        )
-                        ?.map((inp) => (
-                          <div key={inp.selector} className="md:col-span-4 flex flex-col gap-1 min-w-0">
-                            <label className="text-[10px] text-[#707070] uppercase font-bold truncate">
-                              {inp.label || inp.placeholder || inp.name}
-                              {inp.required ? ' *' : ''}
-                            </label>
-                            <input
-                              type={inp.type}
-                              value={dynamicFieldValues[inp.selector] || ''}
-                              onChange={(e) =>
-                                setDynamicFieldValues((prev) => ({
-                                  ...prev,
-                                  [inp.selector]: e.target.value,
-                                }))
-                              }
-                              placeholder={inp.placeholder || inp.label || inp.name}
-                              className="w-full min-w-0 h-9 px-2.5 bg-[#111317] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11.5px]"
-                            />
-                          </div>
-                        ))}
-                    </div>
+                        </>
+                      );
+                    })()}
                   </div>
 
                   {/* STEP 3: Dual Execution Modes (Side-by-Side) */}
@@ -3508,6 +3722,18 @@ The system provides deterministic transaction processing, input validation, and 
                     {copy.step04.subtitle}
                   </p>
                 </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRecaptureScreenshots}
+                    disabled={isRecapturingScreenshots}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#171A21] hover:bg-[#1E232B] disabled:opacity-50 text-[#EDEDED] border border-[#2E3440] hover:border-[#388BFD] text-[11px] font-mono rounded transition-colors shadow-sm cursor-pointer"
+                    title={locale === 'id' ? 'Jalankan Playwright crawler untuk mengambil ulang screenshot modul beresolusi tinggi' : 'Re-run headless Playwright crawler to capture high-definition real screenshots for all discovered modules'}
+                  >
+                    <Camera className={`w-3.5 h-3.5 text-[#388BFD] ${isRecapturingScreenshots ? 'animate-pulse' : ''}`} />
+                    <span>{isRecapturingScreenshots ? (locale === 'id' ? 'Memotret Ulang...' : 'Re-Capturing...') : (locale === 'id' ? 'Potret Ulang Screenshot' : 'Re-Capture Screenshots')}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Quick Export Toolbar for Step 04 */}
@@ -3565,47 +3791,60 @@ The system provides deterministic transaction processing, input validation, and 
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[11.5px] font-mono self-start">
+                <div className="flex flex-wrap items-center gap-2 self-start">
                   <button
-                    onClick={() => setStep5SubTab('API_EXPLORER')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                      step5SubTab === 'API_EXPLORER'
-                        ? 'bg-[#2563EB] text-white font-semibold'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                    }`}
+                    type="button"
+                    onClick={handleRecaptureScreenshots}
+                    disabled={isRecapturingScreenshots}
+                    className="flex items-center gap-1.5 px-3 py-1 bg-[#171A21] hover:bg-[#1E232B] disabled:opacity-50 text-[#EDEDED] border border-[#2E3440] hover:border-[#388BFD] text-[11px] font-mono rounded transition-colors shadow-sm cursor-pointer"
+                    title={locale === 'id' ? 'Jalankan Playwright crawler untuk mengambil ulang screenshot modul beresolusi tinggi' : 'Re-run headless Playwright crawler to capture high-definition real screenshots for all discovered modules'}
                   >
-                    {copy.step05.tabApi}
+                    <Camera className={`w-3.5 h-3.5 text-[#388BFD] ${isRecapturingScreenshots ? 'animate-pulse' : ''}`} />
+                    <span>{isRecapturingScreenshots ? (locale === 'id' ? 'Memotret Ulang...' : 'Re-Capturing...') : (locale === 'id' ? 'Potret Ulang Screenshot' : 'Re-Capture Screenshots')}</span>
                   </button>
-                  <button
-                    onClick={() => setStep5SubTab('ERD_CANVAS')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                      step5SubTab === 'ERD_CANVAS'
-                        ? 'bg-[#2563EB] text-white font-semibold'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                    }`}
-                  >
-                    {copy.step05.tabErd}
-                  </button>
-                  <button
-                    onClick={() => setStep5SubTab('DOM_MAP')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                      step5SubTab === 'DOM_MAP'
-                        ? 'bg-[#2563EB] text-white font-semibold'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                    }`}
-                  >
-                    {copy.step05.tabDom}
-                  </button>
-                  <button
-                    onClick={() => setStep5SubTab('BUNDLE_VAULT')}
-                    className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                      step5SubTab === 'BUNDLE_VAULT'
-                        ? 'bg-[#2563EB] text-white font-semibold'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                    }`}
-                  >
-                    {copy.step05.tabVault}
-                  </button>
+
+                  <div className="flex flex-wrap items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[11.5px] font-mono">
+                    <button
+                      onClick={() => setStep5SubTab('API_EXPLORER')}
+                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step5SubTab === 'API_EXPLORER'
+                          ? 'bg-[#2563EB] text-white font-semibold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step05.tabApi}
+                    </button>
+                    <button
+                      onClick={() => setStep5SubTab('ERD_CANVAS')}
+                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step5SubTab === 'ERD_CANVAS'
+                          ? 'bg-[#2563EB] text-white font-semibold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step05.tabErd}
+                    </button>
+                    <button
+                      onClick={() => setStep5SubTab('DOM_MAP')}
+                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step5SubTab === 'DOM_MAP'
+                          ? 'bg-[#2563EB] text-white font-semibold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step05.tabDom}
+                    </button>
+                    <button
+                      onClick={() => setStep5SubTab('BUNDLE_VAULT')}
+                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                        step5SubTab === 'BUNDLE_VAULT'
+                          ? 'bg-[#2563EB] text-white font-semibold'
+                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                      }`}
+                    >
+                      {copy.step05.tabVault}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -3725,7 +3964,7 @@ The system provides deterministic transaction processing, input validation, and 
                       const json = await res.json();
                       if (res.ok && json.success && json.data) {
                         setBlindCrawlResult(json.data);
-                        const compiled = synthesizeFullSdlcFromCrawl(json.data);
+                        const compiled = synthesizeFullSdlcFromCrawl(json.data, rawMoMNotes);
                         applyCompiledSdlcState(compiled);
                         appendTerminalLog(
                           `[DISCOVERY] SUCCESS: Harvested ${compiled.discoveryResult.apiEndpoints.length} routes from ${target}.`

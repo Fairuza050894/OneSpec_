@@ -20,47 +20,111 @@ const SESSION_STATE_PATH = path.resolve(process.cwd(), '.onespec-session-storage
 
 export async function captureInstantCdpScreenshot(page: any): Promise<string | undefined> {
   try {
+    await page.evaluate(() => {
+      window.scrollTo(0, 0);
+    }).catch(() => {});
     await page
       .addStyleTag({
         content:
           '*, *::before, *::after { transition: none !important; animation: none !important; } body, main, #__nuxt, #__next, #app { opacity: 1 !important; visibility: visible !important; }',
       })
       .catch(() => {});
-    const client = await page.context().newCDPSession(page);
-    const res = (await Promise.race([
-      client.send('Page.captureScreenshot', { format: 'jpeg', quality: 68, fromSurface: true }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('CDP_SHOT_TIMEOUT')), 3500)),
-    ])) as { data?: string };
-    await client.detach().catch(() => {});
-    if (res?.data && res.data.length > 1200) {
-      return `data:image/jpeg;base64,${res.data}`;
+    await page
+      .evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+      .catch(() => {});
+
+    // Lapis 1: Playwright native screenshot (paling stabil di Chromium headless)
+    const buf = await page
+      .screenshot({
+        type: 'jpeg',
+        quality: 75,
+        animations: 'disabled',
+        caret: 'hide',
+        scale: 'css',
+        timeout: 10000,
+      })
+      .catch(() => null);
+    if (buf && Buffer.isBuffer(buf) && buf.length > 2500) {
+      return `data:image/jpeg;base64,${buf.toString('base64')}`;
     }
-  } catch {}
-  try {
-    const buf = await page.screenshot({ type: 'jpeg', quality: 65, timeout: 3500 });
-    if (buf && buf.length > 1000) return `data:image/jpeg;base64,${buf.toString('base64')}`;
+
+    // Lapis 2: CDP Page.captureScreenshot fallback
+    const client = await page.context().newCDPSession(page).catch(() => null);
+    if (client) {
+      try {
+        const res = (await Promise.race([
+          client.send('Page.captureScreenshot', { format: 'jpeg', quality: 72 }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('CDP_TIMEOUT')), 7000)),
+        ])) as { data?: string };
+        if (res?.data && res.data.length > 3000) {
+          return `data:image/jpeg;base64,${res.data.replace(/\s+/g, '')}`;
+        }
+      } finally {
+        await client.detach().catch(() => {});
+      }
+    }
+
+    // Lapis 3: Body locator fallback
+    const bodyBuf = await page.locator('body').screenshot({
+      type: 'jpeg',
+      quality: 70,
+      timeout: 6000,
+    }).catch(() => null);
+    if (bodyBuf && Buffer.isBuffer(bodyBuf) && bodyBuf.length > 2500) {
+      return `data:image/jpeg;base64,${bodyBuf.toString('base64')}`;
+    }
   } catch {}
   return undefined;
 }
 
-export async function waitForSpaDataReady(page: any, maxWaitMs = 2400): Promise<void> {
+export async function waitForSpaDataReady(
+  page: any,
+  expectedRoutePathOrMaxWait?: string | number,
+  optionalMaxWaitMs?: number
+): Promise<void> {
+  const expectedRoutePath = typeof expectedRoutePathOrMaxWait === 'string' ? expectedRoutePathOrMaxWait : undefined;
+  const maxWaitMs =
+    typeof expectedRoutePathOrMaxWait === 'number'
+      ? expectedRoutePathOrMaxWait
+      : typeof optionalMaxWaitMs === 'number'
+      ? optionalMaxWaitMs
+      : 3500;
+
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
     const ready = await page
-      .evaluate(`(() => {
-        const spinners = document.querySelectorAll('[class*="loading" i], [class*="spinner" i], [class*="skeleton" i], .el-loading-mask, .v-progress-circular');
+      .evaluate(`((expectedPath) => {
+        if (expectedPath && expectedPath !== '/') {
+          const cur = window.location.pathname + window.location.hash;
+          const cleanExp = expectedPath.replace(/^\\//, '').replace(/\\?.*$/, '');
+          if (!cur.toLowerCase().includes(cleanExp.toLowerCase())) {
+            return false;
+          }
+        }
+        const spinners = document.querySelectorAll(
+          '[class*="loading" i], [class*="spinner" i], [class*="skeleton" i], .el-loading-mask, .v-progress-circular'
+        );
         const hasVisibleSpinner = Array.from(spinners).some((el) => {
           const r = el.getBoundingClientRect();
           return r.width > 10 && r.height > 10 && window.getComputedStyle(el).display !== 'none';
         });
+        if (hasVisibleSpinner) return false;
+
+        const mainArea = document.querySelector('main, [role="main"], #__nuxt, #__next, #app, .content');
+        if (mainArea) {
+          const meaningfulEls = mainArea.querySelectorAll('table, form, input, button, h1, h2, h3, [class*="card" i], [role="row"]');
+          if (meaningfulEls.length > 0) return true;
+        }
         const textLen = (document.body?.innerText || '').trim().length;
-        return !hasVisibleSpinner && textLen > 60;
-      })()`)
+        return textLen > 80;
+      })(${JSON.stringify(expectedRoutePath)})`)
       .catch(() => true);
     if (ready) break;
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(200);
   }
-  await page.waitForTimeout(300);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {});
+  await page.evaluate(() => { window.scrollTo(0, 0); }).catch(() => {});
+  await page.waitForTimeout(250);
 }
 
 /**
@@ -664,29 +728,47 @@ export async function runDeepSpaHarvester(
 
       // Lakukan Login Otomatis jika kredensial diberikan
       if (config?.username || config?.password) {
-        if (config.username) {
-          const userInput = await page.$(
-            'input[name*="user" i], input[name*="email" i], input[type="email"], input[type="text"]:not([readonly])'
-          );
-          if (userInput) {
-            await userInput.click({ timeout: 1500 }).catch(() => {});
-            await userInput.fill(config.username).catch(() => {});
-          }
+        // TAHAP 1A: Pilih Tab / Role / Tenant Selector TERLEBIH DAHULU (sebelum mengisi username/password)
+        // Di aplikasi SPA (seperti Nuxt/Vue), berpindah tab merender ulang form dan menghapus input yang telah diisi!
+        const effectiveExtra = { ...(config.extraFields || {}) };
+        if (config.accessRoleOrTenant && !Object.values(effectiveExtra).some(v => String(v).toLowerCase().includes(config.accessRoleOrTenant!.toLowerCase()))) {
+          effectiveExtra['access_role'] = config.accessRoleOrTenant;
         }
-        if (config.password) {
-          const passInput = await page.$('input[type="password"]');
-          if (passInput) {
-            await passInput.click({ timeout: 1500 }).catch(() => {});
-            await passInput.fill(config.password).catch(() => {});
-          }
-        }
-        if (config.extraFields && Object.keys(config.extraFields).length > 0) {
-          for (const [, val] of Object.entries(config.extraFields)) {
+
+        if (Object.keys(effectiveExtra).length > 0) {
+          for (const [, val] of Object.entries(effectiveExtra)) {
             if (!val) continue;
             const rawVal = String(val).trim();
             const cleanVal = rawVal.replace(/\([^)]*\)/g, '').trim();
             const primaryToken = cleanVal.split(/[\s|/,-]+/)[0]?.toLowerCase() || cleanVal.toLowerCase();
 
+            // 1. Coba klik Tab / Tombol Role (Pancaran / External / dsb)
+            const clickedTab = await page
+              .evaluate(`(({ rawVal, cleanVal, primaryToken }) => {
+                const matchTab = (text) => {
+                  const t = (text || '').trim().toLowerCase();
+                  if (!t) return false;
+                  return (
+                    t === rawVal.toLowerCase() ||
+                    t === cleanVal.toLowerCase() ||
+                    (primaryToken.length >= 3 && t.includes(primaryToken))
+                  );
+                };
+                const tabEls = Array.from(document.querySelectorAll('[role="tab"], .el-tabs__item, .v-tab, button, [class*="tab" i]'));
+                const hit = tabEls.find((el) => matchTab(el.textContent) && el.getBoundingClientRect().width > 10);
+                if (hit) {
+                  hit.click();
+                  return true;
+                }
+                return false;
+              })(${JSON.stringify({ rawVal, cleanVal, primaryToken })})`)
+              .catch(() => false);
+
+            if (clickedTab) {
+              await page.waitForTimeout(250);
+            }
+
+            // 2. Coba pilih dropdown / select / combobox jika ada
             await page
               .evaluate(`(({ rawVal, cleanVal, primaryToken }) => {
                 const matchOption = (text, valueAttr = '') => {
@@ -716,7 +798,7 @@ export async function runDeepSpaHarvester(
                 });
               })(${JSON.stringify({ rawVal, cleanVal, primaryToken })})`)
               .catch(() => {});
-            await page.waitForTimeout(350);
+            await page.waitForTimeout(250);
             await page
               .evaluate(`(({ rawVal, cleanVal, primaryToken }) => {
                 const matchOption = (text, valueAttr = '') => {
@@ -740,6 +822,26 @@ export async function runDeepSpaHarvester(
           }
         }
 
+        // TAHAP 1B: Isi Username & Password setelah Tab / Role aktif
+        if (config.username) {
+          const userInput = await page.$(
+            'input[name*="user" i], input[name*="email" i], input[type="email"], input[type="text"]:not([readonly])'
+          );
+          if (userInput) {
+            await userInput.click({ timeout: 1500 }).catch(() => {});
+            await userInput.fill(config.username).catch(() => {});
+          }
+        }
+        if (config.password) {
+          const passInput = await page.$('input[type="password"]');
+          if (passInput) {
+            await passInput.click({ timeout: 1500 }).catch(() => {});
+            await passInput.fill(config.password).catch(() => {});
+          }
+        }
+        await page.waitForTimeout(200);
+
+        // TAHAP 1C: Submit Form
         const submitBtn = await page.$(
           'button[type="submit"], input[type="submit"], button:has-text("Masuk"), button:has-text("Login"), button:has-text("Sign In"), button:has-text("Sign in")'
         );
@@ -1105,20 +1207,26 @@ export async function runDeepSpaHarvester(
               } catch {}
             }
           });
-          for (const sUrl of Array.from(scriptUrls).slice(0, 35)) {
+          const scriptUrlsList = Array.from(scriptUrls).slice(0, 15);
+          for (const sUrl of scriptUrlsList) {
             try {
-              const resp = await fetch(sUrl);
-              const code = await resp.text();
-              const regexes = [
-                /path\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
-                /route\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
-                /to\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
-                /["'](\/[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)+)["']/g
-              ];
-              for (const rx of regexes) {
-                for (const m of code.matchAll(rx)) {
-                  if (m[1] && m[1].length > 1 && !/^\/(api|_nuxt|_next|static|assets|images)/i.test(m[1])) {
-                    collected.add(m[1]);
+              const fetchPromise = fetch(sUrl).then((r) => r.text());
+              const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('timeout')), 2500)
+              );
+              const code = await Promise.race([fetchPromise, timeoutPromise]);
+              if (typeof code === 'string') {
+                const regexes = [
+                  /path\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
+                  /route\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
+                  /to\s*:\s*["'](\/[a-zA-Z0-9_\-/]+)["']/g,
+                  /["'](\/[a-zA-Z0-9_\-]+(?:\/[a-zA-Z0-9_\-]+)+)["']/g
+                ];
+                for (const rx of regexes) {
+                  for (const m of code.matchAll(rx)) {
+                    if (m[1] && m[1].length > 1 && !/^\/(api|_nuxt|_next|static|assets|images)/i.test(m[1])) {
+                      collected.add(m[1]);
+                    }
                   }
                 }
               }
@@ -1128,7 +1236,7 @@ export async function runDeepSpaHarvester(
 
         return Array.from(collected);
       })()`)
-      .catch(() => [ '/home' ]);
+      .catch(() => []);
 
     // 2B. Interactive Sidebar Click-Probe: Untuk item menu di sidebar yang tidak memiliki atribut href (hanya @click Vue/React)
     const clickDiscoveredRoutes: string[] = [];
@@ -1189,13 +1297,18 @@ export async function runDeepSpaHarvester(
       if (isStaticFileOrAsset(r)) return false;
       if (/^\/(login|signin|sign-in|logout|signout|keluar)$/i.test(r)) return false;
       if (r.includes(':') || r.includes('[') || r.includes('*')) return false;
-      // Jika ada /home atau /dashboard di dalam daftar rute, lewati rute '/' agar tidak dipindai dua kali
+      // Jangan pernah masukkan /home hardcoded atau halaman not found
+      if (r === '/home') return false;
+      // Jika ada /dashboard di dalam daftar rute, lewati rute '/' agar tidak dipindai dua kali
       if (r === '/' && hasDashboardOrHome) return false;
       return true;
     });
 
     // Pastikan jika ada rute selain '/', kita memprioritaskan rute fitur nyata
-    const routesToVisit = allCandidateRoutes.length > 0 ? allCandidateRoutes.slice(0, 40) : ['/home'];
+    const currentPostLoginPath = normalizeRoutePath(await page.evaluate(`window.location.pathname + window.location.hash`).catch(() => '/'));
+    const safeFallbackRoute = currentPostLoginPath && currentPostLoginPath !== '/login' && currentPostLoginPath !== '/home' ? currentPostLoginPath : '/';
+
+    const routesToVisit = allCandidateRoutes.length > 0 ? allCandidateRoutes.slice(0, 40) : [safeFallbackRoute];
 
     // Deteksi apakah target menggunakan Hash-Mode SPA Routing (e.g. /#/route atau #/route)
     const usesHashRouter = rawUrl.includes('#/') || (await page.evaluate(`Boolean(window.location.hash.startsWith('#/'))`).catch(() => false));
@@ -1204,6 +1317,10 @@ export async function runDeepSpaHarvester(
     // TAHAP 3: KUNJUNGI SETIAP RUTE FITUR & GREP SEMUA ELEMEN (TOMBOL, FILTER, SUB-TAB, MODAL, TABEL, KARTU & SCREENSHOT)
     // ------------------------------------------------------------------------
     for (let idx = 0; idx < routesToVisit.length; idx++) {
+      if (Date.now() - startTime >= 75000) {
+        console.warn(`[DeepSpaHarvester] Global time budget (75s) reached at route ${idx}/${routesToVisit.length}. Gracefully finalizing and returning harvested data.`);
+        break;
+      }
       const routePath = routesToVisit[idx];
       const fullPageUrl = usesHashRouter ? `${origin}/#${routePath}` : `${origin}${routePath}`;
       activeRouteApis = [];
@@ -1276,7 +1393,7 @@ export async function runDeepSpaHarvester(
               await page.goto(fullPageUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
             }
 
-            await waitForSpaDataReady(page, 2000);
+            await waitForSpaDataReady(page, routePath, 3500);
           })(),
           new Promise((_, reject) => setTimeout(() => reject(new Error('PAGE_NAVIGATION_TIMEOUT')), 14000)),
         ]).catch((timeoutErr) => {
@@ -1320,10 +1437,13 @@ export async function runDeepSpaHarvester(
           }
         }
 
-        // 1. Potret Screenshot Bersih via CDP SEBELUM membuka modal
+        // 1. Pastikan scroll di (0, 0) sebelum potret dan ekstrak koordinat DOM
+        await page.evaluate(() => { window.scrollTo(0, 0); }).catch(() => {});
+
+        // 2. Potret Screenshot Bersih via CDP SEBELUM membuka modal
         const cleanScreenshot = await captureInstantCdpScreenshot(page);
 
-        // 2. Ekstrak seluruh permukaan halaman utama
+        // 3. Ekstrak seluruh permukaan halaman utama
         const domSurface = await page
           .evaluate(`(() => {
             const heading =
@@ -1331,23 +1451,37 @@ export async function runDeepSpaHarvester(
               document.title ||
               window.location.pathname;
 
-            const buttons = [];
+            const bodySnippet = (document.body?.innerText || '').slice(0, 600);
+
+            const contentButtons = [];
+            const headerNavButtons = [];
             document.querySelectorAll('button, a[role="button"], [class*="btn" i]').forEach((b) => {
               const txt = (b.textContent || b.getAttribute('aria-label') || b.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
               const r = b.getBoundingClientRect();
               if (txt && txt.length >= 2 && txt.length <= 50 && r.width > 16 && r.height > 14) {
-                if (!buttons.some((x) => x.name.toLowerCase() === txt.toLowerCase())) {
-                  buttons.push({
-                    name: txt,
-                    loc: r.top < 95 ? 'Header / Top Bar' : r.left < 250 ? 'Sidebar Navigation' : 'Toolbar & Area Konten',
-                    xPercent: Math.round(Math.min(94, Math.max(6, ((r.left + r.width / 2) / window.innerWidth) * 100))),
-                    yPercent: Math.round(Math.min(94, Math.max(6, ((r.top + r.height / 2) / window.innerHeight) * 100)))
-                  });
+                const isGlobalHeader = r.top < 72;
+                const item = {
+                  name: txt,
+                  loc: isGlobalHeader ? 'Header / Top Bar' : r.left < 200 ? 'Sidebar Navigation' : 'Toolbar & Area Konten',
+                  xPercent: Math.round(Math.min(94, Math.max(6, ((r.left + r.width / 2) / window.innerWidth) * 100))),
+                  yPercent: Math.round(Math.min(94, Math.max(6, ((r.top + r.height / 2) / window.innerHeight) * 100)))
+                };
+                if (isGlobalHeader) {
+                  if (headerNavButtons.length < 2 && !headerNavButtons.some((x) => x.name.toLowerCase() === txt.toLowerCase())) {
+                    headerNavButtons.push(item);
+                  }
+                } else {
+                  if (!contentButtons.some((x) => x.name.toLowerCase() === txt.toLowerCase())) {
+                    contentButtons.push(item);
+                  }
                 }
               }
             });
+            // Prioritaskan tombol konten utama di depan, header global maksimal 2 di belakang
+            const buttons = [...contentButtons, ...headerNavButtons];
 
-            const inputs = [];
+            const mainInputs = [];
+            const otherInputs = [];
             document.querySelectorAll('input:not([type="hidden"]), select, textarea, [role="combobox"]').forEach((inp, idx) => {
               const r = inp.getBoundingClientRect();
               if (r.width < 14 || r.height < 12) return;
@@ -1363,23 +1497,28 @@ export async function runDeepSpaHarvester(
                 ? Array.from(inp.querySelectorAll('option')).map((o) => o.textContent.trim()).filter(Boolean).join(', ')
                 : '';
               const cleanLabel = label.replace(/\s+/g, ' ').slice(0, 55);
-              if (!inputs.some((x) => x.name.toLowerCase() === cleanLabel.toLowerCase())) {
-                inputs.push({
-                  rawName: inp.getAttribute('name') || ('field_' + (idx + 1)),
-                  name: cleanLabel,
-                  controlType: isSelect
-                    ? 'FILTER_CONTROL'
-                    : inp.getAttribute('type') === 'search' || /cari|search|filter/i.test(cleanLabel)
-                    ? 'SEARCH_INPUT'
-                    : 'MODAL_FORM_INPUT',
-                  inputType: isSelect ? 'select' : (inp.getAttribute('type') || 'text'),
-                  sample: opts || inp.getAttribute('placeholder') || cleanLabel,
-                  required: inp.hasAttribute('required') || inp.getAttribute('aria-required') === 'true',
-                  xPercent: Math.round(Math.min(94, Math.max(6, ((r.left + r.width / 2) / window.innerWidth) * 100))),
-                  yPercent: Math.round(Math.min(94, Math.max(6, ((r.top + r.height / 2) / window.innerHeight) * 100)))
-                });
+              const isMain = r.top >= 72;
+              const inputItem = {
+                rawName: inp.getAttribute('name') || ('field_' + (idx + 1)),
+                name: cleanLabel,
+                controlType: isSelect
+                  ? 'FILTER_CONTROL'
+                  : inp.getAttribute('type') === 'search' || /cari|search|filter/i.test(cleanLabel)
+                  ? 'SEARCH_INPUT'
+                  : 'MODAL_FORM_INPUT',
+                inputType: isSelect ? 'select' : (inp.getAttribute('type') || 'text'),
+                sample: opts || inp.getAttribute('placeholder') || cleanLabel,
+                required: inp.hasAttribute('required') || inp.getAttribute('aria-required') === 'true',
+                xPercent: Math.round(Math.min(94, Math.max(6, ((r.left + r.width / 2) / window.innerWidth) * 100))),
+                yPercent: Math.round(Math.min(94, Math.max(6, ((r.top + r.height / 2) / window.innerHeight) * 100)))
+              };
+              if (isMain) {
+                if (!mainInputs.some((x) => x.name.toLowerCase() === cleanLabel.toLowerCase())) mainInputs.push(inputItem);
+              } else {
+                if (!otherInputs.some((x) => x.name.toLowerCase() === cleanLabel.toLowerCase())) otherInputs.push(inputItem);
               }
             });
+            const inputs = [...mainInputs, ...otherInputs];
 
             const cols = Array.from(document.querySelectorAll('table th, [role="columnheader"], .el-table__header th, .v-data-table th'))
               .map((th) => (th.textContent || '').replace(/\s+/g, ' ').trim())
@@ -1410,9 +1549,23 @@ export async function runDeepSpaHarvester(
               .map((t) => (t.textContent || '').replace(/\s+/g, ' ').trim())
               .filter((t) => t.length >= 2 && t.length <= 45);
 
-            return { heading, buttons, inputs, cols, rows, cards, tabNames: Array.from(new Set(tabNames)) };
+            return { heading, bodySnippet, buttons, inputs, cols, rows, cards, tabNames: Array.from(new Set(tabNames)) };
           })()`)
-          .catch(() => ({ heading: routePath, buttons: [], inputs: [], cols: [], rows: [], cards: [], tabNames: [] }));
+          .catch(() => ({ heading: routePath, bodySnippet: '', buttons: [], inputs: [], cols: [], rows: [], cards: [], tabNames: [] }));
+
+        // Deteksi halaman 404 / Halaman Tidak Ditemukan / Not Found
+        const headingAndTitle = `${domSurface.heading || ''} ${await page.title().catch(() => '')} ${domSurface.bodySnippet || ''}`;
+        const is404NotFound = /halaman tidak ditemukan|404\s*not\s*found|page\s*not\s*found|tidak\s*ditemukan|error\s*404/i.test(headingAndTitle);
+        if (is404NotFound || routePath === '/home') {
+          console.warn(`[DeepSpaHarvester] Skipping 404 / Not Found page at ${routePath}: "${headingAndTitle.slice(0, 80)}"`);
+          continue;
+        }
+
+        // Jika rute '/' hanya redirect shell dengan kontrol <= 2 generik dan sudah ada modul lain
+        if (routePath === '/' && featureModules.length > 0 && domSurface.buttons.length <= 2 && domSurface.inputs.length === 0 && domSurface.cols.length === 0) {
+          console.warn(`[DeepSpaHarvester] Skipping empty redirect shell '/'`);
+          continue;
+        }
 
         // 3. Klik setiap Sub-Tab untuk menyedot kolom/kartu/tombol di dalam sub-tab tersebut
         const subTabsCatalog = [];
@@ -1645,6 +1798,25 @@ export async function runDeepSpaHarvester(
       } finally {
         page.off('pageerror', pageErrorHandler);
         page.off('console', consoleErrorHandler);
+      }
+    }
+
+    // Wajib Verifikasi & Retry Semua Modul Sebelum browser.close()
+    for (const mod of featureModules) {
+      if (!mod.screenshotDataUrl || !mod.screenshotDataUrl.startsWith('data:image/') || mod.screenshotDataUrl.length < 3000) {
+        try {
+          console.warn(`[DeepSpaHarvester] Retrying missing/broken screenshot on ${mod.moduleId} (${mod.routePath})...`);
+          await page.goto(mod.fullUrl, { waitUntil: 'networkidle', timeout: 12000 }).catch(() =>
+            page.goto(mod.fullUrl, { waitUntil: 'domcontentloaded', timeout: 10000 })
+          );
+          await waitForSpaDataReady(page, mod.routePath, 3500);
+          const retriedShot = await captureInstantCdpScreenshot(page);
+          if (retriedShot && retriedShot.startsWith('data:image/') && retriedShot.length >= 3000) {
+            mod.screenshotDataUrl = retriedShot;
+          }
+        } catch (retryErr: any) {
+          console.warn(`[DeepSpaHarvester] Screenshot retry failed on ${mod.routePath}:`, retryErr?.message);
+        }
       }
     }
 

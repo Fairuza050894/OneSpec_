@@ -105,6 +105,8 @@ export interface FieldValidationSpec {
   exactUiErrorString?: string; // e.g. "Amount must be a positive non-zero value"
 }
 
+export type RequirementProvenance = 'SOURCE_REQUIREMENT' | 'AS_BUILT_DISCOVERED';
+
 export interface ValidationRuleContract {
   ruleId: string; // "VR-01"
   userStoryId: string; // "REQ-US-01"
@@ -116,6 +118,7 @@ export interface ValidationRuleContract {
   exactUiErrorString: string;
   moduleName?: string;
   pagePath?: string;
+  provenance?: RequirementProvenance;
 }
 
 export interface BrdMatrixRow {
@@ -127,6 +130,7 @@ export interface BrdMatrixRow {
   priority: BusinessRulePriority;
   complianceReference?: string;
   moduleName?: string;
+  provenance?: RequirementProvenance;
 }
 
 export interface HttpContractSpec {
@@ -164,6 +168,7 @@ export interface UserStory {
   httpContracts: HttpContractSpec[];
   createdAt: string | Date;
   updatedAt: string | Date;
+  provenance?: RequirementProvenance;
 
   // Traceability links
   businessRule?: BusinessRule | null;
@@ -401,6 +406,10 @@ export interface LoginSurfaceProbeResult {
   detectedSelects: DetectedLoginSelect[];
   detectedInputs: DetectedLoginInput[];
   submitButton: DetectedSubmitButton | null;
+  tabs?: DetectedLoginTab[];
+  dropdowns?: DetectedLoginSelect[];
+  selects?: DetectedLoginSelect[];
+  inputs?: DetectedLoginInput[];
 }
 
 export interface AutoRobotFieldValue {
@@ -496,12 +505,33 @@ export interface VisualCalloutPinItem {
   summary: string;
 }
 
+export interface ReleaseAuditSignatureRecord {
+  signatureId: string;
+  approverName: string;
+  approverRole: string;
+  signedAt: string; // ISO-8601
+  snapshotHash: string; // SHA-256
+  releaseGateStatus: string;
+  approvalNotes: string;
+  operatorSessionId?: string;
+  prerequisitesChecked: string[];
+}
+
 export interface ReleaseSignOffCertificate {
   status: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL';
   approvedBy: string;
   roleTitle: string;
   releaseNotes: string;
   signedAt: string;
+  snapshotHash?: string;
+  releaseGateStatus?: string;
+  prerequisitesChecked?: string[];
+  operatorSessionId?: string;
+  auditSignatures?: ReleaseAuditSignatureRecord[];
+  isApproved?: boolean;
+  approvedAt?: string;
+  approverRole?: string;
+  notes?: string;
 }
 
 export interface FeatureModuleSurface {
@@ -748,7 +778,10 @@ export type GapAuditVerdict =
   | 'COMPLIANT'
   | 'MISSING_IN_BACKEND'
   | 'UNDOCUMENTED_SHADOW_API'
-  | 'SCHEMA_TYPE_MISMATCH';
+  | 'SCHEMA_TYPE_MISMATCH'
+  | 'MISSING_IMPLEMENTATION'
+  | 'UNDOCUMENTED_SHADOW_FEATURE'
+  | 'VERIFIED_MATCH';
 
 export interface DefectTicketPayload {
   ticketId: string;
@@ -788,8 +821,13 @@ export interface GapAuditSummary {
   missingInBackendCount: number;
   shadowApiCount: number;
   schemaMismatchCount: number;
+  missingImplementationCount?: number;
+  undocumentedShadowCount?: number;
+  verifiedMatchCount?: number;
   complianceRatePercent: number;
   auditTimestamp: string;
+  isZeroDocMode?: boolean;
+  hasSourceRequirements?: boolean;
 }
 
 /* =========================================================================
@@ -914,6 +952,7 @@ export interface K6MetricSummary {
   totalRequests: number;
   throughputRps: number;
   errorRatePercent: number;
+  provenance?: 'EMPIRICAL_K6' | 'HTTP_CONCURRENCY_PROBE' | 'ESTIMATED';
   latency: K6LatencyPercentiles;
   thresholds: {
     httpReqFailedPass: boolean;

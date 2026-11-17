@@ -50,6 +50,7 @@ import type {
   TestSuiteExecutionTrace,
   VisualCalloutPinItem,
   ReleaseSignOffCertificate,
+  ReleaseAuditSignatureRecord,
 } from '@/types/sdlc';
 import type { SynthesizedRtmRow } from '@/services/rtmSynthesizer';
 import type { OwaspDastAssessmentSummary } from '@/services/owaspDastService';
@@ -72,8 +73,8 @@ import { ModuleScreenshot } from '@/components/shared/ModuleScreenshot';
 import { sanitizeFeatureModuleScreenshots } from '@/lib/featureModuleScreenshotSanitizer';
 import { detectBlankRasterDataUrl } from '@/lib/screenshotQuality';
 
-function normalizeManualImgSrc(raw?: string | null): string {
-  if (!raw) return '/api/manual-assets/placeholder.png';
+function normalizeManualImgSrc(raw?: string | null, fallback = ''): string {
+  if (!raw) return fallback;
   const s = String(raw).trim();
   if (s.startsWith('data:image/')) {
     if (s.startsWith('data:image/svg+xml;utf8,')) {
@@ -88,14 +89,7 @@ function normalizeManualImgSrc(raw?: string | null): string {
   if (s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
     return s;
   }
-  if (s.startsWith('/api/manual-assets/')) return s;
-  const cleaned = s
-    .replace(/\\/g, '/')
-    .replace(/^\.\//, '')
-    .replace(/^\//, '')
-    .replace(/^public\//, '')
-    .replace(/^(uploads|screenshots|manual-images)\//, '');
-  return `/api/manual-assets/${cleaned}`;
+  return fallback;
 }
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
@@ -205,9 +199,15 @@ export function UniversalKnowledgeGraphWorkbench({
   const [draftPinsByRoute, setDraftPinsByRoute] = useState<Record<string, VisualCalloutPinItem[]>>({});
   const [newPinLabel, setNewPinLabel] = useState<string>('');
   const [newPinKind, setNewPinKind] = useState<'BUTTON' | 'FILTER' | 'SUB_TAB'>('BUTTON');
-  const [signOffApprover, setSignOffApprover] = useState<string>(compiledState?.releaseSignOff?.approvedBy || '');
-  const [signOffRole, setSignOffRole] = useState<string>(compiledState?.releaseSignOff?.roleTitle || 'Lead QA & BA Architect');
-  const [signOffNotes, setSignOffNotes] = useState<string>(compiledState?.releaseSignOff?.releaseNotes || '');
+  const [operatorSessionId] = useState<string>(() => `OP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
+  const [signOffApprover, setSignOffApprover] = useState<string>(compiledState?.releaseSignOff?.approvedBy || 'Principal Lead Architect');
+  const [signOffRole, setSignOffRole] = useState<string>(
+    compiledState?.releaseSignOff?.approverRole || compiledState?.releaseSignOff?.roleTitle || 'Lead Systems Architect'
+  );
+  const [signOffNotes, setSignOffNotes] = useState<string>(compiledState?.releaseSignOff?.notes || compiledState?.releaseSignOff?.releaseNotes || '');
+  const [chkQaGapReviewed, setChkQaGapReviewed] = useState<boolean>(true);
+  const [chkZeroCriticalSec, setChkZeroCriticalSec] = useState<boolean>(true);
+  const [isSigning, setIsSigning] = useState<boolean>(false);
   const [copiedSdk, setCopiedSdk] = useState<boolean>(false);
 
   const handleCopySdk = () => {
@@ -920,61 +920,249 @@ export function UniversalKnowledgeGraphWorkbench({
                 ))}
               </div>
             </div>
-            {/* Release Gate Sign-Off Certificate Lock */}
-            <div className="bg-[#111317] border border-[#22262E] rounded-[4px] p-3.5 space-y-2.5 font-mono text-[11px]">
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#22262E]">
+            {/* Release Gate Sign-Off Certificate Lock (ISO 9001 Clause 7.5) */}
+            <div className="bg-[#111317] border border-[#22262E] rounded-[4px] p-4 space-y-3 font-mono text-[11px]">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#22262E]">
                 <div className="flex items-center gap-2 font-bold text-[#EDEDED]">
                   <CheckCircle2 className="h-4 w-4 text-[#10B981]" />
                   <span>
                     {locale === 'id'
-                      ? 'Sertifikat Persetujuan Rilis (Release Gate Sign-Off Lock)'
-                      : 'Release Gate Sign-Off Approval Certificate'}
+                      ? 'Sertifikat Persetujuan Rilis (Release Gate Sign-Off Lock — ISO 9001:2015 Klausul 7.5)'
+                      : 'Release Gate Sign-Off Approval Certificate (ISO 9001:2015 Clause 7.5)'}
                   </span>
                 </div>
-                {compiledState?.releaseSignOff && (
-                  <span className="px-2 py-0.5 bg-[#059669]/20 border border-[#059669]/50 text-[#10B981] font-bold rounded-[2px] text-[10px]">
-                    {compiledState.releaseSignOff.status} · {new Date(compiledState.releaseSignOff.signedAt).toLocaleString()}
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-[#1F2937] border border-[#374151] text-[#9CA3AF] text-[10px] font-mono rounded-[2px]">
+                    Session: <strong className="text-[#EDEDED]">{operatorSessionId}</strong>
                   </span>
-                )}
+                  {compiledState?.releaseSignOff && (
+                    <span className="px-2 py-0.5 bg-[#059669]/20 border border-[#059669]/50 text-[#10B981] font-bold rounded-[2px] text-[10px]">
+                      {compiledState.releaseSignOff.status || compiledState.releaseSignOff.releaseGateStatus} · {new Date(compiledState.releaseSignOff.signedAt || compiledState.releaseSignOff.approvedAt || Date.now()).toLocaleString()}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  value={signOffApprover}
-                  onChange={(e) => setSignOffApprover(e.target.value)}
-                  placeholder={locale === 'id' ? 'Nama Approver (mis. Budi Santoso)' : 'Approver Name'}
-                  className="flex-1 min-w-[140px] h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
-                />
-                <input
-                  type="text"
-                  value={signOffRole}
-                  onChange={(e) => setSignOffRole(e.target.value)}
-                  placeholder={locale === 'id' ? 'Peran / Jabatan' : 'Role / Title'}
-                  className="flex-1 min-w-[140px] h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
-                />
-                <input
-                  type="text"
-                  value={signOffNotes}
-                  onChange={(e) => setSignOffNotes(e.target.value)}
-                  placeholder={locale === 'id' ? 'Catatan persetujuan rilis produksi...' : 'Release sign-off notes...'}
-                  className="flex-[1.5] min-w-[180px] h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
-                />
+
+              {/* Operator Identity & Role Inputs */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                <div className="md:col-span-3">
+                  <label className="text-[10px] text-[#707070] uppercase font-bold block mb-1">
+                    {locale === 'id' ? 'Nama Operator / Approver *' : 'Operator / Approver Name *'}
+                  </label>
+                  <input
+                    type="text"
+                    value={signOffApprover}
+                    onChange={(e) => setSignOffApprover(e.target.value)}
+                    placeholder={locale === 'id' ? 'mis. Budi Santoso' : 'e.g. John Doe'}
+                    className="w-full h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="text-[10px] text-[#707070] uppercase font-bold block mb-1">
+                    {locale === 'id' ? 'Peran / Jabatan Otoritas *' : 'Authority Role *'}
+                  </label>
+                  <select
+                    value={signOffRole}
+                    onChange={(e) => setSignOffRole(e.target.value)}
+                    className="w-full h-8 px-2 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer"
+                  >
+                    <option value="Lead Systems Architect">Lead Systems Architect</option>
+                    <option value="Lead QA / SDET">Lead QA / SDET</option>
+                    <option value="Release Manager">Release Manager</option>
+                    <option value="DevSecOps Lead">DevSecOps Lead</option>
+                    <option value="Compliance / GRC Officer">Compliance / GRC Officer</option>
+                  </select>
+                </div>
+                <div className="md:col-span-6">
+                  <label className="text-[10px] text-[#707070] uppercase font-bold block mb-1">
+                    {locale === 'id' ? 'Catatan & Justifikasi Persetujuan' : 'Approval Justification Notes'}
+                  </label>
+                  <input
+                    type="text"
+                    value={signOffNotes}
+                    onChange={(e) => setSignOffNotes(e.target.value)}
+                    placeholder={locale === 'id' ? 'Catatan persetujuan rilis produksi...' : 'Release sign-off notes...'}
+                    className="w-full h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
+                  />
+                </div>
+              </div>
+
+              {/* Gating Prerequisites Checklist */}
+              <div className="p-2.5 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-4 text-[10px]">
+                  <span className="font-bold text-[#A1A1A1] uppercase tracking-wider">
+                    {locale === 'id' ? 'Prasyarat Gating:' : 'Gating Prerequisites:'}
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[#EDEDED] hover:text-white">
+                    <input
+                      type="checkbox"
+                      checked={chkQaGapReviewed}
+                      onChange={(e) => setChkQaGapReviewed(e.target.checked)}
+                      className="rounded bg-[#16191F] border-[#22262E] text-[#10B981] focus:ring-0"
+                    />
+                    <span>{locale === 'id' ? 'Metrik QA & Gap Audit telah ditinjau' : 'QA Metrics & Gap Audit Reviewed'}</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer text-[#EDEDED] hover:text-white">
+                    <input
+                      type="checkbox"
+                      checked={chkZeroCriticalSec}
+                      onChange={(e) => setChkZeroCriticalSec(e.target.checked)}
+                      className="rounded bg-[#16191F] border-[#22262E] text-[#10B981] focus:ring-0"
+                    />
+                    <span>{locale === 'id' ? 'Temuan keamanan kritis = 0' : 'Critical Security Findings = 0'}</span>
+                  </label>
+                </div>
+
                 <button
                   type="button"
-                  onClick={() => {
-                    onApproveReleaseSignOff?.({
-                      status: 'APPROVED_FOR_PRODUCTION',
-                      approvedBy: signOffApprover.trim() || 'Authorized Release Lead',
-                      roleTitle: signOffRole.trim() || 'Lead QA & BA Architect',
-                      releaseNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
-                      signedAt: new Date().toISOString(),
-                    });
+                  disabled={!signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning}
+                  onClick={async () => {
+                    setIsSigning(true);
+                    try {
+                      let snapshotHash = '';
+                      try {
+                        const hashPayload = JSON.stringify({
+                          appName: compiledState?.appName,
+                          targetUrl: compiledState?.targetUrl,
+                          totalCases: compiledState?.rtmRows?.length,
+                          modules: compiledState?.discoveredModules?.length,
+                          apis: compiledState?.discoveryResult?.apiEndpoints?.length,
+                          timestamp: new Date().toISOString(),
+                        });
+                        const msgUint8 = new TextEncoder().encode(hashPayload);
+                        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+                        const hashArray = Array.from(new Uint8Array(hashBuffer));
+                        snapshotHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+                      } catch {
+                        snapshotHash = `SHA256-${Date.now().toString(16)}`;
+                      }
+
+                      const nowIso = new Date().toISOString();
+                      const prereqs: string[] = [];
+                      if (chkQaGapReviewed) prereqs.push('QA_AND_GAP_AUDIT_REVIEWED');
+                      if (chkZeroCriticalSec) prereqs.push('ZERO_CRITICAL_SECURITY_FINDINGS');
+
+                      const newSig: ReleaseAuditSignatureRecord = {
+                        signatureId: `SIG-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+                        approverName: signOffApprover.trim(),
+                        approverRole: signOffRole,
+                        signedAt: nowIso,
+                        snapshotHash,
+                        releaseGateStatus: 'APPROVED_FOR_PRODUCTION',
+                        approvalNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
+                        operatorSessionId,
+                        prerequisitesChecked: prereqs,
+                      };
+
+                      const existingSigs = compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || [];
+                      const updatedSigs = [newSig, ...existingSigs];
+
+                      onApproveReleaseSignOff?.({
+                        isApproved: true,
+                        status: 'APPROVED_FOR_PRODUCTION',
+                        approvedBy: signOffApprover.trim(),
+                        approverRole: signOffRole,
+                        roleTitle: signOffRole,
+                        notes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
+                        releaseNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
+                        approvedAt: nowIso,
+                        signedAt: nowIso,
+                        snapshotHash,
+                        releaseGateStatus: 'APPROVED_FOR_PRODUCTION',
+                        operatorSessionId,
+                        prerequisitesChecked: prereqs,
+                        auditSignatures: updatedSigs,
+                      });
+                    } finally {
+                      setIsSigning(false);
+                    }
                   }}
-                  className="h-8 px-3.5 bg-[#059669] hover:bg-[#047857] text-white font-bold rounded-[3px] cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0"
+                  className={`h-8 px-4 rounded-[3px] font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors ${
+                    !signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning
+                      ? 'bg-[#1E293B] text-[#64748B] cursor-not-allowed border border-[#334155]'
+                      : 'bg-[#059669] hover:bg-[#047857] text-white cursor-pointer'
+                  }`}
                 >
                   <Check className="h-3.5 w-3.5" />
-                  <span>{locale === 'id' ? 'Kunci & Setujui Rilis' : 'Lock Release Sign-Off'}</span>
+                  <span>
+                    {isSigning
+                      ? 'Signing SHA-256...'
+                      : locale === 'id'
+                      ? 'Kunci & Setujui Rilis'
+                      : 'Lock Release Sign-Off'}
+                  </span>
                 </button>
+              </div>
+
+              {/* Riwayat Tanda Tangan Audit (ISO 9001:2015 Klausul 7.5) */}
+              <div className="pt-2">
+                <div className="flex items-center justify-between pb-1.5">
+                  <span className="text-[10px] font-bold text-[#A1A1A1] uppercase tracking-wider">
+                    {locale === 'id'
+                      ? 'Riwayat Tanda Tangan Audit (ISO 9001:2015 Klausul 7.5)'
+                      : 'Audit Signature Ledger (ISO 9001:2015 Clause 7.5)'}
+                  </span>
+                  <span className="text-[10px] text-[#707070]">
+                    {(compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || []).length} Records
+                  </span>
+                </div>
+                <div className="border border-[#22262E] rounded-[3px] overflow-hidden max-h-48 overflow-y-auto">
+                  <table className="w-full text-left font-mono text-[10px] border-collapse">
+                    <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0">
+                      <tr className="h-6">
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">Timestamp</th>
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">Approver & Role</th>
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">Status</th>
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">SHA-256 Snapshot Hash</th>
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">Session ID</th>
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">Prerequisites</th>
+                        <th className="px-2.5 py-1 font-semibold text-[#A1A1A1]">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#22262E] bg-[#0E1015]">
+                      {(compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-3 py-3 text-center text-[#707070] italic">
+                            {locale === 'id'
+                              ? 'Belum ada tanda tangan audit tercatat untuk rilis ini.'
+                              : 'No digital audit signatures recorded for this release yet.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        (compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || []).map((sig, idx) => (
+                          <tr key={sig.signatureId || idx} className="hover:bg-[#16191F]/50 transition-colors">
+                            <td className="px-2.5 py-1.5 text-[#EDEDED] whitespace-nowrap">
+                              {new Date(sig.signedAt).toLocaleString()}
+                            </td>
+                            <td className="px-2.5 py-1.5 whitespace-nowrap">
+                              <span className="font-bold text-[#EDEDED]">{sig.approverName}</span>
+                              <span className="text-[#707070] ml-1">({sig.approverRole})</span>
+                            </td>
+                            <td className="px-2.5 py-1.5 whitespace-nowrap">
+                              <span className="px-1.5 py-0.2 bg-[#059669]/20 border border-[#059669]/40 text-[#10B981] font-bold rounded-[2px] text-[9px]">
+                                {sig.releaseGateStatus}
+                              </span>
+                            </td>
+                            <td className="px-2.5 py-1.5 text-[#60A5FA] font-mono text-[9px] whitespace-nowrap" title={sig.snapshotHash}>
+                              {sig.snapshotHash ? `${sig.snapshotHash.slice(0, 16)}...` : 'N/A'}
+                            </td>
+                            <td className="px-2.5 py-1.5 text-[#9CA3AF] whitespace-nowrap">
+                              {sig.operatorSessionId || 'N/A'}
+                            </td>
+                            <td className="px-2.5 py-1.5 text-[#10B981] whitespace-nowrap">
+                              {Array.isArray(sig.prerequisitesChecked) && sig.prerequisitesChecked.length >= 2
+                                ? '✓ QA & Zero Sec'
+                                : '✓ Verified'}
+                            </td>
+                            <td className="px-2.5 py-1.5 text-[#A1A1A1] max-w-xs truncate" title={sig.approvalNotes}>
+                              {sig.approvalNotes || '—'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
             {/* Change Request (CR) & Blast-Radius Impact Simulator (Step 12) */}
@@ -1383,9 +1571,13 @@ export function UniversalKnowledgeGraphWorkbench({
                           manual?.section3_ButtonsAndIconsDictionary.buttons || [],
                           manual?.section4_SearchAndFiltersDictionary.filters || []
                         );
-                        const screenshotSrc = isBlankOrMissingScreenshot(guide.screenshotDataUrl)
-                          ? blueprintDataUrl
-                          : guide.screenshotDataUrl;
+                        const rawShot = guide.screenshotDataUrl || manual?.screenshotDataUrl;
+                        const hasValidCapture =
+                          typeof rawShot === 'string' &&
+                          rawShot.startsWith('data:image/') &&
+                          rawShot.length > 2500 &&
+                          !isBlankOrMissingScreenshot(rawShot);
+                        const screenshotSrc = hasValidCapture ? rawShot : blueprintDataUrl;
                         return (
                           <div key={`${guide.routePath}-${idx}`} className="p-4 bg-[#111317] border border-[#22262E] rounded-[4px] space-y-3.5">
                             {/* Module Header & Status */}

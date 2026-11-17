@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { workspaceVaultService, type VaultProjectType } from '@/services/workspaceVaultService';
 import type { CompiledSdlcState } from '@/services/sdlcCompiler';
+import type { ReleaseAuditSignatureRecord } from '@/types/sdlc';
 
 export async function GET(req: NextRequest) {
   try {
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
-      action?: 'SAVE_PROJECT' | 'CREATE_SNAPSHOT';
+      action?: 'SAVE_PROJECT' | 'CREATE_SNAPSHOT' | 'APPEND_AUDIT_SIGNATURE';
       projectId?: string;
       projectName?: string;
       targetUrl?: string;
@@ -35,7 +36,29 @@ export async function POST(req: NextRequest) {
       compiledState?: CompiledSdlcState;
       createSnapshot?: boolean;
       versionLabel?: string;
+      signature?: ReleaseAuditSignatureRecord;
     };
+
+    if (body.action === 'APPEND_AUDIT_SIGNATURE') {
+      if (!body.projectId || !body.signature) {
+        return NextResponse.json(
+          { success: false, error: 'projectId and signature are required for APPEND_AUDIT_SIGNATURE' },
+          { status: 400 }
+        );
+      }
+      const saved = workspaceVaultService.appendAuditSignature(body.projectId, body.signature);
+      if (!saved) {
+        return NextResponse.json(
+          { success: false, error: `Project "${body.projectId}" not found in vault` },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({
+        success: true,
+        data: saved,
+        projects: workspaceVaultService.listProjects(),
+      });
+    }
 
     if (!body?.compiledState) {
       return NextResponse.json(

@@ -1862,7 +1862,7 @@ export class ${clientClassName} {
     customHeaders?: Record<string, string>
   ): Promise<T> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeoutId = setTimeout(() => controller.abort(new Error('Architecture deconstruction timeout')), this.timeoutMs);
 
     try {
       const headers: Record<string, string> = {

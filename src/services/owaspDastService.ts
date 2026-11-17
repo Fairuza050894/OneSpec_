@@ -115,7 +115,7 @@ export class OwaspDastService {
     // 1. Fetch real server headers via lightweight HEAD/GET request (4000ms timeout)
     try {
       const abortCtrl = new AbortController();
-      const timer = setTimeout(() => abortCtrl.abort(), 4000);
+      const timer = setTimeout(() => abortCtrl.abort(new Error('Probe timeout')), 4000);
       let headRes = await fetch(params.targetUrl, {
         method: 'HEAD',
         signal: abortCtrl.signal,
@@ -124,7 +124,7 @@ export class OwaspDastService {
 
       if (!headRes || !headRes.ok) {
         const getCtrl = new AbortController();
-        const getTimer = setTimeout(() => getCtrl.abort(), 4000);
+        const getTimer = setTimeout(() => getCtrl.abort(new Error('Probe timeout')), 4000);
         headRes = await fetch(params.targetUrl, {
           method: 'GET',
           signal: getCtrl.signal,
@@ -156,7 +156,7 @@ export class OwaspDastService {
       try {
         const probeTarget = new URL(protectedEp.path, params.targetUrl).toString();
         const probeCtrl = new AbortController();
-        const probeTimer = setTimeout(() => probeCtrl.abort(), 4000);
+        const probeTimer = setTimeout(() => probeCtrl.abort(new Error('Probe timeout')), 4000);
         const probeRes = await fetch(probeTarget, {
           method: protectedEp.method || 'GET',
           signal: probeCtrl.signal,

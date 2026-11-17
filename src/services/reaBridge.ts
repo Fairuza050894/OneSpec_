@@ -137,9 +137,10 @@ export class ReaBridgeService {
   }
 
   /**
-   * Determine the most efficient available binary: local node_modules, global binary, or npx.
+   * Determine the most efficient available binary: local node_modules pinned binary.
+   * Supply-Chain Lock (ISO/IEC 27001): Dynamic `npx -y rea-agents@latest` fallback is strictly removed.
    */
-  public getExecutableInfo(): { executable: string; argsPrefix: string[]; source: 'local' | 'global' | 'npx' } {
+  public getExecutableInfo(): { executable: string; argsPrefix: string[]; source: 'local' | 'global' | 'npx' | 'unavailable' } {
     const localBin1 = path.join(process.cwd(), 'node_modules', '.bin', 'rea-agents');
     const localBin2 = path.join(process.cwd(), 'node_modules', '.bin', 'rea');
 
@@ -150,18 +151,25 @@ export class ReaBridgeService {
       return { executable: localBin2, argsPrefix: [], source: 'local' };
     }
 
-    return { executable: 'npx', argsPrefix: ['-y', 'rea-agents@latest'], source: 'npx' };
+    return { executable: '', argsPrefix: [], source: 'unavailable' };
   }
 
   /**
-   * Check whether `rea-agents` is available in PATH or via local/npx.
+   * Check whether `rea-agents` is available locally in node_modules/.bin.
    */
   public async checkAvailability(): Promise<{
     available: boolean;
-    method: 'local' | 'global' | 'npx';
+    method: 'local' | 'global' | 'npx' | 'unavailable';
     version?: string;
   }> {
     const exe = this.getExecutableInfo();
+    if (exe.source === 'unavailable' || !exe.executable) {
+      return {
+        available: false,
+        method: 'unavailable',
+        version: '6.8.0 (lockfile pinned; local binary unavailable)',
+      };
+    }
 
     try {
       const checkResult = await this.executeProcess(exe.executable, [...exe.argsPrefix, '--version'], {
@@ -180,8 +188,8 @@ export class ReaBridgeService {
     }
 
     return {
-      available: true,
-      method: exe.source,
+      available: false,
+      method: 'unavailable',
     };
   }
 
@@ -206,6 +214,16 @@ export class ReaBridgeService {
     }
 
     const exe = this.getExecutableInfo();
+    if (exe.source === 'unavailable' || !exe.executable) {
+      const fallbackAnalysis = await this.performHeuristicAstScan(resolvedPath);
+      return {
+        success: true,
+        data: fallbackAnalysis,
+        durationMs: Date.now() - startTime,
+        command: 'reaBridge.performHeuristicAstScan (deterministic AST)',
+      };
+    }
+
     const commandArgs = [...exe.argsPrefix, 'analyze-javascript-application', resolvedPath, '--format', 'json'];
 
     try {
@@ -265,6 +283,17 @@ export class ReaBridgeService {
   ): Promise<ReaExecutionVerdict<ReaWebsiteAnalysis>> {
     const startTime = Date.now();
     const exe = this.getExecutableInfo();
+
+    if (exe.source === 'unavailable' || !exe.executable) {
+      return {
+        success: false,
+        data: null,
+        error: 'rea-agents CLI binary not found in node_modules/.bin (supply-chain locked to v6.8.0)',
+        durationMs: Date.now() - startTime,
+        command: 'rea-agents analyze-web-bundle (unavailable)',
+      };
+    }
+
     const commandArgs = [...exe.argsPrefix, 'analyze-web-bundle', url, '--format', 'json'];
 
     try {
@@ -281,26 +310,23 @@ export class ReaBridgeService {
             durationMs: Date.now() - startTime,
             command: `${exe.executable} ${commandArgs.join(' ')}`,
           };
-        } catch {
-          // Fallback
+        } catch (jsonErr) {
+          return {
+            success: false,
+            data: null,
+            error: `Failed to parse rea-agents output as JSON: ${jsonErr instanceof Error ? jsonErr.message : String(jsonErr)}`,
+            durationMs: Date.now() - startTime,
+            command: `${exe.executable} ${commandArgs.join(' ')}`,
+          };
         }
       }
 
       return {
-        success: true,
-        data: {
-          url,
-          scannedAt: new Date().toISOString(),
-          status: 200,
-          discoveredEndpoints: [url],
-          domSelectors: [
-            { selector: 'button[type="submit"]', tagName: 'button', role: 'button' },
-            { selector: 'input[name="email"]', tagName: 'input', role: 'textbox' },
-          ],
-          forms: [],
-        },
+        success: false,
+        data: null,
+        error: `rea-agents analyze-web-bundle failed with exit code ${processResult.code}: ${processResult.stderr || 'Execution failed'}`,
         durationMs: Date.now() - startTime,
-        command: `${exe.executable} ${commandArgs.join(' ')} (simulated-baseline)`,
+        command: `${exe.executable} ${commandArgs.join(' ')}`,
       };
     } catch (err) {
       return {

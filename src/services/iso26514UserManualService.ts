@@ -706,13 +706,17 @@ export class Iso26514UserManualService {
       if (match?.xPercent !== undefined && match?.yPercent !== undefined) {
         return { xPercent: match.xPercent, yPercent: match.yPercent };
       }
+      const ctrlByIndex = controls[fallbackIdx];
+      if (ctrlByIndex?.xPercent !== undefined && ctrlByIndex?.yPercent !== undefined) {
+        return { xPercent: ctrlByIndex.xPercent, yPercent: ctrlByIndex.yPercent };
+      }
       if (kind === 'SUB_TAB') {
-        return { xPercent: Math.min(88, 14 + fallbackIdx * 18), yPercent: 26 };
+        return { xPercent: Math.min(88, 14 + fallbackIdx * 12), yPercent: 26 };
       }
       if (kind === 'BUTTON') {
-        return { xPercent: Math.min(92, Math.max(12, 84 - (fallbackIdx % 4) * 14)), yPercent: 18 + Math.floor(fallbackIdx / 4) * 10 };
+        return { xPercent: Math.min(92, Math.max(12, 75 + (fallbackIdx % 3) * 5)), yPercent: Math.min(90, 20 + fallbackIdx * 6) };
       }
-      return { xPercent: Math.min(90, 18 + (fallbackIdx % 4) * 20), yPercent: 38 + Math.floor(fallbackIdx / 4) * 9 };
+      return { xPercent: Math.min(90, Math.max(12, 25 + (fallbackIdx % 3) * 6)), yPercent: Math.min(90, 35 + fallbackIdx * 6) };
     };
 
     const buttonsList: Iso26514ButtonEntry[] = [];
@@ -820,25 +824,24 @@ export class Iso26514UserManualService {
       addFilt(isId ? 'Pencarian & Filter Daftar' : 'List Search & Filter', isId ? 'Kolom Pencarian' : 'Search Input', firstCard);
     }
 
-    // Assign sequential 1-to-1 Callout Pins (#1..#N) and deduplicate overlapping coordinates
+    // Assign sequential 1-to-1 Callout Pins (#1..#N) preserving true DOM coordinates
     const visualCalloutPins: NonNullable<Iso26514ModuleManual['visualCalloutPins']> = [];
-    const usedCoords = new Set<string>();
-    const reserveCoord = (x: number, y: number): { xPercent: number; yPercent: number } => {
+    const placedPins: Array<{ xPercent: number; yPercent: number }> = [];
+    const adjustOverlappingCoord = (x: number, y: number): { xPercent: number; yPercent: number } => {
       let cx = x;
       let cy = y;
-      let tries = 0;
-      while (usedCoords.has(`${Math.round(cx / 4)}:${Math.round(cy / 4)}`) && tries < 8) {
-        cx = cx >= 86 ? cx - 6 : cx + 6;
-        if (tries % 2 === 1) cy = cy >= 86 ? cy - 5 : cy + 5;
-        tries++;
+      for (const p of placedPins) {
+        if (Math.abs(p.xPercent - cx) < 3 && Math.abs(p.yPercent - cy) < 3) {
+          cx = Math.min(95, cx + 3.5);
+        }
       }
-      usedCoords.add(`${Math.round(cx / 4)}:${Math.round(cy / 4)}`);
+      placedPins.push({ xPercent: cx, yPercent: cy });
       return { xPercent: cx, yPercent: cy };
     };
     let nextCallout = 1;
     buttonsList.forEach((b) => {
       const pinNum = nextCallout++;
-      const pos = reserveCoord(b.xPercent ?? 78, b.yPercent ?? 20);
+      const pos = adjustOverlappingCoord(b.xPercent ?? 78, b.yPercent ?? 20);
       const px = pos.xPercent;
       const py = pos.yPercent;
       b.calloutNumber = pinNum;
@@ -855,7 +858,7 @@ export class Iso26514UserManualService {
     });
     filtersList.forEach((f) => {
       const pinNum = nextCallout++;
-      const pos = reserveCoord(f.xPercent ?? 28, f.yPercent ?? 38);
+      const pos = adjustOverlappingCoord(f.xPercent ?? 28, f.yPercent ?? 38);
       const px = pos.xPercent;
       const py = pos.yPercent;
       f.calloutNumber = pinNum;

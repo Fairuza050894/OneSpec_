@@ -11,7 +11,7 @@
  */
 
 import type { BugReportTicket, FeatureModuleSurface, ScreenControlCatalogItem } from '@/types/sdlc';
-import type { CompiledSdlcState } from './sdlcCompiler';
+import { computeUnifiedQualityMetrics, type CompiledSdlcState } from './sdlcCompiler';
 import type { RegressionDiffSummary } from './workspaceVaultService';
 
 export interface WorkflowStage {
@@ -505,15 +505,19 @@ export function buildManagementBriefingReport(
       `• QA pass-rate delta: ${diff.passRateDelta > 0 ? '+' : ''}${diff.passRateDelta}%`
     : 'No previous snapshot comparison is available yet; the 1:1 update report appears after the next snapshot.';
 
+  const qm = computeUnifiedQualityMetrics(state);
+
   const cards: ManagementBriefingReport['cards'] = [
     {
       headingId: '1. Ringkasan Eksekutif & Status Kesiapan Aplikasi',
       headingEn: '1. Executive Summary & Application Readiness',
-      bodyId: `${state.appName} (${state.targetUrl}) saat ini berada pada status operasional: ${board.overallOperationalStatus}. ` +
+      bodyId: `${state.appName} (${state.targetUrl}) saat ini berada pada status operasional: ${board.overallOperationalStatus} ` +
+        `(Kesiapan Rilis ISO 29119: ${qm.releaseGateStatus.replace(/_/g, ' ')}, Pass Rate: ${qm.passRatePercent}% [${qm.passedCases}/${qm.totalCases}], p95 Latensi: ${qm.p95LatencyMs}ms). ` +
         `Pemindaian memetakan ${modules} modul, ${apis} endpoint API, dan ${tables} tabel basis data. ` +
         `${errorModules.length} modul berstatus ERROR dan ${warningModules.length} modul berstatus WARNING. ` +
         `Terdapat ${openIssues.length} temuan terbuka yang memerlukan tindak lanjut tim teknis.`,
-      bodyEn: `${state.appName} (${state.targetUrl}) currently reports operational status: ${board.overallOperationalStatus}. ` +
+      bodyEn: `${state.appName} (${state.targetUrl}) currently reports operational status: ${board.overallOperationalStatus} ` +
+        `(ISO 29119 Release Readiness: ${qm.releaseGateStatus.replace(/_/g, ' ')}, Pass Rate: ${qm.passRatePercent}% [${qm.passedCases}/${qm.totalCases}], p95 Latency: ${qm.p95LatencyMs}ms). ` +
         `The scan mapped ${modules} modules, ${apis} API endpoints, and ${tables} database tables. ` +
         `${errorModules.length} module(s) are in ERROR and ${warningModules.length} in WARNING. ` +
         `${openIssues.length} open finding(s) require engineering follow-up.`,

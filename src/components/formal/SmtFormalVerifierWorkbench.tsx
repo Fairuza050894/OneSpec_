@@ -81,12 +81,20 @@ export function SmtFormalVerifierWorkbench({
   const handleReverify = () => {
     setIsVerifying(true);
     if (onAppendLog) {
-      onAppendLog(`[SMT SOLVER] Launching symbolic Z3 theorem proving over ${summary.totalInvariants} formal invariants...`);
+      if (summary.z3Installed) {
+        onAppendLog(`[SMT SOLVER] Launching symbolic Z3 theorem proving over ${summary.totalInvariants} formal invariants...`);
+      } else {
+        onAppendLog(`[SMT SOLVER] Synthesizing SMT-LIB v2 formal logic specifications (${summary.totalInvariants} invariants)...`);
+      }
     }
     setTimeout(() => {
       setIsVerifying(false);
       if (onAppendLog) {
-        onAppendLog(`[SMT SOLVER] Proof complete: 100% UNSAT (No counter-examples found. All invariants formally verified).`);
+        if (summary.z3Installed) {
+          onAppendLog(`[SMT SOLVER] Z3 theorem proving complete: ${summary.provenCount} PROVEN (UNSAT), ${summary.violatedCount} VIOLATIONS.`);
+        } else {
+          onAppendLog(`[SMT SOLVER] SMT-LIB v2 specification generated. Host lacks Z3 binary. Export via 'Download .smt2' to verify with 'z3 -in < file.smt2'.`);
+        }
       }
     }, 600);
   };
@@ -105,6 +113,26 @@ export function SmtFormalVerifierWorkbench({
     }
   };
 
+  const handleDownloadSmt2 = () => {
+    const slug = appName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const fullSmtCode = summary.invariants
+      .map(
+        (i) =>
+          `; =========================================================================\n; INVARIANT: [${i.id}] ${i.title}\n; Category: ${i.category}\n; Math: ${i.mathematicalStatement}\n; Status: ${i.solverVerdict} (${i.solverSatisfiability})\n; =========================================================================\n${i.smtLibScript}`
+      )
+      .join('\n\n');
+    const blob = new Blob([fullSmtCode], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `invariants_${slug}.smt2`;
+    link.click();
+    URL.revokeObjectURL(url);
+    if (onAppendLog) {
+      onAppendLog(`[SMT SOLVER] Exported combined SMT-LIB v2 (.smt2) script for ${appName}.`);
+    }
+  };
+
   return (
     <div className="w-full h-full flex flex-col bg-[#0B0C0E] border border-[#22262E] rounded-[4px] overflow-hidden min-h-0">
       {/* Top Header Toolbar */}
@@ -115,8 +143,16 @@ export function SmtFormalVerifierWorkbench({
             {appName}
           </span>
           <span className="text-[#707070] hidden 2xl:inline whitespace-nowrap">{copy.step10.subtitleSuffix}</span>
-          <span className="badge-tag px-1.5 py-0.2 bg-[#059669]/20 text-[#10B981] font-bold text-[9.5px] whitespace-nowrap">
-            {summary.formalTrustScore}% PROVEN (UNSAT)
+          <span
+            className={`badge-tag px-1.5 py-0.2 font-bold text-[9.5px] whitespace-nowrap ${
+              summary.z3Installed
+                ? 'bg-[#059669]/20 text-[#10B981]'
+                : 'bg-amber-950/70 border border-amber-700/60 text-amber-300'
+            }`}
+          >
+            {summary.z3Installed
+              ? `VERIFIED_BY_Z3_SOLVER (${summary.formalTrustScore}% UNSAT)`
+              : 'SMT_LIB2_SPEC_GENERATED (Z3 Binary Not Installed)'}
           </span>
           <span className="badge-tag px-1.5 py-0.2 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[9.5px] whitespace-nowrap">
             SMT-LIB v2
@@ -179,6 +215,15 @@ export function SmtFormalVerifierWorkbench({
           </button>
 
           <button
+            onClick={handleDownloadSmt2}
+            className="px-2.5 py-1 bg-[#1E293B] hover:bg-[#334155] border border-emerald-700/60 text-emerald-300 font-mono text-[11px] rounded-[2px] transition-colors cursor-pointer flex items-center gap-1.5"
+            title="Download pure SMT-LIB v2 (.smt2) file for external Z3 verification"
+          >
+            <Download className="h-3.5 w-3.5 text-emerald-400" />
+            <span>Download .smt2</span>
+          </button>
+
+          <button
             onClick={handleDownloadSpec}
             className="px-2.5 py-1 bg-[#22262E] hover:bg-[#2A2E39] text-[#EDEDED] font-mono text-[11px] rounded-[2px] transition-colors cursor-pointer flex items-center gap-1.5"
           >
@@ -200,18 +245,26 @@ export function SmtFormalVerifierWorkbench({
             <span className="text-[9.5px] text-[#A1A1A1]">First-Order Logic</span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
-            <span className="text-[10px] text-[#707070] uppercase font-bold">Proven (UNSAT)</span>
-            <span className="text-[18px] font-bold text-[#10B981] tabular-nums">
-              {summary.provenCount}
+            <span className="text-[10px] text-[#707070] uppercase font-bold">
+              {summary.z3Installed ? 'Proven (UNSAT)' : 'Specs Synthesized'}
             </span>
-            <span className="text-[9.5px] text-[#10B981]">No Counter-Examples</span>
+            <span className="text-[18px] font-bold text-[#10B981] tabular-nums">
+              {summary.z3Installed ? summary.provenCount : summary.totalInvariants}
+            </span>
+            <span className="text-[9.5px] text-[#10B981]">
+              {summary.z3Installed ? 'No Counter-Examples' : 'SMT-LIB v2 Valid'}
+            </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
-            <span className="text-[10px] text-[#707070] uppercase font-bold">Violations (SAT)</span>
-            <span className="text-[18px] font-bold text-[#EF4444] tabular-nums">
-              {summary.violatedCount}
+            <span className="text-[10px] text-[#707070] uppercase font-bold">
+              {summary.z3Installed ? 'Violations (SAT)' : 'Host Solver'}
             </span>
-            <span className="text-[9.5px] text-[#A1A1A1]">Refuted Invariants</span>
+            <span className="text-[18px] font-bold text-[#F59E0B] tabular-nums truncate">
+              {summary.z3Installed ? summary.violatedCount : 'Z3 Missing'}
+            </span>
+            <span className="text-[9.5px] text-[#A1A1A1]">
+              {summary.z3Installed ? 'Refuted Invariants' : 'Download .smt2'}
+            </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Formal Trust</span>

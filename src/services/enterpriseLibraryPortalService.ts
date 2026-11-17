@@ -7,7 +7,7 @@
  */
 
 import type { SavedProjectRecord, VaultProjectType } from './workspaceVaultService';
-import type { CompiledSdlcState } from './sdlcCompiler';
+import { computeUnifiedQualityMetrics, type CompiledSdlcState } from './sdlcCompiler';
 import { domainLogicBrainService } from './domainLogicBrainService';
 import { getEnvironmentLabel, maskTargetUrl, type EnvironmentLabel } from '@/lib/presentationSanitizer';
 
@@ -429,12 +429,12 @@ export class EnterpriseLibraryPortalService {
       const apis = st.discoveryResult?.apiEndpoints || [];
       const apisCount = apis.length;
       const tablesCount = st.discoveryResult?.databaseTables?.length || 0;
-      const testsCount = st.rtmRows?.length || st.testScenarios?.length || 1;
-      const failedTests = (st.rtmRows || []).filter((r) => r.executionVerdict === 'FAILED').length;
-      const passRatePercent = Math.round((Math.max(0, testsCount - failedTests) / Math.max(testsCount, 1)) * 100);
+      const qm = computeUnifiedQualityMetrics(st);
+      const testsCount = qm.totalCases || st.testScenarios?.length || 0;
+      const passRatePercent = qm.passRatePercent;
       const openBugsCount = (st.bugReports || []).filter((b) => b.status === 'OPEN').length;
       const compliancePct = st.complianceAssessment?.scorecard?.overallComplianceRate ?? st.gapAuditSummary?.complianceRatePercent ?? 85;
-      const qualityConfidencePercent = passRatePercent;
+      const qualityConfidencePercent = qm.totalCases > 0 ? passRatePercent : (st.testScenarios?.length ? 85 : 0);
       const healthScorePercent = Math.round((qualityConfidencePercent * 0.65) + (compliancePct * 0.35));
       const lastScanAt = rec.updatedAt || docCtrl.effectiveDate || new Date(0).toISOString();
       const ageDaysRaw = (Date.now() - new Date(lastScanAt).getTime()) / 86_400_000;

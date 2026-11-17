@@ -79,7 +79,11 @@ async function main() {
 
   const blueprintUrl = buildFeatureModuleBlueprintSvgDataUrl(moduleSurface, [], []);
   assert.ok(blueprintUrl.startsWith('data:image/svg+xml'), 'blueprint must be an SVG data URL');
-  const blueprintPng = await sharp(Buffer.from(decodeURIComponent(blueprintUrl.split(',')[1]))).png().toBuffer();
+  const isBase64 = blueprintUrl.includes(';base64,');
+  const svgBuffer = isBase64
+    ? Buffer.from(blueprintUrl.split(',')[1], 'base64')
+    : Buffer.from(decodeURIComponent(blueprintUrl.split(',')[1]), 'utf8');
+  const blueprintPng = await sharp(svgBuffer).png().toBuffer();
   const meta = await sharp(blueprintPng).metadata();
   assert.equal(meta.width, 1280);
   assert.equal(meta.height, 720);

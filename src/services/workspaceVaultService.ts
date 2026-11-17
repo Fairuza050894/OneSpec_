@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { CompiledSdlcState } from './sdlcCompiler';
+import type { ReleaseAuditSignatureRecord } from '@/types/sdlc';
 
 export type VaultProjectType = 'EXISTING_WEB' | 'GIT_REPO' | 'LOCAL_ZIP' | 'NEW_PROJECT_FROM_ZERO';
 
@@ -89,6 +90,7 @@ export interface SavedProjectRecord {
   latestState: CompiledSdlcState;
   snapshots: ProjectHistoricalSnapshot[];
   regressionDiffSummary?: RegressionDiffSummary | null;
+  auditSignatures?: ReleaseAuditSignatureRecord[];
 }
 
 export interface ProjectIndexEntry {
@@ -773,7 +775,26 @@ export class WorkspaceVaultService {
     if (!fs.existsSync(filePath)) return null;
     try {
       const raw = fs.readFileSync(filePath, 'utf8');
-      return JSON.parse(raw) as SavedProjectRecord;
+      const record = JSON.parse(raw) as SavedProjectRecord;
+      if (record?.latestState) {
+        const is404Mod = (m: { routePath?: string; moduleName?: string; pageHeading?: string }) => {
+          const r = (m.routePath || '').toLowerCase();
+          if (r === '/home') return true;
+          const text = `${m.moduleName || ''} ${m.pageHeading || ''}`;
+          return /halaman tidak ditemukan|404\s*not\s*found|page\s*not\s*found|tidak\s*ditemukan|error\s*404/i.test(text);
+        };
+        if (record.latestState.discoveredFeatureModules) {
+          record.latestState.discoveredFeatureModules = record.latestState.discoveredFeatureModules
+            .filter((m) => !is404Mod(m))
+            .map((m, idx) => ({ ...m, moduleId: `MOD-${String(idx + 1).padStart(2, '0')}` }));
+        }
+        if ((record.latestState as any).userManuals) {
+          (record.latestState as any).userManuals = ((record.latestState as any).userManuals || [])
+            .filter((um: any) => !is404Mod(um))
+            .map((um: any, idx: number) => ({ ...um, moduleId: `MOD-${String(idx + 1).padStart(2, '0')}` }));
+        }
+      }
+      return record;
     } catch {
       return null;
     }
@@ -810,6 +831,22 @@ export class WorkspaceVaultService {
     const projectId = existingByUrl?.projectId || this.slugifyProjectId(params.projectId || projectName || targetUrl);
     const projectFilePath = path.join(PROJECTS_DIR, `${projectId}.json`);
     const existingRecord = this.getProject(projectId);
+
+    // Peta screenshot valid dari state sebelumnya berdasarkan rute ternormalisasi
+    const prevShotsByRoute = new Map<string, string>();
+    const normalizeKey = (r?: string) => (r || '').toLowerCase().replace(/^\/?#\/?/, '/').replace(/\/$/, '') || '/';
+    if (existingRecord?.latestState) {
+      for (const m of existingRecord.latestState.discoveredFeatureModules || []) {
+        if (typeof m.screenshotDataUrl === 'string' && m.screenshotDataUrl.startsWith('data:image/') && m.screenshotDataUrl.length > 2500) {
+          prevShotsByRoute.set(normalizeKey(m.routePath), m.screenshotDataUrl);
+        }
+      }
+      for (const um of (existingRecord.latestState as any).userManuals || []) {
+        if (typeof um.screenshotDataUrl === 'string' && um.screenshotDataUrl.startsWith('data:image/') && um.screenshotDataUrl.length > 2500) {
+          prevShotsByRoute.set(normalizeKey(um.routePath), um.screenshotDataUrl);
+        }
+      }
+    }
 
     if (existingRecord?.latestState) {
       const prevMods = existingRecord.latestState.discoveredFeatureModules || [];
@@ -865,6 +902,52 @@ export class WorkspaceVaultService {
       }
     }
 
+    // Wariskan screenshot valid ke discoveredFeatureModules & userManuals jika saat ini kosong/tidak valid
+    if (compiledState.discoveredFeatureModules) {
+      for (const m of compiledState.discoveredFeatureModules) {
+        if (!m.screenshotDataUrl || !m.screenshotDataUrl.startsWith('data:image/') || m.screenshotDataUrl.length < 2500) {
+          const inherited = prevShotsByRoute.get(normalizeKey(m.routePath));
+          if (inherited) m.screenshotDataUrl = inherited;
+        }
+      }
+    }
+    if ((compiledState as any).userManuals) {
+      for (const um of (compiledState as any).userManuals) {
+        if (!um.screenshotDataUrl || !um.screenshotDataUrl.startsWith('data:image/') || um.screenshotDataUrl.length < 2500) {
+          const inherited = prevShotsByRoute.get(normalizeKey(um.routePath));
+          if (inherited) um.screenshotDataUrl = inherited;
+        }
+      }
+    }
+
+    // Auto-clean modul 404 / 'Halaman Tidak Ditemukan' / '/home' dari compiledState
+    const is404Mod = (m: { routePath?: string; moduleName?: string; pageHeading?: string }) => {
+      const r = (m.routePath || '').toLowerCase();
+      if (r === '/home') return true;
+      const text = `${m.moduleName || ''} ${m.pageHeading || ''}`;
+      return /halaman tidak ditemukan|404\s*not\s*found|page\s*not\s*found|tidak\s*ditemukan|error\s*404/i.test(text);
+    };
+
+    if (compiledState.discoveredFeatureModules) {
+      compiledState.discoveredFeatureModules = compiledState.discoveredFeatureModules
+        .filter((m) => !is404Mod(m))
+        .map((mod, idx) => ({
+          ...mod,
+          moduleId: `MOD-${String(idx + 1).padStart(2, '0')}`,
+        }));
+      if (compiledState.discoveryResult) {
+        (compiledState.discoveryResult as any).featureModules = compiledState.discoveredFeatureModules;
+      }
+    }
+    if ((compiledState as any).userManuals) {
+      (compiledState as any).userManuals = (compiledState as any).userManuals
+        .filter((um: any) => !is404Mod(um))
+        .map((um: any, idx: number) => ({
+          ...um,
+          moduleId: `MOD-${String(idx + 1).padStart(2, '0')}`,
+        }));
+    }
+
     const existingSnapshots = existingRecord?.snapshots || [];
 
     let updatedSnapshots = [...existingSnapshots];
@@ -910,6 +993,19 @@ export class WorkspaceVaultService {
 
     compiledState.regressionDiffSummary = regressionDiffSummary;
 
+    const existingAuditSignatures = existingRecord?.auditSignatures || [];
+    const stateAuditSignatures = compiledState.auditSignatures || (compiledState.releaseSignOff?.auditSignatures) || [];
+    const mergedSignatures = [...stateAuditSignatures];
+    for (const sig of existingAuditSignatures) {
+      if (!mergedSignatures.some(s => s.signatureId === sig.signatureId)) {
+        mergedSignatures.push(sig);
+      }
+    }
+    compiledState.auditSignatures = mergedSignatures;
+    if (compiledState.releaseSignOff) {
+      compiledState.releaseSignOff.auditSignatures = mergedSignatures;
+    }
+
     const updatedAt = new Date().toISOString();
     const record: SavedProjectRecord = {
       projectId,
@@ -920,6 +1016,7 @@ export class WorkspaceVaultService {
       latestState: compiledState,
       snapshots: updatedSnapshots,
       regressionDiffSummary,
+      auditSignatures: mergedSignatures,
     };
 
     fs.writeFileSync(projectFilePath, JSON.stringify(record, null, 2), 'utf8');
@@ -948,6 +1045,62 @@ export class WorkspaceVaultService {
     // Maintain legacy single cache compatibility
     try {
       fs.writeFileSync(LEGACY_CACHE_FILE_PATH, JSON.stringify(compiledState, null, 2), 'utf8');
+    } catch {}
+
+    return record;
+  }
+
+  public appendAuditSignature(projectId: string, signature: ReleaseAuditSignatureRecord): SavedProjectRecord | null {
+    this.ensureVaultDirectories();
+    const record = this.getProject(projectId);
+    if (!record) return null;
+
+    const existingSignatures = record.auditSignatures || record.latestState.auditSignatures || record.latestState.releaseSignOff?.auditSignatures || [];
+    const filtered = existingSignatures.filter((s) => s.signatureId !== signature.signatureId);
+    const updatedSignatures = [signature, ...filtered];
+
+    record.auditSignatures = updatedSignatures;
+    record.latestState.auditSignatures = updatedSignatures;
+    if (!record.latestState.releaseSignOff) {
+      record.latestState.releaseSignOff = {
+        status: 'APPROVED_FOR_PRODUCTION',
+        isApproved: true,
+        approvedBy: signature.approverName,
+        approvedAt: signature.signedAt,
+        signedAt: signature.signedAt,
+        approverRole: signature.approverRole,
+        roleTitle: signature.approverRole,
+        notes: signature.approvalNotes,
+        releaseNotes: signature.approvalNotes,
+        snapshotHash: signature.snapshotHash,
+        releaseGateStatus: signature.releaseGateStatus,
+        operatorSessionId: signature.operatorSessionId,
+        prerequisitesChecked: signature.prerequisitesChecked,
+        auditSignatures: updatedSignatures,
+      };
+    } else {
+      record.latestState.releaseSignOff.status = 'APPROVED_FOR_PRODUCTION';
+      record.latestState.releaseSignOff.isApproved = true;
+      record.latestState.releaseSignOff.approvedBy = signature.approverName;
+      record.latestState.releaseSignOff.approvedAt = signature.signedAt;
+      record.latestState.releaseSignOff.signedAt = signature.signedAt;
+      record.latestState.releaseSignOff.approverRole = signature.approverRole;
+      record.latestState.releaseSignOff.roleTitle = signature.approverRole;
+      record.latestState.releaseSignOff.notes = signature.approvalNotes;
+      record.latestState.releaseSignOff.releaseNotes = signature.approvalNotes;
+      record.latestState.releaseSignOff.snapshotHash = signature.snapshotHash;
+      record.latestState.releaseSignOff.releaseGateStatus = signature.releaseGateStatus;
+      record.latestState.releaseSignOff.operatorSessionId = signature.operatorSessionId;
+      record.latestState.releaseSignOff.prerequisitesChecked = signature.prerequisitesChecked;
+      record.latestState.releaseSignOff.auditSignatures = updatedSignatures;
+    }
+
+    record.updatedAt = new Date().toISOString();
+    const projectFilePath = path.join(PROJECTS_DIR, `${projectId}.json`);
+    fs.writeFileSync(projectFilePath, JSON.stringify(record, null, 2), 'utf8');
+
+    try {
+      fs.writeFileSync(LEGACY_CACHE_FILE_PATH, JSON.stringify(record.latestState, null, 2), 'utf8');
     } catch {}
 
     return record;

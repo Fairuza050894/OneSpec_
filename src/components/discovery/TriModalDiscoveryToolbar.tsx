@@ -177,7 +177,7 @@ export function TriModalDiscoveryToolbar({
     setIsFetchingRefs(true);
     setRefFetchSuccess(false);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(new Error('Fetch refs timeout')), 60000);
 
     try {
       const res = await fetch('/api/discovery/git-refs', {
@@ -255,7 +255,7 @@ export function TriModalDiscoveryToolbar({
         : `${(file.size / 1024).toFixed(1)} KB`;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(new Error('Fetch refs timeout')), 60000);
     try {
       const res = await fetch('/api/discovery/upload-archive', {
         method: 'POST',
@@ -760,8 +760,17 @@ export function TriModalDiscoveryToolbar({
               {lastResult.apiEndpoints?.length || 0} APIs Discovered
             </span>
             <span className="text-[#707070]">·</span>
-            <span className="tabular-nums font-mono text-[#EDEDED]">
-              {lastResult.databaseTables?.length || 0} Tables Introspected
+            <span className="tabular-nums font-mono text-[#EDEDED] inline-flex items-center gap-1">
+              {lastResult.branchOrDatabase === 'crawled:har' || dbUri === 'crawled:har' ? (
+                <>
+                  <span>{lastResult.databaseTables?.length || 0} Tables Inferred (JSON/HAR)</span>
+                  <span className="px-1 py-0.2 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[8.5px] font-bold">
+                    INFERRED
+                  </span>
+                </>
+              ) : (
+                <span>{lastResult.databaseTables?.length || 0} Tables Introspected</span>
+              )}
             </span>
             <span className="text-[#707070]">·</span>
             <span className="tabular-nums font-mono text-[#EDEDED]">

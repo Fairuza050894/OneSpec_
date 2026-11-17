@@ -719,7 +719,7 @@ export default function () {
     requestFailureRate.add(1);
   }
 
-  sleep(0.1 + Math.random() * 0.2);
+  sleep(0.15);
 }
 `;
   }
@@ -827,15 +827,16 @@ export default function () {
    * 8. Generate k6 Telemetry Metrics Summary
    */
   public getK6MetricSummary(vus: number = 50, duration: number = 30): K6MetricSummary {
-    const totalRequests = vus * duration * 28;
-    const throughputRps = Math.round(totalRequests / duration);
+    const totalRequests = vus * 2;
+    const throughputRps = Math.round(totalRequests / Math.max(duration, 1));
 
     return {
       vus,
       durationSeconds: duration,
       totalRequests,
       throughputRps,
-      errorRatePercent: 0.08,
+      errorRatePercent: 0,
+      provenance: 'ESTIMATED',
       latency: {
         min: 12,
         avg: 38,

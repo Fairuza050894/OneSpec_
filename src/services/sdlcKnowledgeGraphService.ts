@@ -29,7 +29,7 @@ import type { DelphiConsensusSummary } from '@/services/delphiConsensusService';
 import { architectureDeconstructorService, type DeconstructedArchitecture } from '@/services/architectureDeconstructor';
 import { architectureMapEngine } from '@/services/architectureMapEngine';
 import type { RegressionDiffSummary } from '@/services/workspaceVaultService';
-import type { CompiledSdlcState } from '@/services/sdlcCompiler';
+import { computeUnifiedQualityMetrics, type CompiledSdlcState } from '@/services/sdlcCompiler';
 import { enterpriseLibraryPortalService } from '@/services/enterpriseLibraryPortalService';
 import { iso26514UserManualService, type Iso26514ModuleManual } from '@/services/iso26514UserManualService';
 import { ensureCompleteFeatureModuleCoverage } from '@/lib/featureModuleCoverage';
@@ -1703,10 +1703,10 @@ RETURN b.ruleId, e.path, t.tableName, tc.testId
     const testScenarios = params.testScenarios || [];
     const bugReports = params.bugReports || [];
     const uatFlows = params.uatFlows || [];
-    const totalTests = rtmRows.length || testScenarios.length || 1;
-    const failedTests = rtmRows.filter((r) => r.executionVerdict === 'FAILED').length;
-    const passedTests = Math.max(0, totalTests - failedTests);
-    const passRatePercent = Math.round((passedTests / Math.max(totalTests, 1)) * 100);
+    const qm = computeUnifiedQualityMetrics({ rtmRows } as any);
+    const totalTests = qm.totalCases || testScenarios.length;
+    const passedTests = qm.passedCases;
+    const passRatePercent = qm.passRatePercent;
     const complianceRatePercent = params.complianceAssessment?.scorecard?.overallComplianceRate ?? 92;
     const securityGrade = params.owaspDastSummary?.securityPostureGrade || 'A';
 

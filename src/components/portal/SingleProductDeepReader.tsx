@@ -52,8 +52,8 @@ import {
 } from '@/lib/featureModuleBlueprint';
 import { ModuleScreenshot } from '@/components/shared/ModuleScreenshot';
 
-function normalizeManualImgSrc(raw?: string | null): string {
-  if (!raw) return '/api/manual-assets/placeholder.png';
+function normalizeManualImgSrc(raw?: string | null, fallback = ''): string {
+  if (!raw) return fallback;
   const s = String(raw).trim();
   if (s.startsWith('data:image/')) {
     if (s.startsWith('data:image/svg+xml;utf8,')) {
@@ -68,14 +68,7 @@ function normalizeManualImgSrc(raw?: string | null): string {
   if (s.startsWith('blob:') || s.startsWith('http://') || s.startsWith('https://')) {
     return s;
   }
-  if (s.startsWith('/api/manual-assets/')) return s;
-  const cleaned = s
-    .replace(/\\/g, '/')
-    .replace(/^\.\//, '')
-    .replace(/^\//, '')
-    .replace(/^public\//, '')
-    .replace(/^(uploads|screenshots|manual-images)\//, '');
-  return `/api/manual-assets/${cleaned}`;
+  return fallback;
 }
 
 export interface SingleProductDeepReaderProps {
@@ -92,6 +85,8 @@ export interface SingleProductDeepReaderProps {
   onOpenInStudio?: (jumpToStep?: number) => void;
   onAppendLog?: (msg: string) => void;
   onSyncProject?: (record: SavedProjectRecord) => void;
+  onRecaptureScreenshots?: () => Promise<void> | void;
+  isRecapturingScreenshots?: boolean;
 }
 
 type ReaderSectionId =
@@ -129,6 +124,8 @@ export function SingleProductDeepReader({
   onOpenInStudio,
   onAppendLog,
   onSyncProject,
+  onRecaptureScreenshots,
+  isRecapturingScreenshots = false,
 }: SingleProductDeepReaderProps) {
   const isId = locale === 'id';
 
@@ -576,6 +573,18 @@ export function SingleProductDeepReader({
                 <span>{isId ? '🔄 1:1 Sync & Auto-Version' : '🔄 1:1 Sync'}</span>
               </button>
             )}
+            {onRecaptureScreenshots && (
+              <button
+                type="button"
+                onClick={onRecaptureScreenshots}
+                disabled={isRecapturingScreenshots}
+                className="h-7 px-2.5 bg-[#171A21] hover:bg-[#1E232B] disabled:opacity-50 text-[#EDEDED] border border-[#2E3440] hover:border-[#388BFD] font-mono rounded-[3px] cursor-pointer flex items-center gap-1.5 transition-colors shadow-sm"
+                title={isId ? 'Jalankan Playwright crawler untuk mengambil ulang screenshot modul beresolusi tinggi' : 'Re-run headless Playwright crawler to capture high-definition real screenshots for all discovered modules'}
+              >
+                <Camera className={`h-3 w-3 text-[#388BFD] ${isRecapturingScreenshots ? 'animate-pulse' : ''}`} />
+                <span>{isRecapturingScreenshots ? (isId ? 'Memotret...' : 'Re-Capturing...') : (isId ? 'Potret Ulang Screenshot' : 'Re-Capture Screenshots')}</span>
+              </button>
+            )}
             {onOpenInStudio && (
               <button
                 type="button"
@@ -670,8 +679,8 @@ export function SingleProductDeepReader({
             <div className="flex items-center gap-2">
               <span className="font-mono text-[12px] font-bold text-[#60A5FA]">
                 {isId
-                  ? '📋 1. LEMBAR KENDALI DOKUMEN RESMI (ISO 9001:2015 KLAUSUL 7.5) & VALUASI ROI (ISO 5055)'
-                  : '📋 1. OFFICIAL ISO 9001:2015 CLAUSE 7.5 DOCUMENT CONTROL & ISO 5055 ROI VALUATION'}
+                  ? '📋 1. LEMBAR KENDALI DOKUMEN RESMI (ISO 9001:2015 KLAUSUL 7.5) & ESTIMASI EFISIENSI REKAYASA (HEURISTIC MODEL)'
+                  : '📋 1. OFFICIAL ISO 9001:2015 CLAUSE 7.5 DOCUMENT CONTROL & ESTIMATED ENGINEERING EFFICIENCY (HEURISTIC MODEL)'}
               </span>
             </div>
             <span className="font-mono text-[10px] text-[#707070]">
@@ -701,13 +710,21 @@ export function SingleProductDeepReader({
             </div>
           </div>
 
-          {/* ISO 5055 ROI & Value Scorecard */}
+          {/* Estimasi Efisiensi Rekayasa (Heuristic Model) Scorecard */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono">
             <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-1">
-              <span className="text-[10px] text-[#707070] uppercase font-bold block">
-                {isId ? 'Efisiensi Jam Rekayasa (ISO 5055)' : 'Engineering Hours Saved (ISO 5055)'}
-              </span>
-              <div className="text-[20px] font-bold text-[#F59E0B] tabular-nums">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] text-[#707070] uppercase font-bold block">
+                  {isId ? 'Estimasi Efisiensi Rekayasa (Heuristic Model)' : 'Estimated Engineering Hours Saved (Heuristic Model)'}
+                </span>
+                <span
+                  title="(jumlah kontrak × 8 + 48) × 65 jam"
+                  className="px-1.5 py-0.2 rounded bg-amber-950/70 border border-amber-700/60 text-amber-300 text-[8.5px] font-bold"
+                >
+                  ESTIMATED
+                </span>
+              </div>
+              <div className="text-[20px] font-bold text-[#F59E0B] tabular-nums" title="(jumlah kontrak × 8 + 48) × 65 jam">
                 {(contracts.length * 8 + 48).toLocaleString()} {isId ? 'Jam' : 'Hrs'}
               </div>
               <span className="text-[10.5px] text-[#A1A1A1]">
@@ -913,9 +930,13 @@ export function SingleProductDeepReader({
                 m.section3_ButtonsAndIconsDictionary.buttons,
                 m.section4_SearchAndFiltersDictionary.filters
               );
-              const screenshotSrc = isBlankOrMissingScreenshot(guide.screenshotDataUrl)
-                ? blueprintDataUrl
-                : guide.screenshotDataUrl;
+              const rawShot = guide.screenshotDataUrl || m.screenshotDataUrl;
+              const hasValidCapture =
+                typeof rawShot === 'string' &&
+                rawShot.startsWith('data:image/') &&
+                rawShot.length > 2500 &&
+                !isBlankOrMissingScreenshot(rawShot);
+              const screenshotSrc = hasValidCapture ? rawShot : blueprintDataUrl;
 
               return (
                 <div

@@ -236,9 +236,15 @@ export function ensureCompleteFeatureModuleCoverage(params: {
     surfaces.push({ ...surface, moduleId: nextModuleId(usedIds) });
   };
 
+  const is404 = (path: string, name?: string) => {
+    const clean = `${path} ${name || ''}`.toLowerCase();
+    return clean === '/home' || /halaman tidak ditemukan|404\s*not\s*found|page\s*not\s*found|tidak\s*ditemukan|error\s*404/i.test(clean);
+  };
+
   for (const mod of params.discoveredModules || []) {
     if (!mod) continue;
     const routePath = normalizeRoute(mod.pagePath || mod.moduleName);
+    if (is404(routePath, mod.moduleName)) continue;
     if (findCoveringModule(surfaces, { routePath, moduleName: mod.moduleName })) continue;
     const looksLikeLoginSurface =
       mod.inputs.some((input) => input.type === 'password') &&
@@ -249,6 +255,7 @@ export function ensureCompleteFeatureModuleCoverage(params: {
 
   for (const page of params.discoveredPages || []) {
     const routePath = normalizeRoute(page);
+    if (is404(routePath)) continue;
     if (findCoveringModule(surfaces, { routePath })) continue;
     const crawled = (params.discoveredModules || []).find((mod) => normalizeRoute(mod.pagePath) === routePath);
     const crawledLooksLikeLogin = Boolean(

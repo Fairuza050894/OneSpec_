@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { blindCrawlerService } from '@/services/blindCrawlerService';
 import type { LoginSurfaceProbeResult } from '@/types/sdlc';
 
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 const blindCrawlSchema = z.object({
   targetUrl: z.string().min(1, 'Target URL or IP:Port is required'),
