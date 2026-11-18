@@ -107,6 +107,9 @@ export function CamundaBpmnViewer({
 
   useEffect(() => {
     let viewer: any = null;
+    let timer1: any;
+    let timer2: any;
+    let resizeObserver: ResizeObserver | null = null;
 
     async function initBpmnViewer() {
       if (!containerRef.current) return;
@@ -126,17 +129,40 @@ export function CamundaBpmnViewer({
         setError(null);
 
         const canvas = viewer.get('canvas');
-        try {
-          canvas.zoom('fit-viewport', 'auto');
-          const currentZoom = canvas.zoom();
-          if (Number.isFinite(currentZoom)) {
-            setZoomLevel(currentZoom);
-          }
-        } catch {
+        const fitCanvas = () => {
           try {
-            canvas.zoom(0.95);
-            setZoomLevel(0.95);
-          } catch {}
+            canvas.zoom('fit-viewport', 'auto');
+            const currentZoom = canvas.zoom();
+            if (Number.isFinite(currentZoom)) {
+              if (currentZoom < 0.65) {
+                try {
+                  canvas.zoom('fit-viewport', { top: 24, right: 24, bottom: 24, left: 24 });
+                } catch {
+                  canvas.zoom(Math.min(Math.max(currentZoom * 1.35, 0.75), 1.1));
+                }
+              }
+              setZoomLevel(canvas.zoom());
+            }
+          } catch {
+            try {
+              canvas.zoom(0.95);
+              setZoomLevel(0.95);
+            } catch {}
+          }
+        };
+
+        fitCanvas();
+        requestAnimationFrame(() => {
+          fitCanvas();
+        });
+        timer1 = setTimeout(fitCanvas, 150);
+        timer2 = setTimeout(fitCanvas, 400);
+
+        if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+          resizeObserver = new ResizeObserver(() => {
+            fitCanvas();
+          });
+          resizeObserver.observe(containerRef.current);
         }
 
         viewer.on('element.click', (event: any) => {
@@ -191,6 +217,11 @@ export function CamundaBpmnViewer({
     initBpmnViewer();
 
     return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       if (viewer) {
         try {
           viewer.destroy();
@@ -217,9 +248,19 @@ export function CamundaBpmnViewer({
 
   const handleResetZoom = () => {
     if (!viewerRef.current) return;
-    const canvas = viewerRef.current.get('canvas');
-    canvas.zoom('fit-viewport', 'auto');
-    setZoomLevel(canvas.zoom());
+    try {
+      const canvas = viewerRef.current.get('canvas');
+      canvas.zoom('fit-viewport', 'auto');
+      const z = canvas.zoom();
+      if (Number.isFinite(z) && z < 0.65) {
+        try {
+          canvas.zoom('fit-viewport', { top: 24, right: 24, bottom: 24, left: 24 });
+        } catch {
+          canvas.zoom(Math.min(Math.max(z * 1.35, 0.75), 1.1));
+        }
+      }
+      setZoomLevel(canvas.zoom());
+    } catch {}
   };
 
   const handleDownloadXml = () => {
@@ -582,7 +623,9 @@ export function CamundaBpmnViewer({
         .bpmn-dark-theme .djs-label {
           fill: #ededed !important;
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
-          font-size: 11px !important;
+          font-size: 11.5px !important;
+          font-weight: 600 !important;
+          letter-spacing: 0.01em !important;
         }
         .bpmn-dark-theme .djs-connection .djs-visual path {
           stroke: #4b5563 !important;

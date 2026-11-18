@@ -16,8 +16,6 @@ import {
   Search,
   CheckCircle2,
   AlertCircle,
-  FileSpreadsheet,
-  FileCode,
   FileText,
   ChevronDown,
   ChevronUp,
@@ -31,14 +29,6 @@ import {
   Plus,
 } from 'lucide-react';
 import type { SynthesizedRtmRow, RtmScenarioType } from '@/services/rtmSynthesizer';
-import {
-  generateFeatureBundle,
-  generateTestRailCsv,
-  generateRtmMarkdown,
-  generateBugReportMarkdown,
-  generateBugReportCsv,
-} from '@/services/rtmSynthesizer';
-import { unifiedReportGenerator } from '@/services/unifiedReportGenerator';
 import type { DataDictionaryEntry } from '@/services/sdlcKnowledgeGraphService';
 import type {
   TestScenarioItem,
@@ -408,296 +398,129 @@ export function RtmSpreadsheetGrid({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [table, selectedRowId, rowSelection, onRowSelect]);
 
-  // 1-Click Deterministic Exports
-  const handleExportCsv = () => {
-    const csvContent = generateTestRailCsv(filteredData);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'ISO29119_RTM_TestRail_Export.csv';
-    link.click();
-    if (onExportAction) onExportAction('Export CSV (TestRail/Jira format)');
-  };
-
-  const handleExportFeatureBundle = () => {
-    const featureContent = generateFeatureBundle(filteredData);
-    const blob = new Blob([featureContent], { type: 'text/plain;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'onespec_iso29119.feature';
-    link.click();
-    if (onExportAction) onExportAction('Export Cucumber Gherkin .feature Bundle');
-  };
-
-  const handleExportRtmMarkdown = () => {
-    const mdContent = generateRtmMarkdown(filteredData);
-    const blob = new Blob([mdContent], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'ISO29119_Requirement_Traceability_Matrix.md';
-    link.click();
-    if (onExportAction) onExportAction('Export ISO 29119 RTM Markdown Report');
-  };
-
-  const handleExportBugMarkdown = () => {
-    const md = generateBugReportMarkdown(filteredBugs);
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'OneSpec_Bug_Report_Log.md';
-    link.click();
-    if (onExportAction) onExportAction('Export Bug Report Markdown');
-  };
-
-  const handleExportBugCsv = () => {
-    const csv = generateBugReportCsv(filteredBugs);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'OneSpec_Bug_Report_Log.csv';
-    link.click();
-    if (onExportAction) onExportAction('Export Bug Report CSV');
-  };
-
-  const handleExportExcelWorkbook = () => {
-    const xls = unifiedReportGenerator.generateExcelQaWorkbookHtml({
-      appName,
-      targetUrl,
-      testScenarios: filteredScenarios,
-      rtmRows: filteredData,
-      bugReports: filteredBugs,
-      uatFlows: filteredUats,
-      dataDictionary,
-      compiledState: compiledState || undefined,
-      locale,
-    });
-    const blob = new Blob([xls], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    const slug = (appName || 'OneSpec').toLowerCase().replace(/[^a-z0-9]/g, '_');
-    link.download = `OneSpec_QA_Workbook_${slug}.xls`;
-    link.click();
-    URL.revokeObjectURL(url);
-    if (onExportAction) onExportAction('Export Excel Workbook (.xls)');
-  };
-
   return (
     <div className="w-full h-full flex flex-col bg-[#111317] border border-[#22262E] rounded-[2px] overflow-hidden select-none">
-      {/* TOP ROW: Feature / Module Filter Bar */}
-      <div className="min-h-[34px] py-1 bg-[#111317] border-b border-[#22262E] px-3 flex flex-wrap items-center justify-between gap-2 font-mono text-[10.5px] shrink-0">
-        <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
-          <span className="text-[#707070] uppercase font-bold flex items-center gap-1 shrink-0">
-            <Filter className="h-3 w-3 text-[#3B82F6]" />
-            <span>{copy.step04.modulesLabel}</span>
-          </span>
+      {/* UNIFIED SINGLE ROW: 4-Tab Switcher (Left) + Clean Module Filter, Search & CR Simulation (Right) */}
+      <div className="h-10 min-h-[40px] px-3 bg-[#111317] border-b border-[#22262E] flex items-center justify-between gap-3 text-[11px] shrink-0 select-none">
+        {/* Left: Underline Style Sub-Tabs */}
+        <div className="flex items-center gap-1 sm:gap-2 h-full overflow-x-auto min-w-0">
           <button
-            onClick={() => setSelectedModuleFilter('ALL')}
-            className={`px-2 py-0.5 rounded-[2px] border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              selectedModuleFilter === 'ALL'
-                ? 'bg-[#2563EB] text-white border-[#2563EB] font-bold'
-                : 'bg-[#0B0C0E] text-[#A1A1A1] border-[#22262E] hover:text-[#EDEDED]'
-            }`}
-          >
-            {copy.step04.allModules} ({moduleOptions.length})
-          </button>
-          {moduleOptions.length > 4 ? (
-            <>
-              <select
-                aria-label="Filter by Feature Module"
-                value={selectedModuleFilter}
-                onChange={(e) => setSelectedModuleFilter(e.target.value)}
-                className="h-6 px-2 bg-[#0B0C0E] border border-[#22262E] focus:border-[#3B82F6] text-[#EDEDED] rounded-[2px] outline-none cursor-pointer text-[10.5px] max-w-[240px]"
-              >
-                <option value="ALL">
-                  {copy.step04.allModules} ({moduleOptions.length})
-                </option>
-                {moduleOptions.map((mod) => (
-                  <option key={mod.id} value={mod.id}>
-                    {mod.id}: {mod.name}
-                  </option>
-                ))}
-              </select>
-              {moduleOptions.slice(0, 3).map((mod) => (
-                <button
-                  key={mod.id}
-                  onClick={() => setSelectedModuleFilter(mod.id)}
-                  className={`hidden 2xl:inline-flex px-2 py-0.5 rounded-[2px] border transition-colors cursor-pointer whitespace-nowrap max-w-[175px] truncate ${
-                    selectedModuleFilter === mod.id
-                      ? 'bg-[#2563EB] text-white border-[#2563EB] font-bold'
-                      : 'bg-[#0B0C0E] text-[#A1A1A1] border-[#22262E] hover:text-[#EDEDED]'
-                  }`}
-                >
-                  {mod.id}: {mod.name}
-                </button>
-              ))}
-            </>
-          ) : (
-            moduleOptions.map((mod) => (
-              <button
-                key={mod.id}
-                onClick={() => setSelectedModuleFilter(mod.id)}
-                className={`px-2 py-0.5 rounded-[2px] border transition-colors cursor-pointer whitespace-nowrap ${
-                  selectedModuleFilter === mod.id
-                    ? 'bg-[#2563EB] text-white border-[#2563EB] font-bold'
-                    : 'bg-[#0B0C0E] text-[#A1A1A1] border-[#22262E] hover:text-[#EDEDED]'
-                }`}
-              >
-                {mod.id}: {mod.name}
-              </button>
-            ))
-          )}
-        </div>
-        {/* Global Search */}
-        <div className="flex items-center gap-1 bg-[#0B0C0E] border border-[#22262E] px-2 py-0.5 rounded-[2px] shrink-0">
-          <Search className="h-3 w-3 text-[#707070]" />
-          <input
-            type="text"
-            value={globalFilter ?? ''}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            placeholder={copy.step04.searchPlaceholder}
-            className="bg-transparent border-none outline-none text-[#EDEDED] text-[10.5px] w-44 font-mono"
-          />
-        </div>
-      </div>
-
-      {/* SECOND ROW: 4-Tab QA Workbook Switcher */}
-      <div className="min-h-[36px] py-1 bg-[#16191F] border-b border-[#22262E] px-3 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] shrink-0">
-        <div className="flex flex-wrap items-center gap-1">
-          <button
+            type="button"
             onClick={() => setActiveWorkbookTab('SCENARIO_MATRIX')}
-            className={`px-2.5 py-1 rounded-[2px] border flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[10.5px] ${
+            className={`h-full px-2 sm:px-3 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[11px] border-b-2 -mb-px ${
               activeWorkbookTab === 'SCENARIO_MATRIX'
-                ? 'bg-[#111317] text-[#EDEDED] font-bold border-[#3B82F6]'
-                : 'text-[#A1A1A1] border-transparent hover:text-[#EDEDED]'
+                ? 'border-blue-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 font-medium'
             }`}
           >
-            <Layers className="h-3 w-3 text-[#3B82F6]" />
-            <span>{copy.step04.tabScenarios} ({filteredScenarios.length})</span>
+            <Layers className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+            <span>{copy.step04.tabScenarios}</span>
+            <span className="font-mono text-[10.5px] text-zinc-400">({filteredScenarios.length})</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveWorkbookTab('DETAILED_CASES')}
-            className={`px-2.5 py-1 rounded-[2px] border flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[10.5px] ${
+            className={`h-full px-2 sm:px-3 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[11px] border-b-2 -mb-px ${
               activeWorkbookTab === 'DETAILED_CASES'
-                ? 'bg-[#111317] text-[#EDEDED] font-bold border-[#3B82F6]'
-                : 'text-[#A1A1A1] border-transparent hover:text-[#EDEDED]'
+                ? 'border-blue-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 font-medium'
             }`}
           >
-            <CheckCircle2 className="h-3 w-3 text-[#10B981]" />
-            <span>{copy.step04.tabCases} ({filteredData.length})</span>
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+            <span>{copy.step04.tabCases}</span>
+            <span className="font-mono text-[10.5px] text-zinc-400">({filteredData.length})</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveWorkbookTab('BUG_REPORTS')}
-            className={`px-2.5 py-1 rounded-[2px] border flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[10.5px] ${
+            className={`h-full px-2 sm:px-3 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[11px] border-b-2 -mb-px ${
               activeWorkbookTab === 'BUG_REPORTS'
-                ? 'bg-[#111317] text-[#EDEDED] font-bold border-[#EF4444]'
-                : 'text-[#A1A1A1] border-transparent hover:text-[#EDEDED]'
+                ? 'border-red-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 font-medium'
             }`}
           >
-            <Bug className={`h-3 w-3 ${filteredBugs.length > 0 ? 'text-[#EF4444]' : 'text-[#707070]'}`} />
-            <span>{copy.step04.tabDefects} ({filteredBugs.length})</span>
+            <Bug className={`h-3.5 w-3.5 shrink-0 ${filteredBugs.length > 0 ? 'text-red-400' : 'text-zinc-500'}`} />
+            <span>{copy.step04.tabDefects}</span>
+            <span className="font-mono text-[10.5px] text-zinc-400">({filteredBugs.length})</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveWorkbookTab('UAT_SIGNOFF')}
-            className={`px-2.5 py-1 rounded-[2px] border flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[10.5px] ${
+            className={`h-full px-2 sm:px-3 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[11px] border-b-2 -mb-px ${
               activeWorkbookTab === 'UAT_SIGNOFF'
-                ? 'bg-[#111317] text-[#EDEDED] font-bold border-[#3B82F6]'
-                : 'text-[#A1A1A1] border-transparent hover:text-[#EDEDED]'
+                ? 'border-amber-500 text-white font-semibold'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 font-medium'
             }`}
           >
-            <ShieldCheck className="h-3 w-3 text-[#F59E0B]" />
-            <span>{copy.step04.tabUat} ({filteredUats.length})</span>
+            <ShieldCheck className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+            <span>{copy.step04.tabUat}</span>
+            <span className="font-mono text-[10.5px] text-zinc-400">({filteredUats.length})</span>
           </button>
         </div>
 
-        {/* Contextual Right Export Actions */}
-        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-          {onSaveOverridesToVault && (
-            <button
-              onClick={onSaveOverridesToVault}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors border ${
-                hasUnsavedOverrides
-                  ? 'bg-[#059669] hover:bg-[#047857] text-white border-[#10B981]'
-                  : 'bg-[#111317] hover:border-[#10B981] text-[#10B981] border-[#22262E]'
-              }`}
-              title={isId ? 'Simpan perubahan status Bug / catatan UAT ke Vault permanen' : 'Save Bug / UAT overrides to Vault'}
+        {/* Right: Clean Single Module Dropdown + Search Input + CR Simulation Button */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Module Filter Dropdown (single clean control, no duplicate static badge) */}
+          <div className="flex items-center gap-1.5 bg-[#0B0C0E] border border-white/[0.08] px-2 py-1 rounded-[3px]">
+            <Filter className="h-3 w-3 text-zinc-400 shrink-0" />
+            <select
+              aria-label="Filter by Feature Module"
+              value={selectedModuleFilter}
+              onChange={(e) => setSelectedModuleFilter(e.target.value)}
+              className="bg-transparent text-zinc-200 text-[11px] font-medium outline-none cursor-pointer max-w-[170px] truncate"
             >
-              <Save className="h-3 w-3" />
-              <span>{isId ? 'Simpan Perubahan ke Vault' : 'Save Changes to Vault'}</span>
-            </button>
-          )}
+              <option value="ALL" className="bg-[#111317] text-white">
+                {copy.step04.allModules} ({moduleOptions.length})
+              </option>
+              {moduleOptions.map((mod) => (
+                <option key={mod.id} value={mod.id} className="bg-[#111317] text-white">
+                  {mod.id}: {mod.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Global Search */}
+          <div className="flex items-center gap-1 bg-[#0B0C0E] border border-white/[0.08] px-2 py-1 rounded-[3px]">
+            <Search className="h-3 w-3 text-zinc-400 shrink-0" />
+            <input
+              type="text"
+              value={globalFilter ?? ''}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              placeholder={copy.step04.searchPlaceholder}
+              className="bg-transparent border-none outline-none text-zinc-200 text-[11px] w-28 sm:w-36 font-sans placeholder:text-zinc-500"
+            />
+          </div>
+
+          {/* Change Request (CR) Simulation Button */}
           <button
+            type="button"
             onClick={() => setIsCrOpen((prev) => !prev)}
-            className={`flex items-center gap-1 px-2.5 py-1 border rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors ${
+            className={`h-7 px-2.5 border rounded-[3px] text-[10.5px] font-medium cursor-pointer transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               isCrOpen
-                ? 'bg-[#D97706] border-[#F59E0B] text-white'
-                : 'bg-[#111317] border-[#F59E0B]/50 hover:border-[#F59E0B] text-[#F59E0B]'
+                ? 'bg-amber-600 border-amber-500 text-white'
+                : 'bg-[#16191F] border-amber-500/40 hover:border-amber-400 text-amber-300'
             }`}
             title="Simulasi Change Request (CR) & Analisis Dampak Regresi"
           >
             <Zap className="h-3 w-3" />
-            <span>{isId ? 'Simulasi CR & Dampak' : 'CR Impact Analyzer'}</span>
+            <span className="hidden sm:inline">{isId ? 'Simulasi CR' : 'CR Impact'}</span>
           </button>
-          <button
-            onClick={handleExportExcelWorkbook}
-            className="flex items-center gap-1 px-2 py-1 bg-[#111317] border border-[#22262E] hover:border-[#10B981] text-[#10B981] rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors"
-            title="Download Excel QA Workbook & Data Dictionary (.xls)"
-          >
-            <FileSpreadsheet className="h-3 w-3" />
-            <span>Excel (.xls)</span>
-          </button>
-          {activeWorkbookTab === 'BUG_REPORTS' ? (
-            <>
-              <button
-                onClick={handleExportBugMarkdown}
-                className="flex items-center gap-1 px-2.5 py-1 bg-[#111317] border border-[#22262E] hover:border-[#EF4444] text-[#EDEDED] rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors"
-              >
-                <Download className="h-3 w-3 text-[#EF4444]" />
-                <span>{copy.step04.exportDefectMd}</span>
-              </button>
-              <button
-                onClick={handleExportBugCsv}
-                className="flex items-center gap-1 px-2.5 py-1 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors"
-              >
-                <FileSpreadsheet className="h-3 w-3 text-[#059669]" />
-                <span>{copy.step04.exportDefectCsv}</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={handleExportCsv}
-                className="flex items-center gap-1 px-2 py-1 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors"
-                title="Export CSV in TestRail / Jira / Zephyr format"
-              >
-                <FileSpreadsheet className="h-3 w-3 text-[#059669]" />
-                <span>{copy.step04.exportCsv}</span>
-              </button>
-              <button
-                onClick={handleExportFeatureBundle}
-                className="flex items-center gap-1 px-2 py-1 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors"
-                title="Export Gherkin .feature specification bundle"
-              >
-                <FileCode className="h-3 w-3 text-[#3B82F6]" />
-                <span>{copy.step04.exportFeature}</span>
-              </button>
-              <button
-                onClick={handleExportRtmMarkdown}
-                className="flex items-center gap-1 px-2 py-1 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] rounded-[2px] text-[10px] font-bold cursor-pointer transition-colors"
-                title="Export ISO/IEC/IEEE 29119-3 Traceability Matrix Markdown"
-              >
-                <FileText className="h-3 w-3 text-[#D97706]" />
-                <span>{copy.step04.exportMarkdown}</span>
-              </button>
-            </>
+
+          {/* Optional Vault Save Button if changes pending */}
+          {onSaveOverridesToVault && hasUnsavedOverrides && (
+            <button
+              type="button"
+              onClick={onSaveOverridesToVault}
+              className="h-7 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-[3px] text-[10.5px] font-semibold cursor-pointer transition-colors flex items-center gap-1 whitespace-nowrap"
+              title={isId ? 'Simpan perubahan ke Vault' : 'Save overrides to Vault'}
+            >
+              <Save className="h-3 w-3" />
+              <span>{isId ? 'Simpan' : 'Save'}</span>
+            </button>
           )}
         </div>
       </div>

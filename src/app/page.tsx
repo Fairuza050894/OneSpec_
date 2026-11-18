@@ -2409,6 +2409,7 @@ The system provides deterministic transaction processing, input validation, and 
            * ========================================================================= */}
           {activeStep === 1 && (
             <Step01IngestionWorkbench
+              displayMode={displayMode}
               copy={copy}
               locale={locale}
               isAnalyzingSource={isAnalyzingSource}
@@ -3045,47 +3046,68 @@ The system provides deterministic transaction processing, input validation, and 
                     <span>{isRecapturingScreenshots ? (locale === 'id' ? 'Memotret Ulang...' : 'Re-Capturing...') : (locale === 'id' ? 'Potret Ulang Screenshot' : 'Re-Capture Screenshots')}</span>
                   </button>
 
-                  <div className="flex flex-wrap items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-1 text-[11.5px] font-mono">
-                    <button
-                      onClick={() => setStep5SubTab('API_EXPLORER')}
-                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        step5SubTab === 'API_EXPLORER'
-                          ? 'bg-[#2563EB] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      {copy.step05.tabApi}
-                    </button>
-                    <button
-                      onClick={() => setStep5SubTab('ERD_CANVAS')}
-                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        step5SubTab === 'ERD_CANVAS'
-                          ? 'bg-[#2563EB] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      {copy.step05.tabErd}
-                    </button>
-                    <button
-                      onClick={() => setStep5SubTab('DOM_MAP')}
-                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        step5SubTab === 'DOM_MAP'
-                          ? 'bg-[#2563EB] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      {copy.step05.tabDom}
-                    </button>
-                    <button
-                      onClick={() => setStep5SubTab('BUNDLE_VAULT')}
-                      className={`px-3 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
-                        step5SubTab === 'BUNDLE_VAULT'
-                          ? 'bg-[#2563EB] text-white font-semibold'
-                          : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-                      }`}
-                    >
-                      {copy.step05.tabVault}
-                    </button>
+                  <div className="flex flex-wrap items-center bg-[#111317] border border-[#22262E] p-0.5 rounded-[4px] gap-2 text-[11px] font-mono">
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setStep5SubTab('API_EXPLORER')}
+                        className={`px-2.5 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                          step5SubTab === 'API_EXPLORER'
+                            ? 'bg-[#2563EB] text-white font-semibold'
+                            : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                        }`}
+                      >
+                        {copy.step05.tabApi}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStep5SubTab('ERD_CANVAS')}
+                        className={`px-2.5 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                          step5SubTab === 'ERD_CANVAS'
+                            ? 'bg-[#2563EB] text-white font-semibold'
+                            : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                        }`}
+                      >
+                        {copy.step05.tabErd}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStep5SubTab('DOM_MAP')}
+                        className={`px-2.5 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                          step5SubTab === 'DOM_MAP'
+                            ? 'bg-[#2563EB] text-white font-semibold'
+                            : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                        }`}
+                      >
+                        {copy.step05.tabDom}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStep5SubTab('BUNDLE_VAULT')}
+                        className={`px-2.5 py-1 rounded-[3px] transition-colors cursor-pointer whitespace-nowrap ${
+                          step5SubTab === 'BUNDLE_VAULT'
+                            ? 'bg-[#2563EB] text-white font-semibold'
+                            : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                        }`}
+                      >
+                        {copy.step05.tabVault}
+                      </button>
+                    </div>
+
+                    {/* Concise Telemetry Stats Badge */}
+                    <div className="flex items-center gap-1.5 text-[10.5px] px-2 py-0.5 bg-[#0B0C0E] border border-white/[0.06] rounded text-zinc-400 shrink-0">
+                      <span className="text-emerald-400 font-semibold tabular-nums">
+                        {discoveryResult.apiEndpoints?.length || 0} APIs
+                      </span>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-zinc-200 tabular-nums">
+                        {discoveryResult.databaseTables?.length || 0} {discoveryResult.branchOrDatabase === 'crawled:har' ? 'Table Inferred' : 'Tables'}
+                      </span>
+                      <span className="text-zinc-600">•</span>
+                      <span className="text-sky-400 tabular-nums">
+                        {discoveryResult.domTraceability?.length || 0} Selectors
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -4038,103 +4060,106 @@ The system provides deterministic transaction processing, input validation, and 
       </div>
       {/* =========================================================================
        * 4. COLLAPSED BOTTOM TERMINAL BAR (28px Height by Default, Expands to 220px)
+       * (Hidden in Executive View Mode)
        * ========================================================================= */}
-      {isTerminalExpanded ? (
-        <div className="h-[220px] min-h-[220px] bg-[#0E1015] border-t border-[#22262E] flex flex-col font-mono text-[11px] z-30 shrink-0">
-          {/* Expanded Terminal Header */}
-          <div className="h-[28px] bg-[#16191F] border-b border-[#22262E] px-4 flex items-center justify-between text-[#EDEDED] select-none">
-            <div className="flex items-center gap-3">
-              <Terminal className="h-3.5 w-3.5 text-[#3B82F6]" />
-              {[
-                { key: 'TERMINAL', label: copy.terminal.tabConsole },
-                { key: 'AST_OUTPUT', label: copy.terminal.tabAst },
-                { key: 'REA_STREAM', label: copy.terminal.tabStream },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveDrawerTab(tab.key as any)}
-                  className={`px-2.5 py-0.5 rounded-[2px] transition-colors cursor-pointer ${
-                    activeDrawerTab === tab.key
-                      ? 'bg-[#111317] text-[#EDEDED] font-bold border border-[#22262E]'
-                      : 'text-[#707070] hover:text-[#EDEDED]'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-3 text-[#707070]">
-              <span className="text-[10px] tabular-nums">ws://127.0.0.1:8080/ws/runner-stream (ONLINE)</span>
-              <button
-                onClick={() => setIsTerminalExpanded(false)}
-                className="hover:text-white cursor-pointer"
-                title={copy.terminal.collapse}
-              >
-                <ChevronDown className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Terminal Body */}
-          <div className="flex-1 overflow-y-auto p-3 text-[#A1A1A1] space-y-1 font-mono select-text">
-            {activeDrawerTab === 'TERMINAL' && (
-              <div>
-                {terminalLogs.map((log, i) => (
-                  <div key={i} className="whitespace-pre-wrap leading-relaxed">
-                    {log}
-                  </div>
+      {displayMode !== 'EXECUTIVE' && (
+        isTerminalExpanded ? (
+          <div className="h-[220px] min-h-[220px] bg-[#0E1015] border-t border-[#22262E] flex flex-col font-mono text-[11px] z-30 shrink-0">
+            {/* Expanded Terminal Header */}
+            <div className="h-[28px] bg-[#16191F] border-b border-[#22262E] px-4 flex items-center justify-between text-[#EDEDED] select-none">
+              <div className="flex items-center gap-3">
+                <Terminal className="h-3.5 w-3.5 text-[#3B82F6]" />
+                {[
+                  { key: 'TERMINAL', label: copy.terminal.tabConsole },
+                  { key: 'AST_OUTPUT', label: copy.terminal.tabAst },
+                  { key: 'REA_STREAM', label: copy.terminal.tabStream },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveDrawerTab(tab.key as any)}
+                    className={`px-2.5 py-0.5 rounded-[2px] transition-colors cursor-pointer ${
+                      activeDrawerTab === tab.key
+                        ? 'bg-[#111317] text-[#EDEDED] font-bold border border-[#22262E]'
+                        : 'text-[#707070] hover:text-[#EDEDED]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
                 ))}
               </div>
-            )}
-            {activeDrawerTab === 'AST_OUTPUT' && (
-              <div>
-                <div className="text-[#3B82F6]">[AST INSPECTOR] Discovered routes and models from Prisma &amp; Next.js:</div>
-                <pre className="text-[10px] text-[#EDEDED] mt-1 whitespace-pre-wrap">
-                  {JSON.stringify(
-                    {
-                      routes: discoveryResult.apiEndpoints.map((e) => ({
-                        method: e.method,
-                        path: e.path,
-                        controller: e.controllerPath,
-                      })),
-                      tables: discoveryResult.databaseTables.map((t) => t.tableName),
-                    },
-                    null,
-                    2
-                  )}
-                </pre>
+
+              <div className="flex items-center gap-3 text-[#707070]">
+                <span className="text-[10px] tabular-nums">ws://127.0.0.1:8080/ws/runner-stream (ONLINE)</span>
+                <button
+                  onClick={() => setIsTerminalExpanded(false)}
+                  className="hover:text-white cursor-pointer"
+                  title={copy.terminal.collapse}
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </button>
               </div>
-            )}
-            {activeDrawerTab === 'REA_STREAM' && (
-              <div>
-                <div className="text-[#059669]">[WEBSOCKET STREAM] Connected to ws://127.0.0.1:8080/ws/runner-stream</div>
-                <div className="text-[#707070] mt-1">
-                  Active Listeners: [Playwright POM Runner] ➔ [API Gateway] ➔ [morluto/rea Service Logic] ➔ [PostgreSQL DB Query]
+            </div>
+
+            {/* Terminal Body */}
+            <div className="flex-1 overflow-y-auto p-3 text-[#A1A1A1] space-y-1 font-mono select-text">
+              {activeDrawerTab === 'TERMINAL' && (
+                <div>
+                  {terminalLogs.map((log, i) => (
+                    <div key={i} className="whitespace-pre-wrap leading-relaxed">
+                      {log}
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+              {activeDrawerTab === 'AST_OUTPUT' && (
+                <div>
+                  <div className="text-[#3B82F6]">[AST INSPECTOR] Discovered routes and models from Prisma &amp; Next.js:</div>
+                  <pre className="text-[10px] text-[#EDEDED] mt-1 whitespace-pre-wrap">
+                    {JSON.stringify(
+                      {
+                        routes: discoveryResult.apiEndpoints.map((e) => ({
+                          method: e.method,
+                          path: e.path,
+                          controller: e.controllerPath,
+                        })),
+                        tables: discoveryResult.databaseTables.map((t) => t.tableName),
+                      },
+                      null,
+                      2
+                    )}
+                  </pre>
+                </div>
+              )}
+              {activeDrawerTab === 'REA_STREAM' && (
+                <div>
+                  <div className="text-[#059669]">[WEBSOCKET STREAM] Connected to ws://127.0.0.1:8080/ws/runner-stream</div>
+                  <div className="text-[#707070] mt-1">
+                    Active Listeners: [Playwright POM Runner] ➔ [API Gateway] ➔ [morluto/rea Service Logic] ➔ [PostgreSQL DB Query]
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      ) : (
-        /* Collapsed 28px Status Bar */
-        <footer
-          onClick={() => setIsTerminalExpanded(true)}
-          className="h-[28px] min-h-[28px] bg-[#0E1015] border-t border-[#22262E] px-4 flex items-center justify-between text-[11px] font-mono text-[#A1A1A1] cursor-pointer hover:bg-[#16191F] transition-colors select-none z-30 shrink-0"
-        >
-          <div className="flex items-center gap-2.5 truncate max-w-[85vw]">
-            <Terminal className="h-3 w-3 text-[#3B82F6]" />
-            <span className="text-[#059669] font-bold">ws://127.0.0.1:8080/ws/runner-stream (ONLINE)</span>
-            <span className="text-[#707070]">·</span>
-            <span className="truncate text-[#EDEDED]">
-              Latest: {terminalLogs[terminalLogs.length - 1] || 'Ready'}
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 text-[#707070] text-[10px]">
-            <span>{copy.terminal.expand}</span>
-            <ChevronUp className="h-3.5 w-3.5" />
-          </div>
-        </footer>
+        ) : (
+          /* Collapsed 28px Status Bar */
+          <footer
+            onClick={() => setIsTerminalExpanded(true)}
+            className="h-[28px] min-h-[28px] bg-[#0E1015] border-t border-[#22262E] px-4 flex items-center justify-between text-[11px] font-mono text-[#A1A1A1] cursor-pointer hover:bg-[#16191F] transition-colors select-none z-30 shrink-0"
+          >
+            <div className="flex items-center gap-2.5 truncate max-w-[85vw]">
+              <Terminal className="h-3 w-3 text-[#3B82F6]" />
+              <span className="text-[#059669] font-bold">ws://127.0.0.1:8080/ws/runner-stream (ONLINE)</span>
+              <span className="text-[#707070]">·</span>
+              <span className="truncate text-[#EDEDED]">
+                Latest: {terminalLogs[terminalLogs.length - 1] || 'Ready'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-[#707070] text-[10px]">
+              <span>{copy.terminal.expand}</span>
+              <ChevronUp className="h-3.5 w-3.5" />
+            </div>
+          </footer>
+        )
       )}
 
       {/* =========================================================================

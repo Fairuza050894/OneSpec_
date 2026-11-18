@@ -373,64 +373,117 @@ export function TriModalDiscoveryToolbar({
         className="hidden"
       />
 
-      {/* Row 1: Tri-Modal Mode Switcher & Execution Status Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="grid grid-cols-3 gap-1 bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] h-9 flex-1 max-w-[760px]">
+      {/* COMPACT CONFIGURATION ROW (h-11 px-3 bg-[#111317] border border-[#22262E] rounded-[4px] flex items-center justify-between gap-2.5) */}
+      <div className="min-h-[44px] py-1.5 px-3 bg-[#101217] border border-[#22262E] rounded-[4px] flex flex-wrap items-center justify-between gap-2.5">
+        {/* Left: Mode Selection Pill (Full text, no ellipsis cutting) */}
+        <div className="flex items-center bg-[#0B0C0E] border border-white/[0.08] p-0.5 rounded-[4px] h-8 shrink-0">
           <button
+            type="button"
             onClick={() => setActiveMode('MODE_A_GIT')}
-            className={`h-full px-3 rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer text-[11px] whitespace-nowrap ${
+            className={`h-full px-2.5 rounded-[3px] flex items-center gap-1.5 transition-colors cursor-pointer text-[11px] font-medium whitespace-nowrap ${
               activeMode === 'MODE_A_GIT'
-                ? 'bg-[#2563EB] text-white font-bold'
-                : 'text-[#707070] hover:text-[#EDEDED]'
+                ? 'bg-blue-600 text-white font-semibold'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <GitBranch className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{copy.step05.modeAGit}</span>
+            <span>Mode A: Git</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveMode('MODE_B_LOCAL')}
-            className={`h-full px-3 rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer text-[11px] whitespace-nowrap ${
+            className={`h-full px-2.5 rounded-[3px] flex items-center gap-1.5 transition-colors cursor-pointer text-[11px] font-medium whitespace-nowrap ${
               activeMode === 'MODE_B_LOCAL'
-                ? 'bg-[#2563EB] text-white font-bold'
-                : 'text-[#707070] hover:text-[#EDEDED]'
+                ? 'bg-blue-600 text-white font-semibold'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <FolderGit2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{copy.step05.modeBArchive}</span>
+            <span>Mode B: ZIP</span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveMode('MODE_C_STAGING')}
-            className={`h-full px-3 rounded-[3px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer text-[11px] whitespace-nowrap ${
+            className={`h-full px-2.5 rounded-[3px] flex items-center gap-1.5 transition-colors cursor-pointer text-[11px] font-medium whitespace-nowrap ${
               activeMode === 'MODE_C_STAGING'
-                ? 'bg-[#D97706] text-white font-bold'
-                : 'text-[#707070] hover:text-[#EDEDED]'
+                ? 'bg-amber-600 text-white font-semibold'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <Globe className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">{copy.step05.modeCStaging}</span>
+            <span>Mode C: Live URL &amp; HAR</span>
           </button>
         </div>
 
-        {/* Discovery Trigger Action Button (h-9) */}
-        <div className="flex items-center gap-2">
+        {/* Center: Inline Primary Target Input based on activeMode */}
+        <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+          {activeMode === 'MODE_C_STAGING' && (
+            <div className="flex items-center gap-1.5 flex-1 min-w-[200px] bg-[#0B0C0E] border border-white/[0.08] px-2.5 py-1 rounded-[3px] h-8">
+              <Globe className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+              <input
+                type="text"
+                value={stagingUrl}
+                onChange={(e) => {
+                  setStagingUrl(e.target.value);
+                  if (modeCNotice) setModeCNotice(null);
+                }}
+                placeholder="https://staging.internal/service"
+                className="bg-transparent border-none outline-none text-zinc-100 text-[11px] font-mono flex-1 min-w-0"
+              />
+            </div>
+          )}
+
+          {activeMode === 'MODE_A_GIT' && (
+            <div className="flex items-center gap-1.5 flex-1 min-w-[200px] bg-[#0B0C0E] border border-white/[0.08] px-2.5 py-1 rounded-[3px] h-8">
+              <GitBranch className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+              <input
+                type="text"
+                value={gitUrl}
+                onChange={(e) => setGitUrl(e.target.value)}
+                placeholder="https://github.com/org/repo.git"
+                className="bg-transparent border-none outline-none text-zinc-100 text-[11px] font-mono flex-1 min-w-0"
+              />
+            </div>
+          )}
+
+          {activeMode === 'MODE_B_LOCAL' && (
+            <div className="flex items-center gap-2 flex-1">
+              <button
+                type="button"
+                onClick={() => zipInputRef.current?.click()}
+                className="h-8 px-3 bg-[#0B0C0E] border border-white/[0.08] hover:border-blue-500 text-zinc-200 font-medium rounded-[3px] transition-colors cursor-pointer text-[11px] flex items-center gap-1.5"
+              >
+                <FileArchive className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                <span>Browse .ZIP / Folder</span>
+              </button>
+              {uploadedTelemetry && (
+                <span className="text-[10px] text-zinc-400 font-mono truncate">
+                  {uploadedTelemetry.filename} ({uploadedTelemetry.sizeFormatted})
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right: Main Discovery Trigger Action Button */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
+            type="button"
             onClick={handleTriggerDiscovery}
             disabled={isScanning || isProcessingFile}
-            className="h-9 px-4 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[3px] flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap shrink-0 text-[11.5px]"
+            className="h-8 px-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold rounded-[3px] flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap text-[11px]"
           >
             {isScanning ? (
               <>
                 <RotateCw className="h-3.5 w-3.5 animate-spin" />
-                <span>Cloning &amp; Extracting AST...</span>
+                <span>Scanning...</span>
               </>
             ) : (
               <>
                 <Play className="h-3.5 w-3.5 fill-current" />
-                <span>
-                  {copy.step05.executeDiscovery}
-                </span>
+                <span>{copy.step05.executeDiscovery}</span>
               </>
             )}
           </button>
@@ -614,20 +667,6 @@ export function TriModalDiscoveryToolbar({
       {activeMode === 'MODE_C_STAGING' && (
         <div className="bg-[#0B0C0E] border border-[#22262E] p-2.5 rounded-[3px] flex flex-col gap-2.5">
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="flex items-center gap-1.5 flex-1 min-w-[220px]">
-              <span className="text-[#707070] text-[10px] shrink-0">STAGING URL:</span>
-              <input
-                type="text"
-                value={stagingUrl}
-                onChange={(e) => {
-                  setStagingUrl(e.target.value);
-                  if (modeCNotice) setModeCNotice(null);
-                }}
-                placeholder="https://staging.internal/service"
-                className="bg-[#111317] border border-[#22262E] px-2 py-1 text-[#EDEDED] text-[11px] font-mono rounded-[2px] outline-none flex-1 min-w-0 focus:border-[#3B82F6]"
-              />
-            </div>
-
             <div className="flex items-center gap-1.5 w-full sm:w-64">
               <Database className="h-3 w-3 text-[#707070] shrink-0" />
               <span className="text-[#707070] text-[10px] shrink-0">DB URI:</span>
@@ -743,44 +782,6 @@ export function TriModalDiscoveryToolbar({
               <span>{modeCNotice}</span>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Footer: Bottom Telemetry & AST Extraction Status */}
-      {lastResult && (
-        <div className="pt-1.5 border-t border-[#22262E] flex items-center justify-between text-[10.5px] text-[#A1A1A1]">
-          <div className="flex items-center gap-2">
-            <span className="text-[#059669] flex items-center gap-1 font-mono font-bold">
-              <CheckCircle2 className="h-3 w-3" />
-              <span>AST Parsed in</span>
-              <strong className="tabular-nums font-mono text-white">{lastResult.durationMs}ms</strong>
-            </span>
-            <span className="text-[#707070]">·</span>
-            <span className="tabular-nums font-mono text-[#EDEDED]">
-              {lastResult.apiEndpoints?.length || 0} APIs Discovered
-            </span>
-            <span className="text-[#707070]">·</span>
-            <span className="tabular-nums font-mono text-[#EDEDED] inline-flex items-center gap-1">
-              {lastResult.branchOrDatabase === 'crawled:har' || dbUri === 'crawled:har' ? (
-                <>
-                  <span>{lastResult.databaseTables?.length || 0} Tables Inferred (JSON/HAR)</span>
-                  <span className="px-1 py-0.2 rounded bg-amber-950/80 border border-amber-700/60 text-amber-300 text-[8.5px] font-bold">
-                    INFERRED
-                  </span>
-                </>
-              ) : (
-                <span>{lastResult.databaseTables?.length || 0} Tables Introspected</span>
-              )}
-            </span>
-            <span className="text-[#707070]">·</span>
-            <span className="tabular-nums font-mono text-[#EDEDED]">
-              {lastResult.domTraceability?.length || 0} DOM Selectors Bound
-            </span>
-          </div>
-
-          <div className="text-[#707070] font-mono text-[10px]">
-            Target: <span className="text-[#3B82F6]">{lastResult.targetIdentifier}</span>
-          </div>
         </div>
       )}
     </div>

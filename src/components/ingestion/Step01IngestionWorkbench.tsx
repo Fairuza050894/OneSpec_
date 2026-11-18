@@ -50,6 +50,7 @@ export interface InteractiveSessionState {
 }
 
 export interface Step01IngestionWorkbenchProps {
+  displayMode?: 'EXECUTIVE' | 'TECHNICAL';
   copy: ReturnType<typeof useStudioLocale>['copy'];
   locale: 'en' | 'id';
   isAnalyzingSource: boolean;
@@ -114,6 +115,7 @@ export interface Step01IngestionWorkbenchProps {
 }
 
 export function Step01IngestionWorkbench({
+  displayMode = 'TECHNICAL',
   copy,
   locale,
   isAnalyzingSource,
@@ -901,36 +903,38 @@ export function Step01IngestionWorkbench({
       </div>
 
       <div className="flex-1 grid grid-cols-12 gap-4 min-h-[280px]">
-        {/* Left Column: Raw Stakeholder MoM & Notes */}
-        <div className="col-span-12 lg:col-span-5 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px]">
-          <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E] shrink-0">
-            <div className="flex items-center gap-2">
-              <FileText className="h-3.5 w-3.5 text-[#3B82F6]" />
-              <span className="text-[12.5px] font-bold text-[#EDEDED]">{copy.step01.momCardTitle}</span>
+        {/* Left Column: Raw Stakeholder MoM & Notes (Hidden in Executive Mode) */}
+        {displayMode !== 'EXECUTIVE' && (
+          <div className="col-span-12 lg:col-span-5 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px]">
+            <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E] shrink-0">
+              <div className="flex items-center gap-2">
+                <FileText className="h-3.5 w-3.5 text-[#3B82F6]" />
+                <span className="text-[12.5px] font-bold text-[#EDEDED]">{copy.step01.momCardTitle}</span>
+              </div>
+              <span className="text-[10.5px] font-mono text-[#707070] tabular-nums">
+                {rawMoMNotes.length} {copy.step01.charsLabel} · {extractedEntities.length}{' '}
+                {copy.step01.invariantsLabel}
+              </span>
             </div>
-            <span className="text-[10.5px] font-mono text-[#707070] tabular-nums">
-              {rawMoMNotes.length} {copy.step01.charsLabel} · {extractedEntities.length}{' '}
-              {copy.step01.invariantsLabel}
-            </span>
+
+            <textarea
+              value={rawMoMNotes}
+              onChange={(e) => setRawMoMNotes(e.target.value)}
+              className="flex-1 w-full min-h-[160px] bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-2.5 text-[12px] font-mono leading-[1.55] text-[#EDEDED] resize-none outline-none focus:border-[#3B82F6]"
+            />
+
+            <div className="px-2.5 py-1.5 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] text-[11px] text-[#A1A1A1] font-mono flex items-center justify-between gap-2 shrink-0">
+              <span className="whitespace-nowrap">{copy.step01.activeScopeLabel}</span>
+              <strong className="text-[#059669] tabular-nums truncate">
+                {brdMatrixRows.length} {copy.step01.rulesUnit} · {validationRules.length}{' '}
+                {copy.step01.contractsUnit}
+              </strong>
+            </div>
           </div>
+        )}
 
-          <textarea
-            value={rawMoMNotes}
-            onChange={(e) => setRawMoMNotes(e.target.value)}
-            className="flex-1 w-full min-h-[160px] bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-2.5 text-[12px] font-mono leading-[1.55] text-[#EDEDED] resize-none outline-none focus:border-[#3B82F6]"
-          />
-
-          <div className="px-2.5 py-1.5 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] text-[11px] text-[#A1A1A1] font-mono flex items-center justify-between gap-2 shrink-0">
-            <span className="whitespace-nowrap">{copy.step01.activeScopeLabel}</span>
-            <strong className="text-[#059669] tabular-nums truncate">
-              {brdMatrixRows.length} {copy.step01.rulesUnit} · {validationRules.length}{' '}
-              {copy.step01.contractsUnit}
-            </strong>
-          </div>
-        </div>
-
-        {/* Right Column: Extracted Entities, Actors & Constraints */}
-        <div className="col-span-12 lg:col-span-7 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px] overflow-hidden">
+        {/* Right Column: Extracted Entities, Actors & Constraints (Expanded to full width in Executive Mode) */}
+        <div className={`col-span-12 ${displayMode === 'EXECUTIVE' ? 'lg:col-span-12' : 'lg:col-span-7'} flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px] overflow-hidden`}>
           <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E] shrink-0">
             <div className="flex items-center gap-2">
               <Layers className="h-3.5 w-3.5 text-[#059669]" />

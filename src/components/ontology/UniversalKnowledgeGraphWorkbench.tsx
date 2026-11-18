@@ -735,61 +735,7 @@ export function UniversalKnowledgeGraphWorkbench({
               <span>{isSavingSnapshot ? copy.step12.savingSnapshot : locale === 'id' ? 'Simpan Snapshot' : 'Save Snapshot'}</span>
             </button>
           )}
-
-          <button
-            onClick={handleDownloadAzPortalHtml}
-            className="h-7 px-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-[3px] transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
-            title="Download standalone 4-Book A-Z Documentation Portal HTML"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>{locale === 'id' ? 'Portal (.html)' : 'Portal (.html)'}</span>
-          </button>
-          <button
-            onClick={handleDownloadWordDoc}
-            disabled={isExportingDocx}
-            className="h-7 px-2 bg-[#111317] hover:bg-[#22262E] disabled:opacity-50 border border-[#22262E] hover:border-[#3B82F6] text-[#60A5FA] font-bold rounded-[3px] transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
-            title="Download native OOXML MS Word / Google Docs Document (.docx)"
-          >
-            {isExportingDocx ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
-            <span>{isExportingDocx ? 'Word...' : 'Word (.docx)'}</span>
-          </button>
-
-          <button
-            onClick={handleDownloadPdf}
-            disabled={isExportingPdf}
-            className="h-7 px-2 bg-[#111317] hover:bg-[#22262E] disabled:opacity-50 border border-[#22262E] hover:border-[#EF4444] text-[#F87171] font-bold rounded-[3px] transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
-            title="Download print-ready A4 PDF Documentation Bundle (.pdf)"
-          >
-            {isExportingPdf ? <RotateCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            <span>{isExportingPdf ? 'PDF...' : 'PDF (.pdf)'}</span>
-          </button>
-          <button
-            onClick={handleDownloadExcelXls}
-            className="h-7 px-2 bg-[#111317] hover:bg-[#22262E] border border-[#22262E] hover:border-[#10B981] text-[#10B981] font-bold rounded-[3px] transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
-            title="Download MS Excel QA Workbook & Data Dictionary (.xls)"
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5" />
-            <span>Excel (.xls)</span>
-          </button>
-
-          <button
-            onClick={handleDownloadDrawioXml}
-            className="h-7 px-2 bg-[#111317] hover:bg-[#22262E] border border-[#22262E] hover:border-[#F59E0B] text-[#F59E0B] font-bold rounded-[3px] transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
-            title="Export editable Draw.io Architecture Diagram (.drawio)"
-          >
-            <Network className="h-3.5 w-3.5" />
-            <span>Draw.io</span>
-          </button>
-
-          <button
-            onClick={handleDownloadLaypersonMarkdown}
-            className="h-7 px-2 bg-[#111317] hover:bg-[#22262E] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] font-bold rounded-[3px] transition-colors cursor-pointer flex items-center gap-1 whitespace-nowrap"
-            title="Export complete 4-Book Markdown Documentation Bundle (.md)"
-          >
-            <FileText className="h-3.5 w-3.5 text-[#10B981]" />
-            <span>Markdown (.md)</span>
-          </button>
-                                </div>
+        </div>
 
       </div>
       {/* 4 Single-Line Navigation Tabs */}
