@@ -3,7 +3,7 @@
  * Provides:
  * 1. ISO 9001:2015 Clause 7.5 Formal Document Control Sheet & Automated Revision History Ledger
  * 2. Global Cross-Project Federated Search Engine across Vault projects (modules, APIs, DB, rules, manuals, QA)
- * 3. Enterprise Portfolio Governance, Cross-System Dependency Map & ISO 5055 Executive ROI Metrics
+ * 3. Enterprise Portfolio Governance, Cross-System Dependency Map & Estimated Engineering Efficiency (Heuristic Model) Metrics
  */
 
 import type { SavedProjectRecord, VaultProjectType } from './workspaceVaultService';
@@ -444,7 +444,7 @@ export class EnterpriseLibraryPortalService {
       const environment = getEnvironmentLabel(rec.targetUrl);
       const owner = docCtrl.approvedBy || docCtrl.preparedBy || (rec as SavedProjectRecord & { owner?: string }).owner || 'Unassigned';
 
-      // ISO 5055 Engineering ROI Estimate: BA (2.5h/mod) + Arch (1.5h/table+api) + QA (0.6h/test) + Tech Writer (3.0h/mod manual)
+      // Engineering Efficiency Heuristic Estimate: BA (2.5h/mod) + Arch (1.5h/table+api) + QA (0.6h/test) + Tech Writer (3.0h/mod manual)
       const manHoursSaved = Math.round(modulesCount * 5.5 + apisCount * 0.75 + tablesCount * 1.2 + testsCount * 0.5);
       const manHoursSavedTotal = {
         ba: Math.round(modulesCount * 2.5),

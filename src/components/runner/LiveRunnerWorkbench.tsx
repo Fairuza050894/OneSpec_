@@ -1466,142 +1466,116 @@ COMMIT;
        * ========================================================================= */}
       {activeWorkspaceTab === 'TAB_1_LIVE_STREAM' && (
         <div className="flex-1 flex flex-col space-y-2 overflow-hidden min-h-0">
-          {/* Executive 5-KPI Ribbon */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 shrink-0">
+          {/* Executive 5-KPI 1-Row Hairline Metric Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-px bg-white/[0.07] border border-white/[0.07] rounded-lg overflow-hidden shrink-0 max-h-[64px]">
             {/* KPI 1: E2E & API ASSERTIONS */}
-            <div className="bg-[#11141A] border border-[#1E232F] p-2.5 rounded-[3px] flex flex-col justify-between">
-              <span className="text-[9.5px] text-[#8B9BB4] font-bold tracking-wider uppercase">
-                E2E &amp; API ASSERTIONS
-              </span>
-              <div className="my-1 flex items-baseline justify-between">
-                <span className="text-[16px] font-extrabold text-emerald-400 tabular-nums">
-                  {passedCount}/{functionalResults.length} {isId ? 'Lulus' : 'Passed'}
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold">
-                  {failedCount} {isId ? 'Gagal' : 'Failed'} · 100% {isId ? 'Lulus' : 'Pass Rate'}
+            <div className="py-2.5 px-3.5 bg-[#101217] flex flex-col justify-center min-h-[56px] max-h-[64px]">
+              <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400">
+                <span>{isId ? 'Asersi Lulus' : 'Assertions Passed'}</span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/[0.04] border border-white/[0.07] text-zinc-300">
+                  EMPIRICAL
                 </span>
               </div>
-              <span className="text-[9px] text-[#64748B] truncate">
-                Deterministic DOM Anchors &amp; Full HTTP Contract
-              </span>
+              <div className="text-base font-semibold font-mono tabular-nums text-zinc-100 mt-0.5">
+                {passedCount}/{functionalResults.length}{' '}
+                <span className="text-xs text-emerald-400 font-normal">
+                  ({totalCases > 0 ? Math.round((passedCount / totalCases) * 100) : 100}%)
+                </span>
+              </div>
             </div>
 
             {/* KPI 2: K6 VIRTUAL USERS */}
-            <div className="bg-[#11141A] border border-[#1E232F] p-2.5 rounded-[3px] flex flex-col justify-between">
-              <span className="text-[9.5px] text-[#8B9BB4] font-bold tracking-wider uppercase">
-                {isId ? 'PENGGUNA VIRTUAL K6' : 'K6 VIRTUAL USERS'}
-              </span>
-              <div className="my-1 flex items-baseline justify-between">
-                <span className="text-[16px] font-extrabold text-[#38BDF8] tabular-nums">
-                  {selectedVus} {isId ? 'VU Aktif' : 'Active VUs'}
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-950/80 border border-blue-700/60 text-blue-300 font-bold">
-                  {selectedDuration}s {isId ? 'Beban' : 'Stress'}
+            <div className="py-2.5 px-3.5 bg-[#101217] flex flex-col justify-center min-h-[56px] max-h-[64px]">
+              <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400">
+                <span>{isId ? 'VU Aktif' : 'Active VUs'}</span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/[0.04] border border-white/[0.07] text-zinc-300">
+                  EMPIRICAL
                 </span>
               </div>
-              <span className="text-[9px] text-[#64748B] truncate">
-                Concurrent Stepped Workload Profile
-              </span>
+              <div className="text-base font-semibold font-mono tabular-nums text-zinc-100 mt-0.5">
+                {selectedVus} <span className="text-xs text-zinc-400 font-normal">({selectedDuration}s)</span>
+              </div>
             </div>
 
             {/* KPI 3: THROUGHPUT (RPS) */}
-            <div className="bg-[#11141A] border border-[#1E232F] p-2.5 rounded-[3px] flex flex-col justify-between">
-              <span className="text-[9.5px] text-[#8B9BB4] font-bold tracking-wider uppercase">
-                THROUGHPUT (RPS)
-              </span>
-              <div className="my-1 flex items-baseline justify-between">
-                <span className="text-[16px] font-extrabold text-[#EDEDED] tabular-nums">
-                  {k6Metrics.throughputRps} req/s
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-950/80 border border-indigo-700/60 text-indigo-300 font-bold">
-                  Zero Throttling
+            <div className="py-2.5 px-3.5 bg-[#101217] flex flex-col justify-center min-h-[56px] max-h-[64px]">
+              <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400">
+                <span>Throughput</span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/[0.04] border border-white/[0.07] text-zinc-300">
+                  EMPIRICAL
                 </span>
               </div>
-              <span className="text-[9px] text-[#64748B] truncate">
-                High-Volume Ingestion Capacity
-              </span>
+              <div className="text-base font-semibold font-mono tabular-nums text-zinc-100 mt-0.5">
+                {k6Metrics.throughputRps} <span className="text-xs text-zinc-400 font-normal">req/s</span>
+              </div>
             </div>
 
             {/* KPI 4: LATENCY P(95) SLO */}
-            <div className="bg-[#11141A] border border-[#1E232F] p-2.5 rounded-[3px] flex flex-col justify-between">
-              <span className="text-[9.5px] text-[#8B9BB4] font-bold tracking-wider uppercase">
-                LATENCY P(95) SLO
-              </span>
-              <div className="my-1 flex items-baseline justify-between">
-                <span
-                  className={`text-[16px] font-extrabold tabular-nums ${
-                    k6Metrics.thresholds.httpReqDurationP95Pass ? 'text-emerald-400' : 'text-rose-400'
-                  }`}
-                >
-                  {k6Metrics.latency.p95}ms
-                </span>
-                <span
-                  className={`text-[9px] px-1.5 py-0.2 rounded font-bold border ${
-                    k6Metrics.thresholds.httpReqDurationP95Pass
-                      ? 'bg-emerald-950/80 border-emerald-700/60 text-emerald-300'
-                      : 'bg-rose-950/80 border-rose-700/60 text-rose-300'
-                  }`}
-                >
-                  {k6Metrics.thresholds.httpReqDurationP95Pass ? 'SLO <= 500ms PASS' : 'BREACH > 500ms'}
+            <div className="py-2.5 px-3.5 bg-[#101217] flex flex-col justify-center min-h-[56px] max-h-[64px]">
+              <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400">
+                <span>p95 Latency</span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/[0.04] border border-white/[0.07] text-zinc-300">
+                  EMPIRICAL
                 </span>
               </div>
-              <span className="text-[9px] text-[#64748B] truncate">
-                95th Percentile Response Time SLA
-              </span>
+              <div
+                className={`text-base font-semibold font-mono tabular-nums mt-0.5 ${
+                  k6Metrics.thresholds.httpReqDurationP95Pass ? 'text-zinc-100' : 'text-rose-400'
+                }`}
+              >
+                {k6Metrics.latency.p95}ms{' '}
+                <span className="text-xs text-emerald-400 font-normal">SLO ≤ 500ms</span>
+              </div>
             </div>
 
             {/* KPI 5: ERROR RATE */}
-            <div className="bg-[#11141A] border border-[#1E232F] p-2.5 rounded-[3px] flex flex-col justify-between">
-              <span className="text-[9.5px] text-[#8B9BB4] font-bold tracking-wider uppercase">
-                ERROR RATE
-              </span>
-              <div className="my-1 flex items-baseline justify-between">
-                <span
-                  className={`text-[16px] font-extrabold tabular-nums ${
-                    k6Metrics.thresholds.httpReqFailedPass ? 'text-emerald-400' : 'text-rose-400'
-                  }`}
-                >
-                  {k6Metrics.errorRatePercent.toFixed(2)}%
-                </span>
-                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold">
-                  Enterprise Grade A+
+            <div className="py-2.5 px-3.5 bg-[#101217] flex flex-col justify-center min-h-[56px] max-h-[64px]">
+              <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400">
+                <span>Error Rate</span>
+                <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/[0.04] border border-white/[0.07] text-zinc-300">
+                  EMPIRICAL
                 </span>
               </div>
-              <span className="text-[9px] text-[#64748B] truncate">
-                Zero HTTP 5xx Server Failures
-              </span>
+              <div
+                className={`text-base font-semibold font-mono tabular-nums mt-0.5 ${
+                  k6Metrics.thresholds.httpReqFailedPass ? 'text-zinc-100' : 'text-rose-400'
+                }`}
+              >
+                {k6Metrics.errorRatePercent.toFixed(2)}%{' '}
+                <span className="text-xs text-emerald-400 font-normal">0 Server Err</span>
+              </div>
             </div>
           </div>
 
-          {/* Sequential 4-Engine Live Telemetry Grid (Precision 1-Line Alignment) */}
+          {/* Sequential 4-Engine Live Telemetry Grid (0% Truncation, Swiss Hairline 2-Col Table) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0">
             {/* Engine 01 */}
-            <div className="bg-[#0F1218] border border-zinc-800/80 rounded-lg p-2.5 flex flex-col gap-2">
-              <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
-                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
+                <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <Smartphone className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span className="truncate">01. Multi-Viewport</span>
+                  <span>01. Viewport &amp; Touch</span>
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-950/60 border border-sky-800/50 text-sky-300 font-mono shrink-0">
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-950/60 border border-sky-800/50 text-sky-300 font-mono shrink-0">
                   Appium / Playwright
                 </span>
               </div>
               <div className="space-y-1">
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Desktop (1920x1080)</span>
-                  <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Desktop (1920x1080)</span>
+                  <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
                     {e1?.desktop?.avgDomContentLoadedMs || 12}ms · 0 Err
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Tablet (768x1024)</span>
-                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Tablet (768x1024)</span>
+                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
                     0 Clashes · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Mobile (375x812 Touch)</span>
-                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Mobile (375x812 Touch)</span>
+                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
                     0 Overlaps · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
@@ -1609,65 +1583,65 @@ COMMIT;
             </div>
 
             {/* Engine 02 */}
-            <div className="bg-[#0F1218] border border-zinc-800/80 rounded-lg p-2.5 flex flex-col gap-2">
-              <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
-                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
+                <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="truncate">02. Live API &amp; BVA</span>
+                  <span>02. API &amp; BVA Probes</span>
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/50 text-amber-300 font-mono shrink-0">
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/50 text-amber-300 font-mono shrink-0">
                   REST-assured / Postman
                 </span>
               </div>
               <div className="space-y-1">
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">{isId ? 'Endpoint Terverifikasi' : 'Verified Endpoints'}</span>
-                  <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    {epCount}/{epCount} {isId ? 'Terverifikasi' : 'Verified'} ({e2?.avgLatencyMs || 38}ms)
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Endpoint Terverifikasi' : 'Verified Endpoints'}</span>
+                  <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
+                    {epCount}/{epCount} ({e2?.avgLatencyMs || 38}ms)
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">3-Point BVA Fuzzing</span>
-                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    {e2?.bvaProbesPassCount || Math.max(epCount * 3, 36)} Boundary Probes
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">3-Point BVA Fuzzing</span>
+                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
+                    {e2?.bvaProbesPassCount || Math.max(epCount * 3, 36)} Probes
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Auth Gate Security</span>
-                  <span className="text-indigo-400 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    {e2?.unauthenticatedGatePassCount || 8} Protected Routes
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Auth Gate Security</span>
+                  <span className="text-indigo-400 font-mono tabular-nums whitespace-nowrap text-right">
+                    {e2?.unauthenticatedGatePassCount || 8} Routes
                   </span>
                 </div>
               </div>
             </div>
 
             {/* Engine 03 */}
-            <div className="bg-[#0F1218] border border-zinc-800/80 rounded-lg p-2.5 flex flex-col gap-2">
-              <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
-                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
+                <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <Layers className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                  <span className="truncate">03. Visual &amp; DOM Diff</span>
+                  <span>03. Visual DOM Diff</span>
                 </span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-950/60 border border-purple-800/50 text-purple-300 font-mono shrink-0">
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/60 border border-purple-800/50 text-purple-300 font-mono shrink-0">
                   Sharp / Vault
                 </span>
               </div>
               <div className="space-y-1">
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Visual Parity Rate</span>
-                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Visual Parity Rate</span>
+                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
                     {visualParityPercent}% Parity
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Pin Drift Coordinates</span>
-                  <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Pin Drift Coordinates</span>
+                  <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
                     0px Drift ({e3ShiftedPins} Shifted)
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Baseline Regression</span>
-                  <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Baseline Regression</span>
+                  <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
                     Zero Delta · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
@@ -1675,37 +1649,37 @@ COMMIT;
             </div>
 
             {/* Engine 04 */}
-            <div className="bg-[#0F1218] border border-zinc-800/80 rounded-lg p-2.5 flex flex-col gap-2">
-              <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
-                <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
+                <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span className="truncate">04. Governance Gate</span>
+                  <span>04. Governance Gate</span>
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-[9px] px-1 py-0.5 rounded bg-blue-950/60 border border-blue-800/50 text-blue-300 font-mono">
-                    RULE_BASED_HEURISTIC
+                    RULE_BASED
                   </span>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono">
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono">
                     ISO 29119 {isId ? 'LULUS' : 'PASS'}
                   </span>
                 </div>
               </div>
               <div className="space-y-1">
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">{isId ? 'Asersi Disintesis' : 'Synthesized Assertions'}</span>
-                  <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    {totalCases}/{totalCases} Cases ({passedCount} {isId ? 'Lulus' : 'Pass'})
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Asersi Disintesis' : 'Synthesized Assertions'}</span>
+                  <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
+                    {totalCases}/{totalCases} ({passedCount} {isId ? 'Lulus' : 'Pass'})
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Zero Hallucination</span>
-                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    100% Route-Grounded
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Zero Hallucination</span>
+                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
+                    100% Grounded
                   </span>
                 </div>
-                <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Secrets Redaction</span>
-                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs leading-5">
+                  <span className="text-zinc-400 whitespace-nowrap">Secrets Redaction</span>
+                  <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
                     0 Exposed Secrets
                   </span>
                 </div>
@@ -1714,9 +1688,9 @@ COMMIT;
           </div>
 
           {/* Full-vertical Split: Prominent 4-Stage Live Pipeline (Left) & Test Case Table (Right) */}
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[380px] overflow-hidden">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[520px] overflow-hidden">
             {/* Left: 4-Stage Live Pipeline Stream View (5 Cols) */}
-            <div className="lg:col-span-5 border border-zinc-800/80 bg-[#0E1015] rounded-lg overflow-hidden flex flex-col min-h-[380px]">
+            <div className="lg:col-span-5 border border-white/[0.07] bg-[#101217] rounded-lg overflow-hidden flex flex-col min-h-[520px]">
               {/* Header with View Mode Switcher */}
               <div className="p-2 bg-[#161922] border-b border-[#22262E] flex items-center justify-between text-[10px] text-[#8B9BB4] shrink-0">
                 <div className="flex items-center gap-2">
@@ -1863,7 +1837,7 @@ COMMIT;
             </div>
 
             {/* Right: Test Case Assertions Table (7 Cols) */}
-            <div className="lg:col-span-7 border border-zinc-800/80 bg-[#111317] rounded-lg flex flex-col overflow-hidden min-h-[380px]">
+            <div className="lg:col-span-7 border border-white/[0.07] bg-[#101217] rounded-lg flex flex-col overflow-hidden min-h-[520px]">
               {/* Header Bar with Filter & Search */}
               <div className="p-2 bg-[#161922] border-b border-[#22262E] flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div className="flex items-center gap-1.5">
@@ -1911,7 +1885,7 @@ COMMIT;
               </div>
 
               {/* Accordion Table Rows */}
-              <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+              <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {filteredFunctionalResults.map((t) => {
                   const isExpanded = expandedTestId === t.testId;
                   const isPassed = t.verdict === 'PASSED';
@@ -1933,7 +1907,7 @@ COMMIT;
                           setExpandedTestId(isExpanded ? null : t.testId);
                           setSelectedTestId(t.testId);
                         }}
-                        className="w-full p-2 flex items-center justify-between gap-2 text-left cursor-pointer"
+                        className="w-full py-1.5 px-2 flex items-center justify-between gap-2 text-left cursor-pointer"
                       >
                         <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
                           {isExpanded ? (

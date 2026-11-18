@@ -353,8 +353,10 @@ export function buildFeatureModuleBlueprintSvgDataUrl(
     `</svg>`;
 
   const base64 =
-    typeof Buffer !== 'undefined'
-      ? Buffer.from(svg, 'utf8').toString('base64')
+    typeof window !== 'undefined'
+      ? btoa(unescape(encodeURIComponent(svg)))
+      : typeof globalThis.Buffer !== 'undefined'
+      ? globalThis.Buffer.from(svg, 'utf8').toString('base64')
       : btoa(unescape(encodeURIComponent(svg)));
   return `data:image/svg+xml;base64,${base64}`;
 }

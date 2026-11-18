@@ -671,7 +671,7 @@ export function SingleProductDeepReader({
       </div>
 
       {/* =====================================================================
-       * SECTION 1: ISO 9001 DOCUMENT CONTROL & ISO 5055 ROI VALUATION
+       * SECTION 1: ISO 9001 DOCUMENT CONTROL & ESTIMATED ENGINEERING EFFICIENCY (HEURISTIC MODEL)
        * ===================================================================== */}
       {(activeSection === 'ALL' || activeSection === 'SEC1_DOC_CONTROL') && (
         <div className="bg-[#111317] border border-[#22262E] rounded-[4px] p-4 space-y-4">
@@ -679,7 +679,7 @@ export function SingleProductDeepReader({
             <div className="flex items-center gap-2">
               <span className="font-mono text-[12px] font-bold text-[#60A5FA]">
                 {isId
-                  ? '📋 1. LEMBAR KENDALI DOKUMEN RESMI (ISO 9001:2015 KLAUSUL 7.5) & ESTIMASI EFISIENSI REKAYASA (HEURISTIC MODEL)'
+                  ? '📋 1. LEMBAR KENDALI DOKUMEN RESMI (ISO 9001:2015 KLAUSUL 7.5) & ESTIMASI EFISIENSI REKAYASA (MODEL HEURISTIK)'
                   : '📋 1. OFFICIAL ISO 9001:2015 CLAUSE 7.5 DOCUMENT CONTROL & ESTIMATED ENGINEERING EFFICIENCY (HEURISTIC MODEL)'}
               </span>
             </div>
@@ -710,12 +710,12 @@ export function SingleProductDeepReader({
             </div>
           </div>
 
-          {/* Estimasi Efisiensi Rekayasa (Heuristic Model) Scorecard */}
+          {/* Estimasi Efisiensi Rekayasa (Model Heuristik) Scorecard */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono">
             <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] text-[#707070] uppercase font-bold block">
-                  {isId ? 'Estimasi Efisiensi Rekayasa (Heuristic Model)' : 'Estimated Engineering Hours Saved (Heuristic Model)'}
+                  {isId ? 'Estimasi Efisiensi Rekayasa (Model Heuristik)' : 'Estimated Engineering Hours Saved (Heuristic Model)'}
                 </span>
                 <span
                   title="(jumlah kontrak × 8 + 48) × 65 jam"

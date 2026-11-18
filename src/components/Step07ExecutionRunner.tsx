@@ -97,7 +97,7 @@ export function Step07ExecutionRunner({
       </div>
 
       {/* Unified Full-Viewport Workbench (Master Command Bar & 4 Workspace Tabs) */}
-      <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-[520px]">
+      <div className="flex-1 bg-[#101217] border border-white/[0.07] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-[640px]">
         <LiveRunnerWorkbench {...workbenchProps} />
       </div>
     </div>

@@ -398,7 +398,7 @@ ${tables || '- Primary entity table'}
          * ========================================================================= */}
         {portalView === 'CATALOG' && (
           <div className="space-y-5 max-w-[1440px] mx-auto">
-            {/* Executive ROI & Portfolio KPI Bar (ISO 5055) */}
+            {/* Executive ROI & Portfolio KPI Bar (Estimasi Efisiensi Rekayasa (Model Heuristik)) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 font-mono">
               <div className="p-3.5 bg-[#111317] border border-[#22262E] rounded-[4px] space-y-1">
                 <span className="text-[10px] text-[#707070] uppercase font-bold block">
@@ -427,7 +427,7 @@ ${tables || '- Primary entity table'}
               <div className="p-3.5 bg-[#111317] border border-[#22262E] rounded-[4px] space-y-1">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-[#707070] uppercase font-bold block">
-                    {isId ? 'Estimasi Efisiensi Rekayasa (Heuristic Model)' : 'Estimated Engineering Hours (Heuristic Model)'}
+                    {isId ? 'Estimasi Efisiensi Rekayasa (Model Heuristik)' : 'Estimated Engineering Hours (Heuristic Model)'}
                   </span>
                   <span
                     title="(jumlah kontrak × 8 + 48) × 65 jam"
