@@ -25,6 +25,7 @@ import type {
 } from '@/types/sdlc';
 import { gapAuditorService } from '@/services/gapAuditorService';
 import { useStudioLocale } from '@/lib/i18n';
+import { isNoiseUiControlOrInternalId } from '@/services/sdlcCompiler';
 // Dynamic import of DiffEditor to avoid SSR hydration conflicts
 const MonacoDiffEditor = dynamic(
   () => import('@monaco-editor/react').then((mod) => mod.DiffEditor),
@@ -62,9 +63,16 @@ export function GapAuditorWorkbench({
   const [renderSideBySide, setRenderSideBySide] = useState<boolean>(true);
   const [copiedDoc, setCopiedDoc] = useState(false);
 
-  // Filter items
+  // Filter items (purging framework noise IDs and navigation chrome)
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
+    return items
+      .filter(
+        (item) =>
+          !isNoiseUiControlOrInternalId(item.targetEntity) &&
+          !isNoiseUiControlOrInternalId(item.discrepancyTitle) &&
+          !isNoiseUiControlOrInternalId(item.ruleRef)
+      )
+      .filter((item) => {
       let matchVerdict = true;
       if (activeVerdictFilter === 'ALL') {
         matchVerdict = true;

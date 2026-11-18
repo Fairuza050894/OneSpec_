@@ -1453,10 +1453,22 @@ export async function runDeepSpaHarvester(
 
             const bodySnippet = (document.body?.innerText || '').slice(0, 600);
 
+            const isNoise = (str) => {
+              if (!str) return true;
+              const s = String(str).trim();
+              if (!s) return true;
+              const l = s.toLowerCase();
+              if (/^(_r_|radix-|headlessui-|el-id-|v-input-|mui-|field-_r_|select_\d+|input_\d+|field_\d+|nav-button-)/i.test(s)) return true;
+              if (/^(⌘k|ctrl\+k|id|en|in|fairuza\.restu|admin|baris per halaman:?|rows per page:?|katalog|sales quotation|menu profil pengguna|cari fitur.*|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i.test(s) || /^(⌘k|ctrl\+k|id|en|in|fairuza\.restu|admin|baris per halaman:?|rows per page:?|katalog|sales quotation|menu profil pengguna|cari fitur.*|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i.test(l)) return true;
+              if (l.includes('_r_') || l.startsWith('radix-') || l.startsWith('headlessui-') || l.startsWith('nav-button-') || /^field[-\s_]+r[-\s_]+d/i.test(l) || /^field[-\s_]+r[-\s_]+g/i.test(l) || l.includes('baris per halaman') || l.includes('rows per page') || l.includes('menu profil pengguna')) return true;
+              return false;
+            };
+
             const contentButtons = [];
             const headerNavButtons = [];
             document.querySelectorAll('button, a[role="button"], [class*="btn" i]').forEach((b) => {
               const txt = (b.textContent || b.getAttribute('aria-label') || b.getAttribute('title') || '').replace(/\s+/g, ' ').trim();
+              if (isNoise(txt)) return;
               const r = b.getBoundingClientRect();
               if (txt && txt.length >= 2 && txt.length <= 50 && r.width > 16 && r.height > 14) {
                 const isGlobalHeader = r.top < 72;
@@ -1497,6 +1509,7 @@ export async function runDeepSpaHarvester(
                 ? Array.from(inp.querySelectorAll('option')).map((o) => o.textContent.trim()).filter(Boolean).join(', ')
                 : '';
               const cleanLabel = label.replace(/\s+/g, ' ').slice(0, 55);
+              if (isNoise(cleanLabel) || isNoise(inp.getAttribute('name')) || isNoise(inp.id)) return;
               const isMain = r.top >= 72;
               const inputItem = {
                 rawName: inp.getAttribute('name') || ('field_' + (idx + 1)),

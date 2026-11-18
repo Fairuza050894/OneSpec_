@@ -350,7 +350,7 @@ export function LiveRunnerWorkbench({
   const [pipelineViewMode, setPipelineViewMode] = useState<'CARDS' | 'CANVAS'>('CARDS');
 
   // Tab 1 Assertions Table Filter & Search State
-  const [testFilter, setTestFilter] = useState<'ALL' | 'PASSED' | 'FAILED'>('ALL');
+  const [testFilter, setTestFilter] = useState<'ALL' | 'PASSED' | 'WARNING' | 'FAILED'>('ALL');
   const [testSearch, setTestSearch] = useState<string>('');
   const [expandedTestId, setExpandedTestId] = useState<string | null>('TC-008');
 
@@ -404,7 +404,8 @@ export function LiveRunnerWorkbench({
   }, [initialFunctionalResults]);
 
   const passedCount = functionalResults.filter((r) => r.verdict === 'PASSED').length;
-  const failedCount = functionalResults.length - passedCount;
+  const warningCount = functionalResults.filter((r) => r.verdict === 'WARNING').length;
+  const failedCount = functionalResults.filter((r) => r.verdict === 'FAILED' || r.verdict === 'BOTTLENECK').length;
 
   // Shortcuts for In-App Live QA Report (Declared before derived metrics - Zero TDZ)
   const caps = liveQaReport?.engine4AiQaCapabilities?.capabilities;
@@ -945,18 +946,20 @@ export function LiveRunnerWorkbench({
   );
 
   const releaseGateVerdict = useMemo<'PRODUCTION_GO' | 'CONDITIONAL_GO' | 'NO_GO' | 'NOT_EXECUTED'>(() => {
-    const hasFailures = functionalResults.some((r) => r.verdict === 'FAILED');
-    if (hasFailures) {
-      return 'NO_GO';
-    }
     if (functionalResults.length === 0 && unifiedQuality.totalCases === 0) {
       return 'NOT_EXECUTED';
     }
-    if (hasObservedBottleneck) {
+    const hasFailures =
+      functionalResults.some((r) => r.verdict === 'FAILED' || r.verdict === 'BOTTLENECK') ||
+      unifiedQuality.failedCases > 0;
+    if (hasFailures) {
+      return 'NO_GO';
+    }
+    if (warningCount > 0 || unifiedQuality.warningCases > 0 || hasObservedBottleneck || unifiedQuality.passRatePercent < 95) {
       return 'CONDITIONAL_GO';
     }
-    return unifiedQuality.releaseGateStatus === 'NO_GO' ? 'CONDITIONAL_GO' : unifiedQuality.releaseGateStatus;
-  }, [unifiedQuality, hasObservedBottleneck, functionalResults]);
+    return unifiedQuality.releaseGateStatus === 'PRODUCTION_GO' ? 'PRODUCTION_GO' : 'CONDITIONAL_GO';
+  }, [unifiedQuality, hasObservedBottleneck, functionalResults, warningCount]);
 
   const isReleaseGatePassed = releaseGateVerdict === 'PRODUCTION_GO';
 
@@ -1166,7 +1169,8 @@ COMMIT;
   const filteredFunctionalResults = useMemo(() => {
     return functionalResults.filter((t) => {
       if (testFilter === 'PASSED' && t.verdict !== 'PASSED') return false;
-      if (testFilter === 'FAILED' && t.verdict === 'PASSED') return false;
+      if (testFilter === 'WARNING' && t.verdict !== 'WARNING') return false;
+      if (testFilter === 'FAILED' && t.verdict !== 'FAILED' && t.verdict !== 'BOTTLENECK') return false;
       if (testSearch.trim()) {
         const q = testSearch.toLowerCase();
         return (
@@ -1497,11 +1501,17 @@ COMMIT;
                   EMPIRICAL
                 </span>
               </div>
-              <div className="text-base font-semibold font-mono tabular-nums text-zinc-100 mt-0.5">
-                {passedCount}/{functionalResults.length}{' '}
-                <span className="text-xs text-emerald-400 font-normal">
-                  ({totalCases > 0 ? Math.round((passedCount / totalCases) * 100) : 100}%)
-                </span>
+              <div className="text-base font-semibold font-mono tabular-nums text-zinc-100 mt-0.5 flex items-baseline gap-1.5">
+                <span>{passedCount}/{functionalResults.length}</span>
+                {warningCount > 0 ? (
+                  <span className="text-xs text-amber-400 font-normal">
+                    ({warningCount} {isId ? 'Warning' : 'Warning'})
+                  </span>
+                ) : (
+                  <span className="text-xs text-emerald-400 font-normal">
+                    ({totalCases > 0 ? Math.round((passedCount / totalCases) * 100) : 100}%)
+                  </span>
+                )}
               </div>
             </div>
 
@@ -1676,15 +1686,19 @@ COMMIT;
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>04. Governance Gate</span>
                 </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono shrink-0">
-                  ISO 29119 {isId ? 'LULUS' : 'PASS'}
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                  failedCount > 0 ? 'bg-rose-950/60 border border-rose-800/50 text-rose-300' :
+                  warningCount > 0 ? 'bg-amber-950/60 border border-amber-800/50 text-amber-300' :
+                  'bg-emerald-950/60 border border-emerald-800/50 text-emerald-300'
+                }`}>
+                  ISO 29119 {failedCount > 0 ? 'NO GO' : warningCount > 0 ? 'CONDITIONAL' : (isId ? 'LULUS' : 'PASS')}
                 </span>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
                   <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Asersi Disintesis' : 'Assertions'}</span>
                   <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
-                    {totalCases}/{totalCases} ({passedCount} {isId ? 'Lulus' : 'Pass'})
+                    {totalCases}/{totalCases} ({passedCount} {isId ? 'Lulus' : 'Pass'}{warningCount > 0 ? `, ${warningCount} Warning` : ''})
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
@@ -1875,7 +1889,10 @@ COMMIT;
                 <div className="flex items-center gap-1.5">
                   {/* Status Filters */}
                   <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] rounded-[2px] p-0.5 text-[9.5px]">
-                    {(['ALL', 'PASSED', 'FAILED'] as const).map((filter) => (
+                    {(warningCount > 0
+                      ? (['ALL', 'PASSED', 'WARNING', 'FAILED'] as const)
+                      : (['ALL', 'PASSED', 'FAILED'] as const)
+                    ).map((filter) => (
                       <button
                         key={filter}
                         type="button"
@@ -1890,6 +1907,8 @@ COMMIT;
                           ? (isId ? `Semua (${functionalResults.length})` : `All (${functionalResults.length})`)
                           : filter === 'PASSED'
                           ? (isId ? `Lulus (${passedCount})` : `Passed (${passedCount})`)
+                          : filter === 'WARNING'
+                          ? (isId ? `Peringatan (${warningCount})` : `Warning (${warningCount})`)
                           : (isId ? `Gagal (${failedCount})` : `Failed (${failedCount})`)}
                       </button>
                     ))}
@@ -1914,6 +1933,8 @@ COMMIT;
                 {filteredFunctionalResults.map((t) => {
                   const isExpanded = expandedTestId === t.testId;
                   const isPassed = t.verdict === 'PASSED';
+                  const isWarning = t.verdict === 'WARNING';
+                  const isFailed = t.verdict === 'FAILED' || t.verdict === 'BOTTLENECK';
                   const cleanTitle = t.title.replace(/^\[[^\]]+\]\s*/, '');
                   const getModuleBadge = (modName?: string) => {
                     if (!modName) return 'MOD-01';
@@ -1935,6 +1956,8 @@ COMMIT;
                           ? 'border-blue-500 bg-[#0E1015]'
                           : isPassed
                           ? 'border-[#22262E] hover:border-blue-500/50 bg-[#0B0C0E]'
+                          : isWarning
+                          ? 'border-amber-500/40 bg-amber-950/10'
                           : 'border-rose-500/60 bg-rose-950/10'
                       }`}
                     >
@@ -1972,10 +1995,16 @@ COMMIT;
                             className={`px-1.5 py-0.2 rounded-[2px] text-[9px] font-bold ${
                               isPassed
                                 ? 'bg-emerald-950/70 text-emerald-300 border border-emerald-700/60'
+                                : isWarning
+                                ? 'bg-amber-950/70 text-amber-300 border border-amber-700/60'
                                 : 'bg-rose-950/70 text-rose-300 border border-rose-700/60'
                             }`}
                           >
-                            {isPassed ? (isId ? 'LULUS' : 'PASS') : (isId ? 'GAGAL' : 'FAIL')}
+                            {isPassed
+                              ? (isId ? 'LULUS' : 'PASS')
+                              : isWarning
+                              ? (isId ? 'PERINGATAN' : 'WARNING')
+                              : (isId ? 'GAGAL' : 'FAIL')}
                           </span>
                         </div>
                       </button>

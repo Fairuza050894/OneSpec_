@@ -978,7 +978,7 @@ export interface FunctionalTestCaseResult {
   moduleName?: string;
   pagePath?: string;
   scenarioType: 'POSITIVE' | 'BOUNDARY' | 'NEGATIVE' | 'CONCURRENCY';
-  verdict: 'PASSED' | 'FAILED' | 'BOTTLENECK';
+  verdict: 'PASSED' | 'FAILED' | 'BOTTLENECK' | 'WARNING';
   durationMs: number;
   httpStatus: number;
   expectedHttpStatus: number;

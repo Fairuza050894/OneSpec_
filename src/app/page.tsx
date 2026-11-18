@@ -100,7 +100,7 @@ import { GapAuditorWorkbench } from '@/components/audit/GapAuditorWorkbench';
 import { gapAuditorService } from '@/services/gapAuditorService';
 import { getDefaultErdTables, generateOpenApi31SpecClient } from '@/services/discoveryDefaults';
 import { automationSynthesizerService } from '@/services/automationSynthesizer';
-import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, computeUnifiedQualityMetrics, type CompiledSdlcState } from '@/services/sdlcCompiler';
+import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, computeUnifiedQualityMetrics, cleanProjectDisplayName, type CompiledSdlcState } from '@/services/sdlcCompiler';
 import { architectureDeconstructorService, type UpstreamLinkedProjectInfo } from '@/services/architectureDeconstructor';
 import type { ChangeImpactAnalysisReport } from '@/services/changeImpactService';
 import type { ProjectIndexEntry, SavedProjectRecord, ProjectHistoricalSnapshot, RegressionDiffSummary, VaultProjectType } from '@/services/workspaceVaultService';
@@ -1194,7 +1194,7 @@ The system provides deterministic transaction processing, input validation, and 
   // Sync Step 07 Live Runner execution verdicts & newly discovered failures into Step 04 & Vault
   const handleSyncRunnerResults = useCallback(
     (payload: {
-      functionalResults: Array<{ testId: string; verdict: 'PASSED' | 'FAILED' | 'BOTTLENECK' | 'SKIPPED'; diagnostics?: string; durationMs: number }>;
+      functionalResults: Array<{ testId: string; verdict: 'PASSED' | 'FAILED' | 'BOTTLENECK' | 'SKIPPED' | 'WARNING'; diagnostics?: string; durationMs: number }>;
       newlyDiscoveredBugs: BugReportTicket[];
       executionTraces: TestSuiteExecutionTrace[];
     }) => {
@@ -1386,17 +1386,31 @@ The system provides deterministic transaction processing, input validation, and 
     return activeWorkspace?.repositoryUrl || blindTargetUrl;
   }, [activeWorkspace?.repositoryUrl, blindTargetUrl]);
 
+  // Derived Effective Target Application Name (Strict Enterprise: Never 'OneSpec SDLC Studio')
+  const effectiveTargetAppName = useMemo(() => {
+    const activeVault = vaultProjects.find((p) => p.projectId === activeVaultProjectId);
+    const candidate =
+      compiledSdlcState?.appName && !compiledSdlcState.appName.toLowerCase().includes('onespec')
+        ? compiledSdlcState.appName
+        : activeVault?.projectName && !activeVault.projectName.toLowerCase().includes('onespec')
+        ? activeVault.projectName
+        : activeWorkspace?.name && !activeWorkspace.name.toLowerCase().includes('onespec')
+        ? activeWorkspace.name
+        : '';
+    return cleanProjectDisplayName(candidate, currentTargetUrl);
+  }, [compiledSdlcState?.appName, activeVaultProjectId, vaultProjects, activeWorkspace?.name, currentTargetUrl]);
+
   // Step 3: TSD / TRD Technical Specification Document & Codebase Grep
   const tsdRows = useMemo(() => {
     return tsdSynthesizerService.synthesizeTsdRows({
-      appName: activeWorkspace?.name || 'Target Application',
+      appName: effectiveTargetAppName,
       targetUrl: currentTargetUrl,
       apiEndpoints: discoveryResult.apiEndpoints,
       databaseTables: discoveryResult.databaseTables,
       validationRules,
       businessRules: brdMatrixRows,
     });
-  }, [activeWorkspace?.name, currentTargetUrl, discoveryResult, validationRules, brdMatrixRows]);
+  }, [effectiveTargetAppName, currentTargetUrl, discoveryResult, validationRules, brdMatrixRows]);
 
   const [liveTsdRows, setLiveTsdRows] = useState<TsdMatrixRow[]>([]);
   const [selectedTsdRow, setSelectedTsdRow] = useState<TsdMatrixRow | null>(null);
@@ -2984,7 +2998,7 @@ The system provides deterministic transaction processing, input validation, and 
                   uatFlows={qaWorkbook.uatFlows}
                   featureModules={qaWorkbook.featureModules}
                   dataDictionary={compiledSdlcState?.knowledgeGraphSummary?.azDocumentationLibrary?.book2BusinessAnalyst?.masterDataDictionary || []}
-                  appName={activeWorkspace?.name || 'Active Project'}
+                  appName={effectiveTargetAppName}
                   targetUrl={currentTargetUrl}
                   selectedRowId={selectedRtmRow?.testId}
                   onRowSelect={(row) => {
@@ -3275,7 +3289,7 @@ The system provides deterministic transaction processing, input validation, and 
               {step5SubTab === 'BUNDLE_VAULT' && (
                 <div className="flex-1 overflow-hidden min-h-0">
                   <DecompiledBundleVault
-                    appName={activeWorkspace?.name || 'Active Project'}
+                    appName={effectiveTargetAppName}
                     targetUrl={currentTargetUrl}
                     discoveredJsChunks={blindCrawlResult?.discoveredJsChunks}
                     extractedApis={discoveryResult.apiEndpoints}
@@ -3347,7 +3361,7 @@ The system provides deterministic transaction processing, input validation, and 
               onSelectStage={handleSelectRunnerStage}
               selectedStageId={selectedRunnerStage?.id}
               onAppendLog={appendTerminalLog}
-              projectName={activeWorkspace?.name}
+              projectName={effectiveTargetAppName}
               targetUrl={currentTargetUrl}
               rtmRows={rtmRows}
               discoveryResult={discoveryResult}
@@ -3426,7 +3440,7 @@ The system provides deterministic transaction processing, input validation, and 
               {step8SubTab === 'REGULATORY_BINDER' && (
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <ComplianceBinderWorkbench
-                    appName={activeWorkspace?.name || 'Active Project'}
+                    appName={effectiveTargetAppName}
                     targetUrl={currentTargetUrl}
                     apiEndpoints={discoveryResult.apiEndpoints}
                     databaseTables={discoveryResult.databaseTables}
@@ -3444,7 +3458,7 @@ The system provides deterministic transaction processing, input validation, and 
               {step8SubTab === 'ISO_RISK_VAULT' && (
                 <div className="flex-1 min-h-0 overflow-hidden">
                   <IsoRiskAuditWorkbench
-                    appName={activeWorkspace?.name || 'Active Project'}
+                    appName={effectiveTargetAppName}
                     targetUrl={currentTargetUrl}
                     apiEndpoints={discoveryResult.apiEndpoints}
                     databaseTables={discoveryResult.databaseTables}
@@ -3489,7 +3503,7 @@ The system provides deterministic transaction processing, input validation, and 
                 </div>
               </div>
               <OwaspDastWorkbench
-                appName={activeWorkspace?.name || 'Active Project'}
+                appName={effectiveTargetAppName}
                 targetUrl={currentTargetUrl}
                 apiEndpoints={discoveryResult.apiEndpoints}
                 databaseTables={discoveryResult.databaseTables}
@@ -3517,7 +3531,7 @@ The system provides deterministic transaction processing, input validation, and 
                 <p className="text-[11.5px] text-[#707070] font-mono truncate">{copy.step10.subtitle}</p>
               </div>
               <SmtFormalVerifierWorkbench
-                appName={activeWorkspace?.name || 'Active Project'}
+                appName={effectiveTargetAppName}
                 targetUrl={currentTargetUrl}
                 apiEndpoints={discoveryResult.apiEndpoints}
                 databaseTables={discoveryResult.databaseTables}
@@ -3546,7 +3560,7 @@ The system provides deterministic transaction processing, input validation, and 
                 <p className="text-[11.5px] text-[#707070] font-mono truncate">{copy.step11.subtitle}</p>
               </div>
               <DelphiConsensusWorkbench
-                appName={activeWorkspace?.name || 'Active Project'}
+                appName={effectiveTargetAppName}
                 targetUrl={currentTargetUrl}
                 apiEndpoints={discoveryResult.apiEndpoints}
                 databaseTables={discoveryResult.databaseTables}
@@ -3565,7 +3579,7 @@ The system provides deterministic transaction processing, input validation, and 
           {activeStep === 12 && (
             <Step12ExecutiveSummaryWorkbench
               locale={locale}
-              appName={activeWorkspace?.name || 'Active Project'}
+              appName={effectiveTargetAppName}
               targetUrl={currentTargetUrl}
               apiEndpoints={discoveryResult.apiEndpoints}
               databaseTables={discoveryResult.databaseTables}

@@ -105,12 +105,12 @@ export function RtmSpreadsheetGrid({
   const [crDescription, setCrDescription] = useState('');
   const [crReport, setCrReport] = useState<ChangeImpactAnalysisReport | null>(null);
 
-  // Build normalized module filter chips
+  // Build normalized module filter chips (Strictly matching state.discoveredFeatureModules.length)
   const moduleOptions = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const fm of featureModules) {
-      seen.set(fm.moduleId, fm.moduleName);
+    if (featureModules && featureModules.length > 0) {
+      return featureModules.map((fm) => ({ id: fm.moduleId, name: fm.moduleName }));
     }
+    const seen = new Map<string, string>();
     for (const sc of testScenarios) {
       if (!seen.has(sc.moduleId)) seen.set(sc.moduleId, sc.moduleName);
     }

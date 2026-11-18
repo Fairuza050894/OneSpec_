@@ -745,7 +745,15 @@ export default function () {
 
       return rtmRows.map((tc, idx) => {
         const isBottleneck = hasSlowEp && tc.scenarioType === 'CONCURRENCY_RACE' && idx >= 4;
-        const verdict = isBottleneck ? 'BOTTLENECK' : 'PASSED';
+        const rawVerdict = tc.executionVerdict;
+        const verdict: 'PASSED' | 'FAILED' | 'WARNING' | 'BOTTLENECK' =
+          rawVerdict === 'FAILED'
+            ? 'FAILED'
+            : rawVerdict === 'WARNING'
+            ? 'WARNING'
+            : isBottleneck
+            ? 'BOTTLENECK'
+            : 'PASSED';
         const expectedStatus = tc.httpStatus || 200;
 
         return {

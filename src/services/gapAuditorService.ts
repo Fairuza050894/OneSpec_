@@ -14,6 +14,7 @@ import type {
   CrawledModuleSummary,
   FeatureModuleSurface,
 } from '@/types/sdlc';
+import { isNoiseUiControlOrInternalId } from './sdlcCompiler';
 
 export class GapAuditorService {
   private static instance: GapAuditorService;
@@ -49,22 +50,29 @@ export class GapAuditorService {
       discoveredFeatureModules = [],
     } = params;
 
+    const cleanValidationRules = (validationRules || []).filter(
+      (r) => !isNoiseUiControlOrInternalId(r.fieldName) && !isNoiseUiControlOrInternalId(r.ruleId)
+    );
+    const cleanBusinessRules = (businessRules || []).filter(
+      (r) => !isNoiseUiControlOrInternalId(r.moduleName) && !isNoiseUiControlOrInternalId(r.ruleId)
+    );
+
     const items: AuditDiscrepancyItem[] = [];
 
     const hasSource =
       explicitHasSource ??
-      (businessRules.some((r) => r.provenance === 'SOURCE_REQUIREMENT') ||
-        validationRules.some((r) => r.provenance === 'SOURCE_REQUIREMENT'));
+      (cleanBusinessRules.some((r) => r.provenance === 'SOURCE_REQUIREMENT') ||
+        cleanValidationRules.some((r) => r.provenance === 'SOURCE_REQUIREMENT'));
 
     if (hasSource) {
       // -----------------------------------------------------------------------
       // DUAL-TRACK MODE: SOURCE_REQUIREMENT (MoM / PRD) vs AS_BUILT_DISCOVERED
       // -----------------------------------------------------------------------
-      const sourceBrd = businessRules.filter((r) => r.provenance === 'SOURCE_REQUIREMENT');
-      const rulesToAudit = sourceBrd.length > 0 ? sourceBrd : businessRules;
+      const sourceBrd = cleanBusinessRules.filter((r) => r.provenance === 'SOURCE_REQUIREMENT');
+      const rulesToAudit = sourceBrd.length > 0 ? sourceBrd : cleanBusinessRules;
 
-      const sourceValidation = validationRules.filter((r) => r.provenance === 'SOURCE_REQUIREMENT');
-      const valRulesToAudit = sourceValidation.length > 0 ? sourceValidation : validationRules;
+      const sourceValidation = cleanValidationRules.filter((r) => r.provenance === 'SOURCE_REQUIREMENT');
+      const valRulesToAudit = sourceValidation.length > 0 ? sourceValidation : cleanValidationRules;
 
       // 1. Audit Source BRD Requirements against Discovered App Surface
       rulesToAudit.forEach((rule) => {
@@ -296,7 +304,7 @@ export class GapAuditorService {
       // -----------------------------------------------------------------------
       // AS-BUILT BASELINE MODE (Zero-Doc Reverse Engineering)
       // -----------------------------------------------------------------------
-      validationRules.forEach((rule) => {
+      cleanValidationRules.forEach((rule) => {
         const matchingApi =
           apiEndpoints.find(
             (e) =>
@@ -395,19 +403,27 @@ export class GapAuditorService {
       });
     }
 
+    // Purge any noise UI controls or framework IDs from discrepancy matrix
+    const cleanItems = items.filter(
+      (i) =>
+        !isNoiseUiControlOrInternalId(i.targetEntity) &&
+        !isNoiseUiControlOrInternalId(i.discrepancyTitle) &&
+        !isNoiseUiControlOrInternalId(i.ruleRef)
+    );
+
     // Calculate Summary Metrics
-    const totalAudited = items.length;
-    const compliantCount = items.filter((i) => i.verdict === 'COMPLIANT' || i.verdict === 'VERIFIED_MATCH').length;
-    const missingInBackendCount = items.filter((i) => i.verdict === 'MISSING_IN_BACKEND' || i.verdict === 'MISSING_IMPLEMENTATION').length;
-    const schemaMismatchCount = items.filter((i) => i.verdict === 'SCHEMA_TYPE_MISMATCH').length;
-    const shadowApiCount = items.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_API' || i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE').length;
-    const missingImplementationCount = items.filter((i) => i.verdict === 'MISSING_IMPLEMENTATION').length;
-    const undocumentedShadowCount = items.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE' || i.verdict === 'UNDOCUMENTED_SHADOW_API').length;
-    const verifiedMatchCount = items.filter((i) => i.verdict === 'VERIFIED_MATCH' || i.verdict === 'COMPLIANT').length;
+    const totalAudited = cleanItems.length;
+    const compliantCount = cleanItems.filter((i) => i.verdict === 'COMPLIANT' || i.verdict === 'VERIFIED_MATCH').length;
+    const missingInBackendCount = cleanItems.filter((i) => i.verdict === 'MISSING_IN_BACKEND' || i.verdict === 'MISSING_IMPLEMENTATION').length;
+    const schemaMismatchCount = cleanItems.filter((i) => i.verdict === 'SCHEMA_TYPE_MISMATCH').length;
+    const shadowApiCount = cleanItems.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_API' || i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE').length;
+    const missingImplementationCount = cleanItems.filter((i) => i.verdict === 'MISSING_IMPLEMENTATION').length;
+    const undocumentedShadowCount = cleanItems.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE' || i.verdict === 'UNDOCUMENTED_SHADOW_API').length;
+    const verifiedMatchCount = cleanItems.filter((i) => i.verdict === 'VERIFIED_MATCH' || i.verdict === 'COMPLIANT').length;
     const complianceRatePercent = totalAudited > 0 ? Math.round((compliantCount / totalAudited) * 1000) / 10 : 100;
 
     return {
-      items,
+      items: cleanItems,
       summary: {
         totalAudited,
         compliantCount,

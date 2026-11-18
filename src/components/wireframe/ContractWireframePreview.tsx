@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { CheckCircle2, AlertCircle, Loader2, Zap, Server, ShieldCheck } from 'lucide-react';
 import type { ValidationRuleContract } from '@/types/sdlc';
 import { useStudioLocale } from '@/lib/i18n';
+import { isNoiseUiControlOrInternalId } from '@/services/sdlcCompiler';
 export type WireframeState = 'IDLE' | 'VALIDATION_ERROR' | 'SUBMITTING' | 'SUCCESS';
 
 interface ContractWireframeProps {
@@ -33,10 +34,11 @@ export function ContractWireframePreview({
   const [activeFailingRule, setActiveFailingRule] = useState<ValidationRuleContract | null>(null);
   const [measuredLatency, setMeasuredLatency] = useState<number | null>(null);
 
-  // Effective Rules
+  // Effective Rules (purging framework-generated noise IDs)
   const effectiveRules: ValidationRuleContract[] = useMemo(() => {
-    return validationRules.length > 0
-      ? validationRules
+    const cleanRules = (validationRules || []).filter((r) => !isNoiseUiControlOrInternalId(r.fieldName));
+    return cleanRules.length > 0
+      ? cleanRules
       : [
           {
             ruleId: 'VR-01',
@@ -61,19 +63,26 @@ export function ContractWireframePreview({
         ];
   }, [validationRules]);
 
+  // Realistic Domain Sample Value Generator (No Dummy "valid_input_payload")
+  const getDomainSampleValue = (fieldName: string, dataType?: string): string => {
+    const lower = fieldName.toLowerCase();
+    if (lower.includes('pass') || lower.includes('sandi')) return 'ValidPass123!';
+    if (lower.includes('origin') || lower.includes('asal')) return 'JKT (Jakarta)';
+    if (lower.includes('destination') || lower.includes('tujuan')) return 'SUB (Surabaya)';
+    if (lower.includes('quotation') || lower.includes('penawaran') || lower.includes('code') || lower.includes('no')) return 'SQ-2026-JKT-001';
+    if (lower.includes('customer') || lower.includes('pelanggan') || lower.includes('client') || lower.includes('pic')) return 'PT Pancaran Logistik';
+    if (lower.includes('type') || lower.includes('tipe')) return 'Full Container Load (FCL)';
+    if (lower.includes('unit') || lower.includes('bu') || lower.includes('business')) return 'Logistics & Marine';
+    if (lower.includes('user') || lower.includes('email') || lower.includes('login') || lower.includes('username')) return 'operator_pancaran';
+    if (dataType === 'number' || lower.includes('amount') || lower.includes('qty') || lower.includes('nominal') || lower.includes('harga')) return '100';
+    return 'JKT-SUB-001';
+  };
+
   // Dynamic Form Field State mapping
   const [formValues, setFormValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     effectiveRules.forEach((rule) => {
-      if (rule.fieldName.toLowerCase().includes('pass') || rule.fieldName.toLowerCase().includes('sandi')) {
-        initial[rule.fieldName] = 'ValidPass123!';
-      } else if (rule.fieldName.toLowerCase().includes('user') || rule.fieldName.toLowerCase().includes('email')) {
-        initial[rule.fieldName] = 'operator_user';
-      } else if (rule.dataType === 'number') {
-        initial[rule.fieldName] = '100';
-      } else {
-        initial[rule.fieldName] = 'valid_input_payload';
-      }
+      initial[rule.fieldName] = getDomainSampleValue(rule.fieldName, rule.dataType);
     });
     return initial;
   });
@@ -82,19 +91,7 @@ export function ContractWireframePreview({
   useEffect(() => {
     const nextValues: Record<string, string> = {};
     effectiveRules.forEach((rule) => {
-      if (rule.fieldName.toLowerCase().includes('pass') || rule.fieldName.toLowerCase().includes('sandi')) {
-        nextValues[rule.fieldName] = 'ValidPass123!';
-      } else if (
-        rule.fieldName.toLowerCase().includes('user') ||
-        rule.fieldName.toLowerCase().includes('email') ||
-        rule.fieldName.toLowerCase().includes('login')
-      ) {
-        nextValues[rule.fieldName] = 'operator_user';
-      } else if (rule.dataType === 'number') {
-        nextValues[rule.fieldName] = '100';
-      } else {
-        nextValues[rule.fieldName] = 'valid_input_payload';
-      }
+      nextValues[rule.fieldName] = getDomainSampleValue(rule.fieldName, rule.dataType);
     });
     setFormValues(nextValues);
   }, [effectiveRules]);

@@ -34,6 +34,7 @@ import type {
 } from '@/types/sdlc';
 import { generateCanonicalBpmn2Xml } from './bpmnXmlGenerator';
 import { detectEnvironment } from '@/lib/environmentDetector';
+import { isNoiseUiControlOrInternalId } from './sdlcCompiler';
 
 export function formatHumanFieldLabel(
   rawName: string,
@@ -42,15 +43,21 @@ export function formatHumanFieldLabel(
   type?: string,
   index: number = 1
 ): string {
+  if (isNoiseUiControlOrInternalId(rawName) && isNoiseUiControlOrInternalId(labelText) && isNoiseUiControlOrInternalId(placeholder)) {
+    return '';
+  }
   const cleanLbl = (labelText || '').trim().replace(/\s+/g, ' ');
-  if (cleanLbl && !/^(select option|select_\d+|field_\d+|modal_field_\d+|pilih)$/i.test(cleanLbl)) {
+  if (cleanLbl && !isNoiseUiControlOrInternalId(cleanLbl)) {
     return cleanLbl;
   }
   const cleanPh = (placeholder || '').trim().replace(/\s+/g, ' ');
-  if (cleanPh && !/^(select option|select_\d+|field_\d+|pilih)$/i.test(cleanPh)) {
+  if (cleanPh && !isNoiseUiControlOrInternalId(cleanPh)) {
     return cleanPh;
   }
   const raw = (rawName || '').trim();
+  if (isNoiseUiControlOrInternalId(raw)) {
+    return '';
+  }
   const selectMatch = raw.match(/^(?:select|dropdown|filter)[_-]?(\d+)$/i);
   if (selectMatch) return `Filter Pilihan #${selectMatch[1]}`;
   const fieldMatch = raw.match(/^(?:modal_)?field[_-]?(\d+)$/i);
@@ -5190,6 +5197,9 @@ export class BlindCrawlerService {
 
     scrapedInputs.forEach((inp, idx) => {
       const fieldName = inp.name || inp.id || (inp.placeholder ? inp.placeholder.toLowerCase().replace(/[^a-z0-9]/g, '_') : `field_${idx + 1}`);
+      if (isNoiseUiControlOrInternalId(fieldName) || isNoiseUiControlOrInternalId(inp.name) || isNoiseUiControlOrInternalId(inp.labelText)) {
+        return;
+      }
       const vrKey = `${inp.pagePath || '/'}::${fieldName}`;
       if (seenVrKeys.has(vrKey)) return;
       seenVrKeys.add(vrKey);
@@ -5347,14 +5357,19 @@ export class BlindCrawlerService {
 
       const humanInputs = Array.from(
         new Set(
-          mod.inputs.map((i, idx) => this.formatHumanFieldLabel(i.name, i.placeholder, i.labelText, i.type, idx + 1))
+          mod.inputs
+            .map((i, idx) => this.formatHumanFieldLabel(i.name, i.placeholder, i.labelText, i.type, idx + 1))
+            .filter((l) => l && !isNoiseUiControlOrInternalId(l))
         )
       );
+      const cleanButtons = Array.from(new Set(mod.buttons))
+        .filter((b) => b && !isNoiseUiControlOrInternalId(b))
+        .slice(0, 5);
       const hasTbl = mod.tables.length > 0;
       const controlParts: string[] = [];
       if (humanInputs.length > 0) controlParts.push(`inputs (${humanInputs.join(', ')})`);
       if (hasTbl) controlParts.push(`data table (${mod.tables[0].columns.join(', ')})`);
-      if (mod.buttons.length > 0) controlParts.push(`actions (${Array.from(new Set(mod.buttons)).slice(0, 5).join(', ')})`);
+      if (cleanButtons.length > 0) controlParts.push(`actions (${cleanButtons.join(', ')})`);
       const controlsDesc = controlParts.length > 0 ? controlParts.join(', ') : `${mod.moduleName} navigation`;
       const apiSummary = mod.apis.length > 0 ? `and synchronize state across ${mod.apis.length} backend service endpoint(s)` : `at route ${mod.pagePath}`;
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateUrlForSsrf, isMetadataHost, isPrivateOrLoopbackHost } from '../lib/serverSecurity';
-import { computeUnifiedQualityMetrics, type CompiledSdlcState } from '../services/sdlcCompiler';
+import { computeUnifiedQualityMetrics, isNoiseUiControlOrInternalId, cleanProjectDisplayName, type CompiledSdlcState } from '../services/sdlcCompiler';
 import { ReaBridgeService } from '../services/reaBridge';
 
 test('Test 1: serverSecurity blocks SSRF to metadata IP and unauthorized private/loopback hosts', () => {
@@ -75,4 +75,62 @@ test('Test 3: reaBridge.getExecutableInfo() never resolves to @latest or unsafe 
   const allStrings = [exeInfo.executable, ...exeInfo.argsPrefix].join(' ');
   assert.equal(allStrings.includes('@latest'), false);
   assert.equal(allStrings.includes('npx -y'), false);
+});
+
+test('Test 4: isNoiseUiControlOrInternalId purges framework noise, radix IDs, and global chrome', () => {
+  // Framework noise IDs must be rejected
+  assert.equal(isNoiseUiControlOrInternalId('field-_r_d_'), true);
+  assert.equal(isNoiseUiControlOrInternalId('Field- R D'), true);
+  assert.equal(isNoiseUiControlOrInternalId('_r_123'), true);
+  assert.equal(isNoiseUiControlOrInternalId('radix-:r1:'), true);
+  assert.equal(isNoiseUiControlOrInternalId('headlessui-listbox-button-1'), true);
+  assert.equal(isNoiseUiControlOrInternalId('nav-button-catalog'), true);
+  assert.equal(isNoiseUiControlOrInternalId('select_3'), true);
+  assert.equal(isNoiseUiControlOrInternalId('input_4'), true);
+  assert.equal(isNoiseUiControlOrInternalId('field_5'), true);
+
+  // Global navigation chrome, shortcuts, and avatars must be rejected
+  assert.equal(isNoiseUiControlOrInternalId('⌘k'), true);
+  assert.equal(isNoiseUiControlOrInternalId('ctrl+k'), true);
+  assert.equal(isNoiseUiControlOrInternalId('id'), true);
+  assert.equal(isNoiseUiControlOrInternalId('en'), true);
+  assert.equal(isNoiseUiControlOrInternalId('fairuza.restu'), true);
+  assert.equal(isNoiseUiControlOrInternalId('Baris per halaman:'), true);
+  assert.equal(isNoiseUiControlOrInternalId('Rows per page:'), true);
+  assert.equal(isNoiseUiControlOrInternalId('menu profil pengguna'), true);
+  assert.equal(isNoiseUiControlOrInternalId('toggle sidebar'), true);
+  assert.equal(isNoiseUiControlOrInternalId('logout'), true);
+  assert.equal(isNoiseUiControlOrInternalId('keluar'), true);
+
+  // Legitimate business fields must pass
+  assert.equal(isNoiseUiControlOrInternalId('Origin'), false);
+  assert.equal(isNoiseUiControlOrInternalId('Destination'), false);
+  assert.equal(isNoiseUiControlOrInternalId('Filter Tipe'), false);
+  assert.equal(isNoiseUiControlOrInternalId('Filter Business Unit'), false);
+  assert.equal(isNoiseUiControlOrInternalId('Nama Penawaran'), false);
+  assert.equal(isNoiseUiControlOrInternalId('Customer & PIC'), false);
+  assert.equal(isNoiseUiControlOrInternalId('SQ-2026-JKT-001'), false);
+});
+
+test('Test 5: cleanProjectDisplayName never substitutes target app with OneSpec SDLC Studio', () => {
+  assert.equal(cleanProjectDisplayName('OneSpec SDLC Studio', 'http://10.10.15.79:3000/'), 'Commercial Center | Pancaran');
+  assert.equal(cleanProjectDisplayName('OneSpec', 'http://10.10.15.79:3000/'), 'Commercial Center | Pancaran');
+  assert.equal(cleanProjectDisplayName('Default Architecture Workspace', 'http://10.10.15.79:3000/'), 'Commercial Center | Pancaran');
+  assert.equal(cleanProjectDisplayName('Commercial Center | Pancaran', 'http://10.10.15.79:3000/'), 'Commercial Center | Pancaran');
+  assert.equal(cleanProjectDisplayName(undefined, 'https://erp.internal.net/'), 'Erp');
+});
+
+test('Test 6: Score synchronization (49 passed, 8 warning out of 57 tests) yields CONDITIONAL_GO and exact pass counts', () => {
+  const rtmRows = [
+    ...Array.from({ length: 49 }, (_, i) => ({ id: `r-${i}`, executionVerdict: 'PASSED' as const })),
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `w-${i}`, executionVerdict: 'WARNING' as const })),
+  ];
+  const qm = computeUnifiedQualityMetrics({ rtmRows } as any);
+
+  assert.equal(qm.totalCases, 57);
+  assert.equal(qm.passedCases, 49);
+  assert.equal(qm.warningCases, 8);
+  assert.equal(qm.failedCases, 0);
+  assert.equal(qm.passRatePercent, 86);
+  assert.equal(qm.releaseGateStatus, 'CONDITIONAL_GO');
 });

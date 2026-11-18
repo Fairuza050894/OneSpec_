@@ -138,37 +138,8 @@ export function computeNextSemanticVersion(
   return `v${major}.${minor}.${patch + 1}`;
 }
 
-export function cleanProjectDisplayName(rawName?: string, targetUrl?: string): string {
-  let name = (rawName || '').trim();
-  if (!name && targetUrl) {
-    try {
-      const u = new URL(targetUrl);
-      name = u.hostname.split('.')[0] || 'Project';
-    } catch {
-      name = 'Project';
-    }
-  }
-
-  // Remove trailing page titles e.g. "Mobospace - Home", "ERP - Dashboard", "Mobospace | Beranda"
-  name = name.replace(/\s*[-–—|]\s*(home|dashboard|beranda|login|sign\s*in|masuk|index)\b/gi, '').trim();
-
-  // If name has hyphens or underscores (e.g. mobospace-sandbox or Mobospace-sandbox)
-  if (name.includes('-') || name.includes('_')) {
-    const parts = name.split(/[-_]+/).filter(Boolean);
-    const cleanedParts = parts.filter((p) => !/^(home|dashboard|beranda|index)$/i.test(p));
-    if (cleanedParts.length > 0) {
-      name = cleanedParts
-        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-        .join(' ');
-    }
-  } else if (/^[a-z0-9]+$/i.test(name) && name.length > 2) {
-    if (name === name.toLowerCase()) {
-      name = name.charAt(0).toUpperCase() + name.slice(1);
-    }
-  }
-
-  return name || 'Active Project';
-}
+import { cleanProjectDisplayName } from './sdlcCompiler';
+export { cleanProjectDisplayName };
 
 export class WorkspaceVaultService {
   private static instance: WorkspaceVaultService;
