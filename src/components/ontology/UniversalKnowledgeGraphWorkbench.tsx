@@ -101,7 +101,7 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react'), {
   ),
 });
 
-interface UniversalKnowledgeGraphWorkbenchProps {
+export interface UniversalKnowledgeGraphWorkbenchProps {
   appName?: string;
   targetUrl: string;
   apiEndpoints: DiscoveredApiEndpoint[];

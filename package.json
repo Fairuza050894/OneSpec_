@@ -18,7 +18,8 @@
     "test:vault-diff": "tsx scripts/check-vault-snapshot-diff.ts",
     "test:docx-delta": "tsx scripts/check-docx-delta.ts",
     "test:product-knowledge": "tsx scripts/check-product-knowledge.ts",
-    "test:screenshot-guard": "tsx scripts/check-screenshot-guard.ts"
+    "test:screenshot-guard": "tsx scripts/check-screenshot-guard.ts",
+    "test:unit": "tsx --test src/__tests__/coreAudit.test.ts"
   },
   "keywords": [],
   "author": "Fairuza Restu Chabita",
