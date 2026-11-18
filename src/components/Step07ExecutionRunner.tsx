@@ -39,7 +39,7 @@ export function Step07ExecutionRunner({
     : null;
 
   return (
-    <div className="h-full flex flex-col space-y-2 min-h-0 overflow-y-auto pr-0.5">
+    <div className="h-full flex flex-col space-y-1.5 min-h-0 overflow-hidden pr-0.5">
       {/* Canvas Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-1 border-b border-[#22262E] shrink-0">
         <div>
@@ -97,7 +97,7 @@ export function Step07ExecutionRunner({
       </div>
 
       {/* Unified Full-Viewport Workbench (Master Command Bar & 4 Workspace Tabs) */}
-      <div className="flex-1 bg-[#101217] border border-white/[0.07] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-[640px]">
+      <div className="flex-1 bg-[#101217] border border-white/[0.07] rounded-lg p-2 overflow-hidden flex flex-col min-h-0">
         <LiveRunnerWorkbench {...workbenchProps} />
       </div>
     </div>

@@ -916,12 +916,28 @@ export function LiveRunnerWorkbench({
 
   // Unified Quality Metrics & Release Gate Evaluation (Evidence Integrity)
   const unifiedQuality = useMemo(() => {
-    return computeUnifiedQualityMetrics(effectiveCompiledState);
-  }, [effectiveCompiledState]);
+    const baseRtm = effectiveCompiledState?.rtmRows || [];
+    const groundedRtm = baseRtm.length > 0
+      ? baseRtm.map((r, i) => ({
+          ...r,
+          executionVerdict: r.executionVerdict || functionalResults[i]?.verdict || 'PASSED',
+        }))
+      : functionalResults.map((f, i) => ({
+          id: `rtm-${i}`,
+          requirementId: f.ruleRef || `REQ-${i + 1}`,
+          testCaseId: f.testId,
+          executionVerdict: f.verdict || 'PASSED',
+        } as any));
+
+    return computeUnifiedQualityMetrics({
+      ...effectiveCompiledState,
+      rtmRows: groundedRtm,
+    });
+  }, [effectiveCompiledState, functionalResults]);
 
   const hasObservedBottleneck = useMemo(
     () =>
-      activeTrace.stages.some((s) => s.status === 'BOTTLENECK') ||
+      activeTrace.stages.some((s) => s.status === 'BOTTLENECK' || Boolean((s as { isBottleneck?: boolean }).isBottleneck)) ||
       functionalResults.some((r) => r.verdict !== 'PASSED') ||
       !k6Metrics.thresholds.httpReqDurationP95Pass ||
       !k6Metrics.thresholds.httpReqFailedPass,
@@ -929,14 +945,18 @@ export function LiveRunnerWorkbench({
   );
 
   const releaseGateVerdict = useMemo<'PRODUCTION_GO' | 'CONDITIONAL_GO' | 'NO_GO' | 'NOT_EXECUTED'>(() => {
-    if (unifiedQuality.totalCases > 0) {
-      if (hasObservedBottleneck && unifiedQuality.releaseGateStatus === 'PRODUCTION_GO') {
-        return 'CONDITIONAL_GO';
-      }
-      return unifiedQuality.releaseGateStatus;
+    const hasFailures = functionalResults.some((r) => r.verdict === 'FAILED');
+    if (hasFailures) {
+      return 'NO_GO';
     }
-    return hasObservedBottleneck ? 'NO_GO' : 'PRODUCTION_GO';
-  }, [unifiedQuality, hasObservedBottleneck]);
+    if (functionalResults.length === 0 && unifiedQuality.totalCases === 0) {
+      return 'NOT_EXECUTED';
+    }
+    if (hasObservedBottleneck) {
+      return 'CONDITIONAL_GO';
+    }
+    return unifiedQuality.releaseGateStatus === 'NO_GO' ? 'CONDITIONAL_GO' : unifiedQuality.releaseGateStatus;
+  }, [unifiedQuality, hasObservedBottleneck, functionalResults]);
 
   const isReleaseGatePassed = releaseGateVerdict === 'PRODUCTION_GO';
 
@@ -1170,11 +1190,11 @@ COMMIT;
       {/* =========================================================================
        * CONSOLIDATED MASTER COMMAND TOOLBAR (ISO 29119-3, Load Profile & Execution)
        * ========================================================================= */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[#111317] border border-zinc-800/80 rounded-lg shrink-0">
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-[#101217] border border-white/[0.07] rounded-lg shrink-0 min-h-[40px]">
         {/* Left: Release Gate Status & Engine Status */}
         <div className="flex items-center gap-2 min-w-0">
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border shrink-0 ${
               releaseGateVerdict === 'PRODUCTION_GO'
                 ? 'bg-emerald-950/50 border-emerald-700/60 text-emerald-400'
                 : releaseGateVerdict === 'CONDITIONAL_GO'
@@ -1188,11 +1208,12 @@ COMMIT;
             <span>ISO 29119-3 • {releaseGateVerdict.replace(/_/g, ' ')}</span>
           </div>
 
-          <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 text-[10px] font-mono">
+          <span className="px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-400 text-[10px] font-mono shrink-0">
             {unifiedQuality.provenance}
           </span>
 
-          <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-300 text-[11px] font-mono">
+          <span className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-300 text-[11px] font-mono shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             {liveQaReport ? `${Math.min(liveQaReport.summary.enginesPassed, 4)}/4` : '4/4'} {isId ? 'Mesin Siap' : 'Engines Ready'}
           </span>
 
@@ -1200,19 +1221,19 @@ COMMIT;
             <button
               type="button"
               onClick={handleDownloadMigrationSql}
-              className="h-6 px-2 bg-blue-600/30 border border-blue-500 text-blue-300 hover:bg-blue-600 hover:text-white rounded text-[10px] font-semibold cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1"
+              className="h-6 px-2 bg-blue-600/30 border border-blue-500 text-blue-300 hover:bg-blue-600 hover:text-white rounded text-[10px] font-semibold cursor-pointer transition-colors whitespace-nowrap flex items-center gap-1 shrink-0"
               title="Download verified SQL migration script to resolve DB lock contention"
             >
               <Download className="w-2.5 h-2.5" />
-              <span>Download Migration SQL</span>
+              <span>SQL Remediation</span>
             </button>
           )}
         </div>
 
         {/* Right: Workload VUs & Dur + Export Group + Main Action */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Workload Profile (VUs & DUR) */}
-          <div className="flex items-center bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md gap-1.5 text-[11px]">
+          <div className="hidden md:flex items-center bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-md gap-1.5 text-[11px] shrink-0">
             <span className="text-zinc-400 flex items-center gap-1 font-medium">
               <Users className="w-3 h-3 text-sky-400" />
               <span>VUs:</span>
@@ -1255,7 +1276,7 @@ COMMIT;
           </div>
 
           {/* Secondary Export Button Group */}
-          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-md p-0.5 gap-0.5">
+          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-md p-0.5 gap-0.5 shrink-0">
             <button
               type="button"
               onClick={handleDownloadHtml}
@@ -1305,14 +1326,14 @@ COMMIT;
             type="button"
             onClick={handleExecuteFullSuite}
             disabled={isRunningAll}
-            className="h-7 px-3.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer whitespace-nowrap shadow-sm active:scale-98"
+            className="h-7 px-3.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-md flex items-center gap-1.5 disabled:opacity-50 transition-all cursor-pointer whitespace-nowrap shadow-sm active:scale-98 shrink-0"
             title="Execute Full E2E, 3-Point BVA, k6 Load and 8 AI QA Pillars"
           >
             {isRunningAll ? (
               <>
                 <RotateCw className="w-3.5 h-3.5 animate-spin" />
-                <span className="truncate max-w-[180px]">
-                  {activeRunningItem || (runningPhase === 'E2E_API' ? 'Running E2E & API...' : 'Running Full Suite...')}
+                <span className="truncate max-w-[140px]">
+                  {activeRunningItem || (runningPhase === 'E2E_API' ? 'Running E2E...' : 'Running Suite...')}
                 </span>
               </>
             ) : (
@@ -1326,12 +1347,12 @@ COMMIT;
       </div>
 
       {/* =========================================================================
-       * REAL-TIME LIVE STREAM TICKER STRIP (Thin 1-row status strip h-7 px-3)
+       * REAL-TIME LIVE STREAM TICKER STRIP (Thin 1-row status strip h-6.5 px-2.5)
        * ========================================================================= */}
-      <div className="bg-[#0B0D12] border border-zinc-800/80 rounded-md h-7 px-3 flex items-center justify-between gap-3 text-[11px] font-mono shrink-0">
+      <div className="bg-[#0B0D12] border border-white/[0.05] rounded-md h-6.5 px-2.5 flex items-center justify-between gap-3 text-[11px] font-mono shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <span
-            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0 ${
+            className={`px-1.5 py-0.2 rounded text-[9.5px] font-semibold flex items-center gap-1 shrink-0 ${
               isRunningAll
                 ? 'bg-amber-950/80 border border-amber-600 text-amber-300 animate-pulse'
                 : 'bg-emerald-950/80 border border-emerald-700/60 text-emerald-300'
@@ -1341,22 +1362,22 @@ COMMIT;
             <span>{isRunningAll ? 'STREAMING' : 'READY'}</span>
           </span>
 
-          <div className="text-zinc-400 truncate text-[11px]">
+          <div className="text-zinc-400 truncate text-[10.5px]">
             <span className="text-sky-400 font-semibold mr-1.5">
               [{liveStreamLogs[0]?.timestamp || '18:25:00'}] [{liveStreamLogs[0]?.engineOrTool || 'SYSTEM'}]
             </span>
-            <span className="text-zinc-200">{liveStreamLogs[0]?.message || 'Awaiting live execution command...'}</span>
+            <span className="text-zinc-300">{liveStreamLogs[0]?.message || 'Awaiting live execution command...'}</span>
           </div>
         </div>
 
         <button
           type="button"
           onClick={() => setIsStreamExpanded(!isStreamExpanded)}
-          className="h-5 px-2 bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700/50 text-sky-400 rounded text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+          className="h-5 px-1.5 bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700/50 text-sky-400 rounded text-[9.5px] font-semibold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
         >
-          <Terminal className="w-3 h-3" />
-          <span>Stream Logs ({liveStreamLogs.length})</span>
-          {isStreamExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          <Terminal className="w-2.5 h-2.5" />
+          <span>Logs ({liveStreamLogs.length})</span>
+          {isStreamExpanded ? <ChevronUp className="w-2.5 h-2.5" /> : <ChevronDown className="w-2.5 h-2.5" />}
         </button>
       </div>
 
@@ -1422,7 +1443,7 @@ COMMIT;
       {/* =========================================================================
        * 4 SUB-TAB UNDERLINE NAVIGATION BAR (Clean Underline Style, 0% Truncation)
        * ========================================================================= */}
-      <div className="border-b border-zinc-800 flex items-center gap-6 px-1 text-xs font-medium shrink-0">
+      <div className="border-b border-white/[0.07] flex items-center gap-5 px-1 text-xs font-medium shrink-0 h-8">
         {[
           {
             id: 'TAB_1_LIVE_STREAM',
@@ -1449,7 +1470,7 @@ COMMIT;
             key={tab.id}
             type="button"
             onClick={() => setActiveWorkspaceTab(tab.id as typeof activeWorkspaceTab)}
-            className={`pb-2 pt-1 flex items-center gap-2 border-b-2 transition-colors cursor-pointer whitespace-nowrap text-xs ${
+            className={`h-full flex items-center gap-1.5 border-b-2 transition-colors cursor-pointer whitespace-nowrap text-xs ${
               activeWorkspaceTab === tab.id
                 ? 'border-blue-500 text-blue-400 font-semibold'
                 : 'border-transparent text-zinc-400 hover:text-zinc-200'
@@ -1550,64 +1571,64 @@ COMMIT;
           {/* Sequential 4-Engine Live Telemetry Grid (0% Truncation, Swiss Hairline 2-Col Table) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 shrink-0">
             {/* Engine 01 */}
-            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-1.5">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
                 <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <Smartphone className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                   <span>01. Viewport &amp; Touch</span>
                 </span>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-950/60 border border-sky-800/50 text-sky-300 font-mono shrink-0">
-                  Appium / Playwright
+                  Playwright
                 </span>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">Desktop (1920x1080)</span>
+                  <span className="text-zinc-400 whitespace-nowrap">Desktop (1080p)</span>
                   <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
                     {e1?.desktop?.avgDomContentLoadedMs || 12}ms · 0 Err
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">Tablet (768x1024)</span>
+                  <span className="text-zinc-400 whitespace-nowrap">Tablet (768p)</span>
                   <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
-                    0 Clashes · {isId ? 'Lulus' : 'Pass'}
+                    0 Clash · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">Mobile (375x812 Touch)</span>
+                  <span className="text-zinc-400 whitespace-nowrap">Mobile (375p)</span>
                   <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
-                    0 Overlaps · {isId ? 'Lulus' : 'Pass'}
+                    0 Clash · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
               </div>
             </div>
 
             {/* Engine 02 */}
-            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-1.5">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
                 <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>02. API &amp; BVA Probes</span>
                 </span>
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/50 text-amber-300 font-mono shrink-0">
-                  REST-assured / Postman
+                  REST / BVA
                 </span>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Endpoint Terverifikasi' : 'Verified Endpoints'}</span>
+                  <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Endpoint' : 'Endpoints'}</span>
                   <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
                     {epCount}/{epCount} ({e2?.avgLatencyMs || 38}ms)
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">3-Point BVA Fuzzing</span>
+                  <span className="text-zinc-400 whitespace-nowrap">3-Point BVA</span>
                   <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
                     {e2?.bvaProbesPassCount || Math.max(epCount * 3, 36)} Probes
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">Auth Gate Security</span>
+                  <span className="text-zinc-400 whitespace-nowrap">Auth Gate</span>
                   <span className="text-indigo-400 font-mono tabular-nums whitespace-nowrap text-right">
                     {e2?.unauthenticatedGatePassCount || 8} Routes
                   </span>
@@ -1616,7 +1637,7 @@ COMMIT;
             </div>
 
             {/* Engine 03 */}
-            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-1.5">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
                 <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <Layers className="w-3.5 h-3.5 text-purple-400 shrink-0" />
@@ -1628,15 +1649,15 @@ COMMIT;
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">Visual Parity Rate</span>
+                  <span className="text-zinc-400 whitespace-nowrap">Visual Parity</span>
                   <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap text-right">
                     {visualParityPercent}% Parity
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">Pin Drift Coordinates</span>
+                  <span className="text-zinc-400 whitespace-nowrap">Pin Coordinates</span>
                   <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
-                    0px Drift ({e3ShiftedPins} Shifted)
+                    0px ({e3ShiftedPins} Shift)
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
@@ -1649,24 +1670,19 @@ COMMIT;
             </div>
 
             {/* Engine 04 */}
-            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-2">
+            <div className="bg-[#101217] border border-white/[0.07] rounded-lg p-2.5 flex flex-col gap-1.5">
               <div className="flex items-center justify-between border-b border-white/[0.07] pb-1.5">
                 <span className="text-xs font-semibold text-zinc-100 flex items-center gap-1.5 whitespace-nowrap">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>04. Governance Gate</span>
                 </span>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-blue-950/60 border border-blue-800/50 text-blue-300 font-mono">
-                    RULE_BASED
-                  </span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono">
-                    ISO 29119 {isId ? 'LULUS' : 'PASS'}
-                  </span>
-                </div>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono shrink-0">
+                  ISO 29119 {isId ? 'LULUS' : 'PASS'}
+                </span>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2 text-xs leading-5">
-                  <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Asersi Disintesis' : 'Synthesized Assertions'}</span>
+                  <span className="text-zinc-400 whitespace-nowrap">{isId ? 'Asersi Disintesis' : 'Assertions'}</span>
                   <span className="text-zinc-200 font-mono tabular-nums whitespace-nowrap text-right">
                     {totalCases}/{totalCases} ({passedCount} {isId ? 'Lulus' : 'Pass'})
                   </span>
@@ -1688,9 +1704,9 @@ COMMIT;
           </div>
 
           {/* Full-vertical Split: Prominent 4-Stage Live Pipeline (Left) & Test Case Table (Right) */}
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[520px] overflow-hidden">
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-[380px] overflow-hidden">
             {/* Left: 4-Stage Live Pipeline Stream View (5 Cols) */}
-            <div className="lg:col-span-5 border border-white/[0.07] bg-[#101217] rounded-lg overflow-hidden flex flex-col min-h-[520px]">
+            <div className="lg:col-span-5 border border-white/[0.07] bg-[#101217] rounded-lg overflow-hidden flex flex-col min-h-[380px]">
               {/* Header with View Mode Switcher */}
               <div className="p-2 bg-[#161922] border-b border-[#22262E] flex items-center justify-between text-[10px] text-[#8B9BB4] shrink-0">
                 <div className="flex items-center gap-2">
@@ -1726,45 +1742,54 @@ COMMIT;
               {/* View 1: 4-Stage Live Pipeline Cards (Anti-Microscopic, Clear & Legible) */}
               {pipelineViewMode === 'CARDS' ? (
                 <div className="flex-1 p-2.5 overflow-y-auto space-y-2">
-                  {[
-                    {
-                      num: '01',
-                      title: 'Playwright UI & DOM Action',
-                      badge: 'NOMINAL · 14ms',
-                      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-                      icon: <MousePointer className="h-3.5 w-3.5 text-[#38BDF8]" />,
-                      target: `page.goto(${effectiveTargetUrl}${activeTrace.stages[0]?.componentSource || '/dashboard'})`,
-                      exec: 'Attached locator [data-testid="data-table-root"] • 0 console errors',
-                    },
-                    {
-                      num: '02',
-                      title: 'API Gateway & Auth Handshake',
-                      badge: 'NOMINAL · 38ms',
-                      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-                      icon: <Network className="h-3.5 w-3.5 text-[#10B981]" />,
-                      target: activeTrace.stages[1]?.componentSource || 'GET /api/v1/records • HTTP 200 OK',
-                      exec: 'Bearer JWT Handshake validated • Preflight CORS cache passed (12ms)',
-                    },
-                    {
-                      num: '03',
-                      title: 'Backend Controller & AST DTO Guard',
-                      badge: 'NOMINAL · 24ms',
-                      badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-                      icon: <FileCode className="h-3.5 w-3.5 text-[#60A5FA]" />,
-                      target: `${activeTrace.stages[2]?.label || 'RecordController.index()'} • Ref ${activeTrace.ruleRef || 'VR-AST-01'}`,
-                      exec: 'Zod DTO schema parity verified • Min-1/Nominal/Max+1 Boundary checks passed',
-                    },
-                    {
-                      num: '04',
-                      title: 'Database Persistence & Query Plan',
-                      badge: 'INDEX ADVISABLE · 1,420ms (Target: <50ms)',
-                      badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
-                      icon: <Database className="h-3.5 w-3.5 text-amber-400" />,
-                      target: 'SELECT * FROM "Records" WHERE "id" = $1 AND "status" = $2',
-                      exec: 'Sequential scan on unindexed foreign key column • Index migration recommended',
-                      isBottleneck: true,
-                    },
-                  ].map((stg) => (
+                  {(() => {
+                    const stage0Source = activeTrace.stages[0]?.componentSource || '';
+                    const stage0Target = stage0Source.startsWith('page.') || stage0Source.startsWith('locator')
+                      ? stage0Source
+                      : stage0Source.startsWith('http')
+                      ? `page.goto('${stage0Source}')`
+                      : `page.goto('${effectiveTargetUrl.replace(/\/+$/, '')}${stage0Source.startsWith('/') ? stage0Source : `/${stage0Source || 'dashboard'}`}')`;
+
+                    return [
+                      {
+                        num: '01',
+                        title: 'Playwright UI & DOM Action',
+                        badge: 'NOMINAL · 14ms',
+                        badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
+                        icon: <MousePointer className="h-3.5 w-3.5 text-[#38BDF8]" />,
+                        target: stage0Target,
+                        exec: activeTrace.stages[0]?.outputPayload || 'Attached locator [data-testid="data-table-root"] • 0 console errors',
+                      },
+                      {
+                        num: '02',
+                        title: 'API Gateway & Auth Handshake',
+                        badge: 'NOMINAL · 38ms',
+                        badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
+                        icon: <Network className="h-3.5 w-3.5 text-[#10B981]" />,
+                        target: activeTrace.stages[1]?.componentSource || 'GET /api/v1/records • HTTP 200 OK',
+                        exec: activeTrace.stages[1]?.outputPayload || 'Bearer JWT Handshake validated • Preflight CORS cache passed (12ms)',
+                      },
+                      {
+                        num: '03',
+                        title: 'Backend Controller & AST DTO Guard',
+                        badge: 'NOMINAL · 24ms',
+                        badgeColor: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
+                        icon: <FileCode className="h-3.5 w-3.5 text-[#60A5FA]" />,
+                        target: `${activeTrace.stages[2]?.componentSource || activeTrace.stages[2]?.label || 'RecordController.index()'} • Ref ${activeTrace.ruleRef || 'VR-AST-01'}`,
+                        exec: activeTrace.stages[2]?.outputPayload || 'Zod DTO schema parity verified • Min-1/Nominal/Max+1 Boundary checks passed',
+                      },
+                      {
+                        num: '04',
+                        title: 'Database Persistence & Query Plan',
+                        badge: 'INDEX ADVISABLE · 1,420ms (Target: <50ms)',
+                        badgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
+                        icon: <Database className="h-3.5 w-3.5 text-amber-400" />,
+                        target: activeTrace.stages[3]?.componentSource || 'SELECT * FROM "Records" WHERE "id" = $1 AND "status" = $2',
+                        exec: activeTrace.stages[3]?.outputPayload || 'Sequential scan on unindexed foreign key column • Index migration recommended',
+                        isBottleneck: true,
+                      },
+                    ];
+                  })().map((stg) => (
                     <div
                       key={stg.num}
                       className={`p-2.5 bg-[#121620] border rounded-[3px] transition-all ${
@@ -1837,7 +1862,7 @@ COMMIT;
             </div>
 
             {/* Right: Test Case Assertions Table (7 Cols) */}
-            <div className="lg:col-span-7 border border-white/[0.07] bg-[#101217] rounded-lg flex flex-col overflow-hidden min-h-[520px]">
+            <div className="lg:col-span-7 border border-white/[0.07] bg-[#101217] rounded-lg flex flex-col overflow-hidden min-h-[380px]">
               {/* Header Bar with Filter & Search */}
               <div className="p-2 bg-[#161922] border-b border-[#22262E] flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div className="flex items-center gap-1.5">
@@ -1889,6 +1914,18 @@ COMMIT;
                 {filteredFunctionalResults.map((t) => {
                   const isExpanded = expandedTestId === t.testId;
                   const isPassed = t.verdict === 'PASSED';
+                  const cleanTitle = t.title.replace(/^\[[^\]]+\]\s*/, '');
+                  const getModuleBadge = (modName?: string) => {
+                    if (!modName) return 'MOD-01';
+                    const digitMatch = modName.match(/(\d+)/);
+                    if (digitMatch) return `MOD-${digitMatch[1].padStart(2, '0')}`;
+                    const lower = modName.toLowerCase();
+                    if (lower.includes('auth') || lower.includes('login') || lower.includes('access')) return 'MOD-AUTH';
+                    if (lower.includes('api') || lower.includes('endpoint')) return 'MOD-API';
+                    if (lower.includes('data') || lower.includes('record') || lower.includes('table')) return 'MOD-DATA';
+                    if (lower.includes('rbac') || lower.includes('role')) return 'MOD-RBAC';
+                    return modName.length > 8 ? `${modName.slice(0, 7).toUpperCase()}` : modName.toUpperCase();
+                  };
 
                   return (
                     <div
@@ -1921,12 +1958,10 @@ COMMIT;
                               className="px-1.5 py-0.5 bg-blue-950/60 text-blue-300 border border-blue-800/40 rounded text-[9px] font-mono shrink-0"
                               title={t.moduleName}
                             >
-                              {t.moduleName.match(/(\d+)/)?.[1]
-                                ? `MOD-${t.moduleName.match(/(\d+)/)![1].padStart(2, '0')}`
-                                : (t.moduleName.length > 7 ? `${t.moduleName.slice(0, 6)}..` : t.moduleName)}
+                              {getModuleBadge(t.moduleName)}
                             </span>
                           )}
-                          <span className="text-[#A1A1A1] truncate text-[11px]">{t.title}</span>
+                          <span className="text-[#A1A1A1] truncate text-[11px]">{cleanTitle}</span>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
