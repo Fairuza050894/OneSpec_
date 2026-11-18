@@ -6,7 +6,7 @@
  * - Cryptographic Merkle Tree Binary Hash Vault (SHA-256)
  */
 
-import { createHash } from 'node:crypto';
+import { safeSha256Hex } from '@/lib/safeCrypto';
 import type {
   DiscoveredApiEndpoint,
   DatabaseErdTable,
@@ -118,7 +118,7 @@ export class Iso31000RiskService {
    * SHA-256 helper
    */
   private sha256(data: string): string {
-    return createHash('sha256').update(data).digest('hex');
+    return safeSha256Hex(data);
   }
 
   /**

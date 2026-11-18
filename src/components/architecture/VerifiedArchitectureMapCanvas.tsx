@@ -579,27 +579,45 @@ export function VerifiedArchitectureMapCanvas({
                   {node.tag}
                 </text>
 
-                {/* Primary Title */}
-                <text
-                  x={x + 12}
-                  y={y + 38}
-                  fill="#F8FAFC"
-                  fontSize="12.5"
-                  fontWeight="700"
-                  fontFamily="Inter, system-ui, sans-serif"
-                >
-                  {node.label.length > 24 ? `${node.label.slice(0, 23)}…` : node.label}
-                </text>
+                {/* Primary Title with zero cut-off */}
+                {node.label.length > 20 && node.label.includes(' ') ? (
+                  <text
+                    x={x + 12}
+                    y={y + 33}
+                    fill="#F8FAFC"
+                    fontSize="11.5"
+                    fontWeight="700"
+                    fontFamily="Inter, system-ui, sans-serif"
+                  >
+                    <tspan x={x + 12} dy="0">
+                      {node.label.slice(0, node.label.lastIndexOf(' ', 22))}
+                    </tspan>
+                    <tspan x={x + 12} dy="14">
+                      {node.label.slice(node.label.lastIndexOf(' ', 22) + 1)}
+                    </tspan>
+                  </text>
+                ) : (
+                  <text
+                    x={x + 12}
+                    y={y + 38}
+                    fill="#F8FAFC"
+                    fontSize="12.5"
+                    fontWeight="700"
+                    fontFamily="Inter, system-ui, sans-serif"
+                  >
+                    {node.label}
+                  </text>
+                )}
 
                 {/* Sublabel / Tech Stack */}
                 <text
                   x={x + 12}
-                  y={y + 56}
-                  fill="#94A3B8"
+                  y={node.label.length > 20 && node.label.includes(' ') ? y + 62 : y + 56}
+                  fill="#CBD5E1"
                   fontSize="9.5"
                   fontFamily="ui-monospace, Menlo, monospace"
                 >
-                  {node.sublabel.length > 26 ? `${node.sublabel.slice(0, 25)}…` : node.sublabel}
+                  {node.sublabel}
                 </text>
               </g>
             );

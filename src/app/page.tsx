@@ -83,7 +83,7 @@ import type {
 import { generateCanonicalBpmn2Xml } from '@/services/bpmnXmlGenerator';
 import { detectEnvironment } from '@/lib/environmentDetector';
 import { useStudioLocale } from '@/lib/i18n';
-import { CamundaBpmnViewer, BpmnNodeClickEvent } from '@/components/bpmn/CamundaBpmnViewer';
+import type { BpmnNodeClickEvent } from '@/components/bpmn/CamundaBpmnViewer';
 import { ContractWireframePreview, WireframeState } from '@/components/wireframe/ContractWireframePreview';
 import {
   synthesizeTestCasesFromValidations,
@@ -112,17 +112,20 @@ import { IsoRiskAuditWorkbench } from '@/components/compliance/IsoRiskAuditWorkb
 import { ReverseDfdWorkbench } from '@/components/architecture/ReverseDfdWorkbench';
 import { SmtFormalVerifierWorkbench } from '@/components/formal/SmtFormalVerifierWorkbench';
 import { DelphiConsensusWorkbench } from '@/components/consensus/DelphiConsensusWorkbench';
-import { EnterpriseLibraryPortal } from '@/components/portal/EnterpriseLibraryPortal';
 import { ProductKnowledgeMonitorHub } from '@/components/portal/ProductKnowledgeMonitorHub';
 import { UniversalKnowledgeGraphWorkbench } from '@/components/ontology/UniversalKnowledgeGraphWorkbench';
 import { QuickExportToolbar } from '@/components/shared/QuickExportToolbar';
-const LiveRunnerWorkbench = dynamic(
-  () => import('@/components/runner/LiveRunnerWorkbench').then((m) => m.LiveRunnerWorkbench),
+import { IsoLibraryPortal } from '@/components/IsoLibraryPortal';
+import { Step07ExecutionRunner } from '@/components/Step07ExecutionRunner';
+
+// Dynamically import Camunda BPMN Canvas to prevent SSR hydration conflicts with bpmn-js
+const CamundaBpmnViewer = dynamic(
+  () => import('@/components/bpmn/CamundaBpmnViewer').then((m) => m.CamundaBpmnViewer),
   {
     ssr: false,
     loading: () => (
-      <div className="w-full h-full flex items-center justify-center font-mono text-[12px] text-[#707070] bg-[#0E1015]">
-        Initializing Playwright Synthesizer &amp; @xyflow/react Live Runner...
+      <div className="w-full h-full flex items-center justify-center font-mono text-[12px] text-[#94A3B8] bg-[#0E1015]">
+        Initializing BPMN 2.0 Engine &amp; bpmn-js Canvas...
       </div>
     ),
   }
@@ -160,7 +163,7 @@ interface ExtractedEntity {
   status: 'EXTRACTED' | 'VALIDATED';
 }
 
-export function resolveModuleScreenshot(targetItem: any, state: CompiledSdlcState | null): string | undefined {
+function resolveModuleScreenshot(targetItem: any, state: CompiledSdlcState | null): string | undefined {
   if (!targetItem && !state) return undefined;
   const isCandidateValid = (val: unknown): val is string =>
     typeof val === 'string' && val.startsWith('data:image/') && val.length > 2500;
@@ -197,6 +200,7 @@ export default function OneSpecEngineeringWorkbench() {
   const [activeWorkspace, setActiveWorkspace] = useState<any | null>(null);
   const [activeStep, setActiveStep] = useState<number>(1);
   const [workspaceMode, setWorkspaceMode] = useState<'STUDIO' | 'ENTERPRISE_LIBRARY'>('STUDIO');
+  const [displayMode, setDisplayMode] = useState<'EXECUTIVE' | 'TECHNICAL'>('TECHNICAL');
   const [step12View, setStep12View] = useState<'KNOWLEDGE_GRAPH' | 'PRODUCT_KNOWLEDGE'>('KNOWLEDGE_GRAPH');
 
   // Sub-View Pill Switchers (Single Focus per Step)
@@ -1419,7 +1423,7 @@ The system provides deterministic transaction processing, input validation, and 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          dirPath: process.cwd(),
+          dirPath: '.',
           tsdRows: liveTsdRows,
         }),
       });
@@ -2064,50 +2068,37 @@ The system provides deterministic transaction processing, input validation, and 
           </div>
 
           {workspaceMode === 'STUDIO' && (
-            <div className="hidden min-[1180px]:flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-0.5 shrink-0">
+            <div
+              className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-0.5 shrink-0 text-[11px]"
+              role="group"
+              aria-label={locale === 'id' ? 'Mode Tampilan' : 'Display Mode'}
+            >
+              <span className="hidden min-[1380px]:inline px-2 text-[10.5px] text-[#94A3B8] font-medium">
+                {locale === 'id' ? 'Mode Tampilan:' : 'View Mode:'}
+              </span>
               <button
-                onClick={() => handlePhaseChange(1)}
-                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                  activeStep <= 4
-                    ? 'bg-[#2563EB] text-white font-semibold'
-                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                type="button"
+                onClick={() => setDisplayMode('EXECUTIVE')}
+                className={`px-2.5 h-7 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap text-[11px] font-medium ${
+                  displayMode === 'EXECUTIVE'
+                    ? 'bg-[#2563EB] text-white shadow-sm font-semibold'
+                    : 'text-[#CBD5E1] hover:text-white hover:bg-[#16191F]'
                 }`}
-                title="Phase 1: Pre-Development (Steps 01-04)"
+                title={locale === 'id' ? 'Mode Ringkas untuk Eksekutif / Manajemen' : 'Executive Summary Mode'}
               >
-                <span>P1: Pre-Dev</span>
+                <span>{locale === 'id' ? 'Ringkas (Executive)' : 'Executive'}</span>
               </button>
               <button
-                onClick={() => handlePhaseChange(2)}
-                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                  activeStep >= 5 && activeStep <= 7
-                    ? 'bg-[#2563EB] text-white font-semibold'
-                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                type="button"
+                onClick={() => setDisplayMode('TECHNICAL')}
+                className={`px-2.5 h-7 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap text-[11px] font-medium ${
+                  displayMode === 'TECHNICAL'
+                    ? 'bg-[#2563EB] text-white shadow-sm font-semibold'
+                    : 'text-[#CBD5E1] hover:text-white hover:bg-[#16191F]'
                 }`}
-                title="Phase 2: Staging & Automation (Steps 05-07)"
+                title={locale === 'id' ? 'Mode Pakar Audit & Telemetri Teknis' : 'Technical Audit & Telemetry Mode'}
               >
-                <span>P2: Staging</span>
-              </button>
-              <button
-                onClick={() => handlePhaseChange(3)}
-                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                  activeStep >= 8 && activeStep <= 9
-                    ? 'bg-[#2563EB] text-white font-semibold'
-                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
-                }`}
-                title="Phase 3: GRC & Security (Steps 08-09)"
-              >
-                <span>P3: GRC</span>
-              </button>
-              <button
-                onClick={() => handlePhaseChange(4)}
-                className={`px-2 h-8 text-[10.5px] font-mono rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
-                  activeStep >= 10
-                    ? 'bg-[#2563EB] text-white font-semibold'
-                    : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
-                }`}
-                title="Phase 4: Formal Assurance (Steps 10-12)"
-              >
-                <span>P4: Formal</span>
+                <span>{locale === 'id' ? 'Pakar (Technical Audit)' : 'Technical Audit'}</span>
               </button>
             </div>
           )}
@@ -2191,71 +2182,61 @@ The system provides deterministic transaction processing, input validation, and 
        * ========================================================================= */}
       <div className="flex-1 flex overflow-hidden min-h-0 relative">
         {workspaceMode === 'ENTERPRISE_LIBRARY' ? (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="px-3 py-1.5 border-b border-[#22262E] bg-[#111317]">
-              <QuickExportToolbar
-                compiledState={compiledSdlcState}
-                activeVaultProjectId={activeVaultProjectId}
-                locale={locale}
-              />
-            </div>
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <EnterpriseLibraryPortal
-                activeState={compiledSdlcState}
-                activeVaultProjectId={activeVaultProjectId}
-                onOpenInStudio={async (projectId, jumpToStep) => {
-                  if (projectId && projectId !== 'active-workspace' && projectId !== activeVaultProjectId) {
-                    await handleSwitchVaultProject(projectId);
-                  }
-                  setWorkspaceMode('STUDIO');
-                  setActiveStep(jumpToStep || 1);
-                }}
-                onCopyBlueprintToNewProject={(blueprintMom, projectNameHint) => {
-                  setGreenfieldProjectName(projectNameHint);
-                  setRawMoMNotes(blueprintMom);
-                  setStep1SourceTab('STAKEHOLDER_MOM');
-                  setWorkspaceMode('STUDIO');
-                  setActiveStep(1);
-                  appendTerminalLog(`[BLUEPRINT REGISTRY] Copied enterprise blueprint "${projectNameHint}" into Step 01 Greenfield Compiler.`);
-                }}
-                onSwitchToStudioMode={() => setWorkspaceMode('STUDIO')}
-                onAppendLog={appendTerminalLog}
-                onRecaptureScreenshots={handleRecaptureScreenshots}
-                isRecapturingScreenshots={isRecapturingScreenshots}
-                onSyncProject={async (rec) => {
-                  appendTerminalLog(`[1:1 SYNC & AUTO-VERSION] Initiating structural re-scan & audit ledger for "${rec.projectName}" (${rec.projectId})...`);
-                  try {
-                    if (rec.projectId && rec.projectId !== activeVaultProjectId) {
-                      await handleSwitchVaultProject(rec.projectId);
-                    }
-                    const saveRes = await fetch('/api/workspace/vault', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        action: 'CREATE_SNAPSHOT',
-                        projectId: rec.projectId,
-                        projectName: rec.projectName,
-                        targetUrl: rec.targetUrl,
-                        compiledState: rec.latestState || compiledSdlcState,
-                        createSnapshot: true,
-                        versionLabel: `Live 1:1 Sync ${new Date().toLocaleTimeString()}`,
-                      }),
-                    });
-                    if (saveRes.ok) {
-                      const saveJson = await saveRes.json();
-                      const newVer = saveJson.data?.snapshots?.[0]?.semanticVersion || 'v1.1.0';
-                      const crId = saveJson.data?.snapshots?.[0]?.autoChangeRequestId || 'CR-AUTO-002';
-                      appendTerminalLog(`[1:1 SYNC COMPLETE] Successfully saved new version ${newVer} (${crId}) with deep delta grep across UI buttons, forms, and API contracts.`);
-                    } else {
-                      appendTerminalLog(`[1:1 SYNC ERROR] Failed to save snapshot: ${saveRes.statusText}`);
-                    }
-                  } catch (err) {
-                    appendTerminalLog(`[1:1 SYNC ERROR] Sync exception: ${err instanceof Error ? err.message : String(err)}`);
-                  }
-                }}
-              />
-            </div>
-          </div>
+          <IsoLibraryPortal
+            compiledSdlcState={compiledSdlcState}
+            activeVaultProjectId={activeVaultProjectId}
+            locale={locale}
+            onOpenInStudio={async (projectId, jumpToStep) => {
+              if (projectId && projectId !== 'active-workspace' && projectId !== activeVaultProjectId) {
+                await handleSwitchVaultProject(projectId);
+              }
+              setWorkspaceMode('STUDIO');
+              setActiveStep(jumpToStep || 1);
+            }}
+            onCopyBlueprintToNewProject={(blueprintMom, projectNameHint) => {
+              setGreenfieldProjectName(projectNameHint);
+              setRawMoMNotes(blueprintMom);
+              setStep1SourceTab('STAKEHOLDER_MOM');
+              setWorkspaceMode('STUDIO');
+              setActiveStep(1);
+              appendTerminalLog(`[BLUEPRINT REGISTRY] Copied enterprise blueprint "${projectNameHint}" into Step 01 Greenfield Compiler.`);
+            }}
+            onSwitchToStudioMode={() => setWorkspaceMode('STUDIO')}
+            onAppendLog={appendTerminalLog}
+            onRecaptureScreenshots={handleRecaptureScreenshots}
+            isRecapturingScreenshots={isRecapturingScreenshots}
+            onSyncProject={async (rec) => {
+              appendTerminalLog(`[1:1 SYNC & AUTO-VERSION] Initiating structural re-scan & audit ledger for "${rec.projectName}" (${rec.projectId})...`);
+              try {
+                if (rec.projectId && rec.projectId !== activeVaultProjectId) {
+                  await handleSwitchVaultProject(rec.projectId);
+                }
+                const saveRes = await fetch('/api/workspace/vault', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    action: 'CREATE_SNAPSHOT',
+                    projectId: rec.projectId,
+                    projectName: rec.projectName,
+                    targetUrl: rec.targetUrl,
+                    compiledState: rec.latestState || compiledSdlcState,
+                    createSnapshot: true,
+                    versionLabel: `Live 1:1 Sync ${new Date().toLocaleTimeString()}`,
+                  }),
+                });
+                if (saveRes.ok) {
+                  const saveJson = await saveRes.json();
+                  const newVer = saveJson.data?.snapshots?.[0]?.semanticVersion || 'v1.1.0';
+                  const crId = saveJson.data?.snapshots?.[0]?.autoChangeRequestId || 'CR-AUTO-002';
+                  appendTerminalLog(`[1:1 SYNC COMPLETE] Successfully saved new version ${newVer} (${crId}) with deep delta grep across UI buttons, forms, and API contracts.`);
+                } else {
+                  appendTerminalLog(`[1:1 SYNC ERROR] Failed to save snapshot: ${saveRes.statusText}`);
+                }
+              } catch (err) {
+                appendTerminalLog(`[1:1 SYNC ERROR] Sync exception: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }}
+          />
         ) : (
           <>
         {/* LEFT VERTICAL SIDEBAR (248px Fixed Width, Breathable Stepper Navigation) */}
@@ -4114,44 +4095,28 @@ The system provides deterministic transaction processing, input validation, and 
            * STEP 07: PLAYWRIGHT AUTOMATION & REA LIVE RUNNER (1-CLICK UNIFIED RUNNER)
            * ========================================================================= */}
           {activeStep === 7 && (
-            <div className="h-full flex flex-col space-y-2 min-h-0 overflow-y-auto pr-0.5">
-              {/* Canvas Header */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 pb-1 border-b border-[#22262E] shrink-0">
-                <div>
-                  <h1 className="text-[17px] font-bold text-[#EDEDED] tracking-tight">
-                    {copy.step07.title}
-                  </h1>
-                  <p className="text-[11.5px] text-[#707070] font-mono mt-0.5">
-                    {copy.step07.subtitle}
-                  </p>
-                </div>
-              </div>
-
-              {/* Unified Full-Viewport Workbench (Master Command Bar & 4 Workspace Tabs) */}
-              <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] p-2 overflow-hidden flex flex-col min-h-[520px]">
-                <LiveRunnerWorkbench
-                  onSelectStage={handleSelectRunnerStage}
-                  selectedStageId={selectedRunnerStage?.id}
-                  onAppendLog={appendTerminalLog}
-                  projectName={activeWorkspace?.name}
-                  targetUrl={currentTargetUrl}
-                  rtmRows={rtmRows}
-                  discoveryResult={discoveryResult}
-                  customPipelineStages={compiledPipelineStages}
-                  customExecutionTraces={compiledExecutionTraces}
-                  playwrightCode={compiledPlaywrightCode}
-                  k6Code={compiledK6Code}
-                  postmanCode={compiledPostmanCode}
-                  testScenarios={qaWorkbook.testScenarios}
-                  bugReports={qaWorkbook.bugReports}
-                  uatFlows={qaWorkbook.uatFlows}
-                  discoveredModules={compiledSdlcState?.discoveredModules}
-                  onExecutionSynced={handleSyncRunnerResults}
-                  compiledState={compiledSdlcState}
-                  activeVaultProjectId={activeVaultProjectId}
-                />
-              </div>
-            </div>
+            <Step07ExecutionRunner
+              displayMode={displayMode}
+              onSelectStage={handleSelectRunnerStage}
+              selectedStageId={selectedRunnerStage?.id}
+              onAppendLog={appendTerminalLog}
+              projectName={activeWorkspace?.name}
+              targetUrl={currentTargetUrl}
+              rtmRows={rtmRows}
+              discoveryResult={discoveryResult}
+              customPipelineStages={compiledPipelineStages}
+              customExecutionTraces={compiledExecutionTraces}
+              playwrightCode={compiledPlaywrightCode}
+              k6Code={compiledK6Code}
+              postmanCode={compiledPostmanCode}
+              testScenarios={qaWorkbook.testScenarios}
+              bugReports={qaWorkbook.bugReports}
+              uatFlows={qaWorkbook.uatFlows}
+              discoveredModules={compiledSdlcState?.discoveredModules}
+              onExecutionSynced={handleSyncRunnerResults}
+              compiledState={compiledSdlcState}
+              activeVaultProjectId={activeVaultProjectId}
+            />
           )}
 
           {/* =========================================================================

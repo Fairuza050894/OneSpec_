@@ -206,13 +206,13 @@ export class ArchitectureMapEngineService {
         nodes.push({
           id: nodeId,
           role: 'SERVICE',
-          label: comp.name.slice(0, 24),
+          label: comp.name.slice(0, 50),
           sublabel: comp.identifier || 'Business Invariant Engine',
           tag: 'ISO 29148',
           evidenceRef: comp.sourcePath || 'Domain Service',
           details: [comp.responsibility],
           pos: [812, 104 + idx * 104],
-          size: [248, 74],
+          size: [264, 80],
         });
         edges.push({
           id: `edge-gw-${nodeId}`,
@@ -236,7 +236,7 @@ export class ArchitectureMapEngineService {
       nodes.push({
         id: 'domain-svc-1',
         role: 'SERVICE',
-        label: (singleComp?.name || 'Domain Logic Service').slice(0, 24),
+        label: (singleComp?.name || 'Domain Logic Service').slice(0, 50),
         sublabel: hla.techStackSummary.serviceLanguage,
         tag: `${domainTier?.components.length || 1} RULES`,
         evidenceRef: singleComp?.sourcePath || 'Domain Service',
@@ -245,7 +245,7 @@ export class ArchitectureMapEngineService {
           `Concurrency: ${lla.securityTopology.concurrencyIsolation}`,
         ],
         pos: [812, 168],
-        size: [248, 76],
+        size: [264, 80],
       });
       edges.push({
         id: 'edge-gw-domain-svc-1',
@@ -276,7 +276,7 @@ export class ArchitectureMapEngineService {
       evidenceRef: dbTables[0] ? `Table: ${dbTables[0]}` : 'Schema Store',
       details: dbTables.length > 0 ? dbTables.map((t) => `Entity: ${t}`) : ['ACID Transactional Persistence'],
       pos: [812, dbY],
-      size: [248, 78],
+      size: [264, 80],
     });
     // Optional Cross-Project Upstream Linked System (bottom left)
     if (integrationHandoffKit?.upstreamLinkedProject) {

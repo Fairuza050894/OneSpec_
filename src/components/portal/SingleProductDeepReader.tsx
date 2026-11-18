@@ -59,7 +59,7 @@ function normalizeManualImgSrc(raw?: string | null, fallback = ''): string {
     if (s.startsWith('data:image/svg+xml;utf8,')) {
       try {
         const svgBody = decodeURIComponent(s.replace('data:image/svg+xml;utf8,', ''));
-        const b64 = typeof Buffer !== 'undefined' ? Buffer.from(svgBody, 'utf8').toString('base64') : btoa(unescape(encodeURIComponent(svgBody)));
+        const b64 = btoa(unescape(encodeURIComponent(svgBody)));
         return `data:image/svg+xml;base64,${b64}`;
       } catch {}
     }

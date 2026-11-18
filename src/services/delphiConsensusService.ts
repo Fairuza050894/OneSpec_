@@ -6,7 +6,7 @@
  * - Multi-Agent Adversarial Consensus Protocol & Cryptographic Architecture Clearance Packet
  */
 
-import { createHash } from 'node:crypto';
+import { safeSha256Hex } from '@/lib/safeCrypto';
 import type {
   DiscoveredApiEndpoint,
   DatabaseErdTable,
@@ -86,7 +86,7 @@ export class DelphiConsensusService {
   }
 
   private sha256(text: string): string {
-    return createHash('sha256').update(text).digest('hex');
+    return safeSha256Hex(text);
   }
 
   /**

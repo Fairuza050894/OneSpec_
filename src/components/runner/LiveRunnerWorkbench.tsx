@@ -281,7 +281,8 @@ export function LiveRunnerWorkbench({
   compiledState,
   activeVaultProjectId,
 }: LiveRunnerWorkbenchProps) {
-  const { copy } = useStudioLocale();
+  const { copy, locale } = useStudioLocale();
+  const isId = locale === 'id';
   const effectiveProjectName = projectName || compiledState?.appName || 'Target Application';
   const effectiveTargetUrl = targetUrl || compiledState?.targetUrl || 'http://localhost:3000';
   const slug = effectiveProjectName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -1192,7 +1193,7 @@ COMMIT;
           </span>
 
           <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/60 text-zinc-300 text-[11px] font-mono">
-            {liveQaReport ? `${Math.min(liveQaReport.summary.enginesPassed, 4)}/4` : '4/4'} Engines Ready
+            {liveQaReport ? `${Math.min(liveQaReport.summary.enginesPassed, 4)}/4` : '4/4'} {isId ? 'Mesin Siap' : 'Engines Ready'}
           </span>
 
           {!isReleaseGatePassed && (
@@ -1474,10 +1475,10 @@ COMMIT;
               </span>
               <div className="my-1 flex items-baseline justify-between">
                 <span className="text-[16px] font-extrabold text-emerald-400 tabular-nums">
-                  {passedCount}/{functionalResults.length} Passed
+                  {passedCount}/{functionalResults.length} {isId ? 'Lulus' : 'Passed'}
                 </span>
                 <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 font-bold">
-                  {failedCount} Failed · 100% Pass Rate
+                  {failedCount} {isId ? 'Gagal' : 'Failed'} · 100% {isId ? 'Lulus' : 'Pass Rate'}
                 </span>
               </div>
               <span className="text-[9px] text-[#64748B] truncate">
@@ -1488,14 +1489,14 @@ COMMIT;
             {/* KPI 2: K6 VIRTUAL USERS */}
             <div className="bg-[#11141A] border border-[#1E232F] p-2.5 rounded-[3px] flex flex-col justify-between">
               <span className="text-[9.5px] text-[#8B9BB4] font-bold tracking-wider uppercase">
-                K6 VIRTUAL USERS
+                {isId ? 'PENGGUNA VIRTUAL K6' : 'K6 VIRTUAL USERS'}
               </span>
               <div className="my-1 flex items-baseline justify-between">
                 <span className="text-[16px] font-extrabold text-[#38BDF8] tabular-nums">
-                  {selectedVus} Active VUs
+                  {selectedVus} {isId ? 'VU Aktif' : 'Active VUs'}
                 </span>
                 <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-950/80 border border-blue-700/60 text-blue-300 font-bold">
-                  {selectedDuration}s Stress
+                  {selectedDuration}s {isId ? 'Beban' : 'Stress'}
                 </span>
               </div>
               <span className="text-[9px] text-[#64748B] truncate">
@@ -1579,7 +1580,7 @@ COMMIT;
               <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
                 <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
                   <Smartphone className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span className="truncate">01. Multi-Viewport &amp; Touch</span>
+                  <span className="truncate">01. Multi-Viewport</span>
                 </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-950/60 border border-sky-800/50 text-sky-300 font-mono shrink-0">
                   Appium / Playwright
@@ -1595,13 +1596,13 @@ COMMIT;
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
                   <span className="text-zinc-400 truncate">Tablet (768x1024)</span>
                   <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    0 Clashes · Pass
+                    0 Clashes · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
                   <span className="text-zinc-400 truncate">Mobile (375x812 Touch)</span>
                   <span className="text-emerald-400 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    0 Overlaps · Pass
+                    0 Overlaps · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
               </div>
@@ -1612,7 +1613,7 @@ COMMIT;
               <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
                 <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
                   <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="truncate">02. Live API &amp; 3-Pt BVA</span>
+                  <span className="truncate">02. Live API &amp; BVA</span>
                 </span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/50 text-amber-300 font-mono shrink-0">
                   REST-assured / Postman
@@ -1620,9 +1621,9 @@ COMMIT;
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Verified Endpoints</span>
+                  <span className="text-zinc-400 truncate">{isId ? 'Endpoint Terverifikasi' : 'Verified Endpoints'}</span>
                   <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    {epCount}/{epCount} Verified ({e2?.avgLatencyMs || 38}ms)
+                    {epCount}/{epCount} {isId ? 'Terverifikasi' : 'Verified'} ({e2?.avgLatencyMs || 38}ms)
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
@@ -1667,7 +1668,7 @@ COMMIT;
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
                   <span className="text-zinc-400 truncate">Baseline Regression</span>
                   <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    Zero Delta · Pass
+                    Zero Delta · {isId ? 'Lulus' : 'Pass'}
                   </span>
                 </div>
               </div>
@@ -1678,22 +1679,22 @@ COMMIT;
               <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
                 <span className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5 truncate">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                  <span className="truncate">04. AI Guardrails &amp; Grounding</span>
+                  <span className="truncate">04. Governance Gate</span>
                 </span>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-[9px] px-1 py-0.5 rounded bg-blue-950/60 border border-blue-800/50 text-blue-300 font-mono">
                     RULE_BASED_HEURISTIC
                   </span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 font-mono">
-                    ISO 29119 PASS
+                    ISO 29119 {isId ? 'LULUS' : 'PASS'}
                   </span>
                 </div>
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
-                  <span className="text-zinc-400 truncate">Synthesized Assertions</span>
+                  <span className="text-zinc-400 truncate">{isId ? 'Asersi Disintesis' : 'Synthesized Assertions'}</span>
                   <span className="text-zinc-100 font-mono tabular-nums whitespace-nowrap shrink-0">
-                    {totalCases}/{totalCases} Cases ({passedCount} Pass)
+                    {totalCases}/{totalCases} Cases ({passedCount} {isId ? 'Lulus' : 'Pass'})
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 text-[11px] leading-5">
@@ -1887,10 +1888,10 @@ COMMIT;
                         }`}
                       >
                         {filter === 'ALL'
-                          ? `All (${functionalResults.length})`
+                          ? (isId ? `Semua (${functionalResults.length})` : `All (${functionalResults.length})`)
                           : filter === 'PASSED'
-                          ? `Passed (${passedCount})`
-                          : `Failed (${failedCount})`}
+                          ? (isId ? `Lulus (${passedCount})` : `Passed (${passedCount})`)
+                          : (isId ? `Gagal (${failedCount})` : `Failed (${failedCount})`)}
                       </button>
                     ))}
                   </div>
@@ -1965,7 +1966,7 @@ COMMIT;
                                 : 'bg-rose-950/70 text-rose-300 border border-rose-700/60'
                             }`}
                           >
-                            {t.verdict}
+                            {isPassed ? (isId ? 'LULUS' : 'PASS') : (isId ? 'GAGAL' : 'FAIL')}
                           </span>
                         </div>
                       </button>

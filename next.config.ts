@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  experimental: {
+    agentUpgrade: false,
+  },
   images: { unoptimized: true },
   reactStrictMode: true,
   devIndicators: false,

@@ -7,7 +7,7 @@
     "dev": "concurrently -k -p \"[{name}]\" -n \"FASTIFY,NEXT\" -c \"blue.bold,cyan.bold\" \"pnpm run dev:server\" \"pnpm run dev:next\"",
     "dev:server": "tsx watch src/server/index.ts",
     "dev:next": "next dev -p 3000",
-    "build": "prisma generate && next build",
+    "build": "prisma generate && next build --webpack",
     "start": "concurrently -k -p \"[{name}]\" -n \"FASTIFY,NEXT\" -c \"blue.bold,cyan.bold\" \"pnpm run start:server\" \"pnpm run start:next\"",
     "start:server": "tsx src/server/index.ts",
     "start:next": "next start -p 3000",
