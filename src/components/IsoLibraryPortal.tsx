@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import { QuickExportToolbar } from '@/components/shared/QuickExportToolbar';
 import { EnterpriseLibraryPortal } from '@/components/portal/EnterpriseLibraryPortal';
 import type { CompiledSdlcState } from '@/services/sdlcCompiler';
 import type { SavedProjectRecord } from '@/services/workspaceVaultService';
@@ -33,13 +32,6 @@ export function IsoLibraryPortal({
 }: IsoLibraryPortalProps) {
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-      <div className="px-3 py-1.5 border-b border-[#22262E] bg-[#111317]">
-        <QuickExportToolbar
-          compiledState={compiledSdlcState}
-          activeVaultProjectId={activeVaultProjectId}
-          locale={locale}
-        />
-      </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         <EnterpriseLibraryPortal
           activeState={compiledSdlcState}

@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --surface-canvas: #0B0C0E;
-  --surface-panel: #111317;
-  --surface-elevated: #16191F;
-  --surface-terminal: #0E1015;
-  --border-hairline: #22262E;
+  --surface-canvas: #090A0D;
+  --surface-panel: #101217;
+  --surface-elevated: #16181E;
+  --surface-terminal: #0B0D11;
+  --border-hairline: rgba(255, 255, 255, 0.07);
   --border-focus: #3B82F6;
   --text-primary: #EDEDED;
   --text-secondary: #CBD5E1; /* WCAG 2.2 AA compliant (contrast ratio >= 4.5:1 against dark surface) */
   --text-muted: #94A3B8;     /* WCAG 2.2 AA compliant secondary text */
   --accent-action: #2563EB;
-  --status-conformant: #059669;
-  --status-warning: #D97706;
-  --status-defect: #DC2626;
+  --status-conformant: #10B981;
+  --status-warning: #F59E0B;
+  --status-defect: #EF4444;
 }
 
 html, body {
@@ -103,6 +103,54 @@ button, input, select, textarea {
   font-family: "JetBrains Mono", "Geist Mono", monospace;
   font-size: 11px;
   letter-spacing: 0.02em;
+}
+
+/* Minimalist Enterprise Status Dot Indicator (Zero AI Slop) */
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: #E4E4E7;
+  font-weight: 500;
+}
+
+.status-dot-emerald {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: #10B981;
+  flex-shrink: 0;
+}
+
+.status-dot-amber {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: #F59E0B;
+  flex-shrink: 0;
+}
+
+.status-dot-rose {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: #EF4444;
+  flex-shrink: 0;
+}
+
+.status-dot-zinc {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background-color: #71717A;
+  flex-shrink: 0;
+}
+
+.card-enterprise {
+  background-color: #101217;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
 }
 
 /* Interactive Accessibility Constraints (R-39) */

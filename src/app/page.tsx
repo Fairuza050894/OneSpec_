@@ -114,9 +114,9 @@ import { SmtFormalVerifierWorkbench } from '@/components/formal/SmtFormalVerifie
 import { DelphiConsensusWorkbench } from '@/components/consensus/DelphiConsensusWorkbench';
 import { ProductKnowledgeMonitorHub } from '@/components/portal/ProductKnowledgeMonitorHub';
 import { UniversalKnowledgeGraphWorkbench } from '@/components/ontology/UniversalKnowledgeGraphWorkbench';
-import { QuickExportToolbar } from '@/components/shared/QuickExportToolbar';
 import { IsoLibraryPortal } from '@/components/IsoLibraryPortal';
 import { Step07ExecutionRunner } from '@/components/Step07ExecutionRunner';
+import { ExportBundleDropdown } from '@/components/shared/ExportBundleDropdown';
 
 // Dynamically import Camunda BPMN Canvas to prevent SSR hydration conflicts with bpmn-js
 const CamundaBpmnViewer = dynamic(
@@ -1968,23 +1968,23 @@ The system provides deterministic transaction processing, input validation, and 
   return (
     <div className="w-screen h-screen overflow-hidden flex flex-col bg-[#0B0C0E] text-[#EDEDED] font-sans select-none">
       {/* =========================================================================
-       * 1. SINGLE TOP HEADER BAR (48px Height, px-5, Hairline Border, No Wrapping)
+       * 1. SINGLE TOP HEADER BAR (h-12 px-4 border-b border-white/[0.07] bg-[#090A0D])
        * ========================================================================= */}
-      <header className="h-[48px] min-h-[48px] px-3 bg-[#16191F] border-b border-[#22262E] flex items-center justify-between gap-2 z-30 select-none shrink-0 overflow-hidden">
-        {/* Item 1 (Left): Brand Title & Workspace Selector */}
-        <div className="flex items-center gap-2 min-w-0 shrink-0">
-          <div className="flex items-center gap-1.5 pr-2 border-r border-[#22262E] shrink-0">
-            <div className="h-5 w-5 bg-[#2563EB] rounded-[3px] flex items-center justify-center text-white font-mono text-[11px] font-bold shrink-0">
+      <header className="h-12 min-h-12 px-4 bg-[#090A0D] border-b border-white/[0.07] flex items-center justify-between gap-3 z-30 select-none shrink-0">
+        {/* Left: Logo OneSpec + Active Project Dropdown + Mode Switcher */}
+        <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+          {/* Logo OneSpec */}
+          <div className="flex items-center gap-2 pr-2.5 border-r border-white/[0.07] shrink-0">
+            <div className="h-5 w-5 bg-zinc-800 border border-white/[0.1] rounded-[3px] flex items-center justify-center text-white font-mono text-[11px] font-semibold shrink-0">
               1S
             </div>
-            <span className="font-bold text-[12.5px] tracking-tight text-[#EDEDED] whitespace-nowrap">
-              <span className="hidden min-[1660px]:inline">OneSpec SDLC Studio</span>
-              <span className="min-[1660px]:hidden">OneSpec</span>
+            <span className="font-semibold text-[13px] tracking-tight text-zinc-100 whitespace-nowrap">
+              OneSpec <span className="text-zinc-400 font-normal text-[11.5px]">SDLC Studio</span>
             </span>
           </div>
 
-          {/* Multi-Project Permanent Vault Switcher + New Project + Snapshot History */}
-          <div className="flex items-center gap-1 text-[11px] font-mono shrink-0">
+          {/* Active Project Dropdown + New Project + Snapshot History */}
+          <div className="flex items-center gap-1 text-[11px] shrink-0">
             <select
               aria-label="Active Project Workspace Vault Selector"
               value={activeVaultProjectId || ''}
@@ -1992,7 +1992,7 @@ The system provides deterministic transaction processing, input validation, and 
                 const val = e.target.value;
                 if (val) handleSwitchVaultProject(val);
               }}
-              className="bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] px-1.5 h-8 rounded-[3px] outline-none text-[11px] cursor-pointer w-[120px] min-[1400px]:w-[145px] min-[1720px]:w-[180px] truncate"
+              className="bg-[#101217] border border-white/[0.07] hover:border-zinc-500 text-zinc-200 px-2 h-7 rounded-[4px] outline-none text-[11px] cursor-pointer w-[130px] min-[1400px]:w-[155px] min-[1720px]:w-[185px] truncate"
             >
               {vaultProjects.length === 0 && (
                 <option value="">
@@ -2001,7 +2001,7 @@ The system provides deterministic transaction processing, input validation, and 
               )}
               {vaultProjects.map((p) => (
                 <option key={p.projectId} value={p.projectId}>
-                  {p.projectName} · {p.latestPassRatePercent}% · {p.snapshotCount} snap
+                  {p.projectName} · {p.latestPassRatePercent}%
                 </option>
               ))}
             </select>
@@ -2010,109 +2010,106 @@ The system provides deterministic transaction processing, input validation, and 
               type="button"
               onClick={() => setIsNewProjectModalOpen(true)}
               title={copy.header.newProjectBtn}
-              className="h-8 w-8 min-[1760px]:w-auto min-[1760px]:px-2 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#3B82F6] hover:text-white rounded-[3px] text-[10.5px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+              className="h-7 w-7 bg-[#101217] border border-white/[0.07] hover:border-zinc-500 text-zinc-400 hover:text-white rounded-[4px] flex items-center justify-center cursor-pointer transition-colors shrink-0"
             >
-              <Plus className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden min-[1760px]:inline">{copy.header.newProjectBtn.replace(/^\+\s*/, '')}</span>
+              <Plus className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
             </button>
 
             <button
               type="button"
               onClick={() => setIsVaultHistoryOpen(true)}
               title={copy.header.historyBtn}
-              className="h-8 px-2 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] rounded-[3px] text-[10.5px] font-bold flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0"
+              className="h-7 px-2 bg-[#101217] border border-white/[0.07] hover:border-zinc-500 text-zinc-400 hover:text-white rounded-[4px] text-[11px] font-medium flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap shrink-0"
             >
-              <History className="h-3.5 w-3.5 text-[#10B981] shrink-0" />
-              <span className="hidden min-[1820px]:inline">{copy.header.historyBtn}</span>
+              <History className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
+              <span className="hidden min-[1680px]:inline">{copy.header.historyBtn}</span>
               {projectSnapshots.length > 0 && (
-                <span className="px-1 py-0.2 bg-[#059669]/20 text-[#10B981] text-[9.5px] rounded-[2px] tabular-nums">
-                  {projectSnapshots.length}
+                <span className="inline-flex items-center gap-1 text-[10px] text-zinc-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span className="tabular-nums">{projectSnapshots.length}</span>
                 </span>
               )}
             </button>
           </div>
-        </div>
 
-        {/* Center Group: Dual-Mode Switcher + Compact Phase Switcher */}
-        <div className="flex items-center gap-2 min-w-0 shrink-0">
-          <div className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-0.5 shrink-0 font-mono text-[10.5px]">
+          {/* Mode Switcher: 12-Step Studio | ISO Library */}
+          <div className="flex items-center bg-[#101217] border border-white/[0.07] p-0.5 rounded-[4px] gap-0.5 shrink-0 text-[11px]">
             <button
               type="button"
               onClick={() => setWorkspaceMode('STUDIO')}
-              className={`px-2 h-8 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+              className={`px-2.5 h-7 rounded-[3px] transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap font-medium ${
                 workspaceMode === 'STUDIO'
-                  ? 'bg-[#2563EB] text-white font-semibold'
-                  : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                  ? 'bg-zinc-800 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
               }`}
               title="Switch to 12-Step SDLC Engineering Studio"
             >
-              <Wrench className="h-3 w-3 shrink-0" />
-              <span className="hidden min-[1360px]:inline">{locale === 'id' ? 'Studio' : 'Studio'}</span>
+              <Wrench className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
+              <span>{locale === 'id' ? '12-Step Studio' : '12-Step Studio'}</span>
             </button>
             <button
               type="button"
               onClick={() => setWorkspaceMode('ENTERPRISE_LIBRARY')}
-              className={`px-2 h-8 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap ${
+              className={`px-2.5 h-7 rounded-[3px] transition-colors flex items-center gap-1.5 cursor-pointer whitespace-nowrap font-medium ${
                 workspaceMode === 'ENTERPRISE_LIBRARY'
-                  ? 'bg-[#059669] text-white font-semibold'
-                  : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]'
+                  ? 'bg-zinc-800 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
               }`}
               title="Switch to Enterprise ISO Product & Documentation Library Portal"
             >
-              <Building2 className="h-3 w-3 shrink-0" />
+              <Building2 className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
               <span>{locale === 'id' ? 'Library ISO' : 'ISO Library'}</span>
-              <span className="px-1 py-0.2 bg-[#111317] border border-[#22262E] text-[#10B981] text-[9.5px] rounded-[2px] tabular-nums">
+              <span className="px-1 py-0.2 bg-zinc-900 border border-white/[0.07] text-zinc-300 text-[10px] rounded-[2px] tabular-nums">
                 {Math.max(1, vaultProjects.length)}
               </span>
             </button>
           </div>
 
+          {/* View Mode: Ringkas (Executive) | Pakar (Technical Audit) */}
           {workspaceMode === 'STUDIO' && (
             <div
-              className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[4px] gap-0.5 shrink-0 text-[11px]"
+              className="hidden min-[1360px]:flex items-center bg-[#101217] border border-white/[0.07] p-0.5 rounded-[4px] gap-0.5 shrink-0 text-[11px]"
               role="group"
               aria-label={locale === 'id' ? 'Mode Tampilan' : 'Display Mode'}
             >
-              <span className="hidden min-[1380px]:inline px-2 text-[10.5px] text-[#94A3B8] font-medium">
-                {locale === 'id' ? 'Mode Tampilan:' : 'View Mode:'}
-              </span>
               <button
                 type="button"
                 onClick={() => setDisplayMode('EXECUTIVE')}
-                className={`px-2.5 h-7 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap text-[11px] font-medium ${
+                className={`px-2 h-7 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap text-[10.5px] font-medium ${
                   displayMode === 'EXECUTIVE'
-                    ? 'bg-[#2563EB] text-white shadow-sm font-semibold'
-                    : 'text-[#CBD5E1] hover:text-white hover:bg-[#16191F]'
+                    ? 'bg-zinc-800 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
                 }`}
-                title={locale === 'id' ? 'Mode Ringkas untuk Eksekutif / Manajemen' : 'Executive Summary Mode'}
+                title={locale === 'id' ? 'Mode Ringkas Executive' : 'Executive Summary Mode'}
               >
-                <span>{locale === 'id' ? 'Ringkas (Executive)' : 'Executive'}</span>
+                <span>{locale === 'id' ? 'Ringkas' : 'Executive'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setDisplayMode('TECHNICAL')}
-                className={`px-2.5 h-7 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap text-[11px] font-medium ${
+                className={`px-2 h-7 rounded-[3px] transition-colors flex items-center gap-1 cursor-pointer whitespace-nowrap text-[10.5px] font-medium ${
                   displayMode === 'TECHNICAL'
-                    ? 'bg-[#2563EB] text-white shadow-sm font-semibold'
-                    : 'text-[#CBD5E1] hover:text-white hover:bg-[#16191F]'
+                    ? 'bg-zinc-800 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
                 }`}
-                title={locale === 'id' ? 'Mode Pakar Audit & Telemetri Teknis' : 'Technical Audit & Telemetry Mode'}
+                title={locale === 'id' ? 'Mode Pakar Technical Audit' : 'Technical Audit Mode'}
               >
-                <span>{locale === 'id' ? 'Pakar (Technical Audit)' : 'Technical Audit'}</span>
+                <span>{locale === 'id' ? 'Pakar' : 'Technical'}</span>
               </button>
             </div>
           )}
         </div>
-        {/* Item 4 (Right): Seed Data, Global Language Switcher & Cmd+K */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={handleSeedBenchmark}
-            title={copy.header.seedData}
-            className="flex items-center gap-1.5 px-2 min-[1400px]:px-2.5 h-8 bg-[#111317] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] text-[11px] font-mono rounded-[3px] transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <Database className="h-3.5 w-3.5 text-[#3B82F6]" />
-            <span className="hidden min-[1400px]:inline">{copy.header.seedData}</span>
-          </button>
+
+        {/* Right: Export Bundle Dropdown + Mask PII + Language ID | EN + ⌘K */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Unified Export Bundle Dropdown Menu */}
+          <ExportBundleDropdown
+            compiledState={compiledSdlcState}
+            activeVaultProjectId={activeVaultProjectId}
+            locale={locale}
+          />
+
+          {/* Mask PII Toggle */}
           <button
             type="button"
             onClick={() => setIsMaskSensitiveData((prev) => !prev)}
@@ -2121,56 +2118,71 @@ The system provides deterministic transaction processing, input validation, and 
                 ? (locale === 'id' ? 'Nonaktifkan Penyamaran Host / User' : 'Disable Sensitive Host / User Masking')
                 : (locale === 'id' ? 'Samarkan Host / IP / User Sensitif untuk Presentasi & Screenshot' : 'Mask Sensitive Host / User for Demos & Screenshots')
             }
-            className={`flex items-center gap-1.5 px-2 min-[1400px]:px-2.5 h-8 border text-[11px] font-mono rounded-[3px] transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            className={`flex items-center gap-1.5 px-2.5 h-7 border text-[11px] rounded-[4px] transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               isMaskSensitiveData
-                ? 'bg-[#10B981]/20 border-[#10B981] text-[#10B981] font-bold'
-                : 'bg-[#111317] border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED]'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-medium'
+                : 'bg-[#101217] border-white/[0.07] hover:border-zinc-500 text-zinc-400 hover:text-zinc-200'
             }`}
           >
             {isMaskSensitiveData ? (
-              <EyeOff className="h-3.5 w-3.5 text-[#10B981]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
             ) : (
-              <Eye className="h-3.5 w-3.5 text-[#707070]" />
+              <Eye className="h-3.5 w-3.5 text-zinc-400 shrink-0" strokeWidth={1.5} />
             )}
             <span className="hidden min-[1280px]:inline">
               {isMaskSensitiveData
-                ? (locale === 'id' ? 'Host & User Masked' : 'Host & User Masked')
-                : (locale === 'id' ? 'Mask Host/User' : 'Mask Sensitive Host/User')}
+                ? (locale === 'id' ? 'PII Masked' : 'PII Masked')
+                : (locale === 'id' ? 'Mask PII' : 'Mask PII')}
             </span>
           </button>
+
+          {/* Benchmark Seed */}
+          <button
+            type="button"
+            onClick={handleSeedBenchmark}
+            title={copy.header.seedData}
+            className="flex items-center gap-1.5 px-2.5 h-7 bg-[#101217] border border-white/[0.07] hover:border-zinc-500 text-zinc-400 hover:text-zinc-200 text-[11px] rounded-[4px] transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <Database className="h-3.5 w-3.5 text-zinc-400 shrink-0" strokeWidth={1.5} />
+            <span className="hidden min-[1500px]:inline">{copy.header.seedData}</span>
+          </button>
+
+          {/* Language Switcher: ID | EN */}
           <div
-            className="flex items-center bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[3px] font-mono text-[10.5px] h-8 shrink-0"
+            className="flex items-center bg-[#101217] border border-white/[0.07] p-0.5 rounded-[4px] text-[11px] h-7 shrink-0"
             role="group"
             aria-label={copy.header.localeTooltip}
             title={copy.header.localeTooltip}
           >
             <button
               type="button"
-              onClick={() => setLocale('en')}
-              className={`px-2 h-full rounded-[2px] font-bold transition-colors cursor-pointer ${
-                locale === 'en' ? 'bg-[#2563EB] text-white' : 'text-[#A1A1A1] hover:text-[#EDEDED]'
-              }`}
-            >
-              EN
-            </button>
-            <button
-              type="button"
               onClick={() => setLocale('id')}
-              className={`px-2 h-full rounded-[2px] font-bold transition-colors cursor-pointer ${
-                locale === 'id' ? 'bg-[#2563EB] text-white' : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+              className={`px-2 h-full rounded-[2px] font-medium transition-colors cursor-pointer ${
+                locale === 'id' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
               }`}
             >
               ID
             </button>
+            <button
+              type="button"
+              onClick={() => setLocale('en')}
+              className={`px-2 h-full rounded-[2px] font-medium transition-colors cursor-pointer ${
+                locale === 'en' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              EN
+            </button>
           </div>
 
+          {/* ⌘K Search Command Palette */}
           <button
+            type="button"
             onClick={() => setIsCmdkOpen(true)}
             title={copy.header.cmdkTooltip}
-            className="flex items-center gap-1.5 px-2 h-8 bg-[#0B0C0E] border border-[#22262E] hover:border-[#3B82F6] text-[#A1A1A1] hover:text-[#EDEDED] text-[11.5px] font-mono rounded-[3px] transition-colors cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-2 h-7 bg-[#101217] border border-white/[0.07] hover:border-zinc-500 text-zinc-400 hover:text-zinc-200 text-[11px] rounded-[4px] transition-colors cursor-pointer shrink-0"
           >
-            <Search className="h-3.5 w-3.5 text-[#707070]" />
-            <kbd className="text-[10px] bg-[#16191F] px-1.5 py-0.5 rounded-[2px] text-[#A1A1A1] border border-[#22262E]">
+            <Search className="h-3.5 w-3.5 text-zinc-400 shrink-0" strokeWidth={1.5} />
+            <kbd className="text-[10px] bg-zinc-900 px-1 py-0.2 rounded-[2px] text-zinc-400 border border-white/[0.07]">
               ⌘K
             </kbd>
           </button>
@@ -2240,19 +2252,19 @@ The system provides deterministic transaction processing, input validation, and 
         ) : (
           <>
         {/* LEFT VERTICAL SIDEBAR (248px Fixed Width, Breathable Stepper Navigation) */}
-        <aside className="w-[252px] min-w-[252px] max-w-[252px] bg-[#111317] border-r border-[#22262E] flex flex-col justify-between overflow-y-auto select-none shrink-0">
+        <aside className="w-[252px] min-w-[252px] max-w-[252px] bg-[#101217] border-r border-white/[0.07] flex flex-col justify-between overflow-y-auto select-none shrink-0">
           {/* Stepper Navigation Groups */}
           <div className="py-2">
             {/* Group 1: Phase 1 Pre-Development */}
-            <div className="px-3 pt-2 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+            <div className="px-3 pt-2 pb-1 text-[10px] font-mono font-medium text-zinc-400 uppercase tracking-wider">
               {copy.nav.group1}
             </div>
             <nav className="space-y-0.5 px-2">
               {[
-                { step: 1, icon: <FileText className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 2, icon: <GitBranch className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 3, icon: <Layers className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 4, icon: <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 1, icon: <FileText className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 2, icon: <GitBranch className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 3, icon: <Layers className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 4, icon: <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
               ].map((item) => {
                 const meta = copy.nav.steps.find((s) => s.step === item.step)!;
                 return (
@@ -2262,11 +2274,11 @@ The system provides deterministic transaction processing, input validation, and 
                     onClick={() => setActiveStep(item.step)}
                     className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
                       activeStep === item.step
-                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                        ? 'bg-white/[0.06] text-white font-semibold border-l-2 border-l-zinc-200'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border-l-2 border-l-transparent'
                     }`}
                   >
-                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                    <span className={activeStep === item.step ? 'text-zinc-200' : 'text-zinc-400'}>
                       {item.icon}
                     </span>
                     <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
@@ -2276,14 +2288,14 @@ The system provides deterministic transaction processing, input validation, and 
             </nav>
 
             {/* Group 2: Phase 2 Staging & Automation */}
-            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-medium text-zinc-400 uppercase tracking-wider">
               {copy.nav.group2}
             </div>
             <nav className="space-y-0.5 px-2">
               {[
-                { step: 5, icon: <Globe className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 6, icon: <GitCompare className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 7, icon: <Activity className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 5, icon: <Globe className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 6, icon: <GitCompare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 7, icon: <Activity className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
               ].map((item) => {
                 const meta = copy.nav.steps.find((s) => s.step === item.step)!;
                 return (
@@ -2293,11 +2305,11 @@ The system provides deterministic transaction processing, input validation, and 
                     onClick={() => setActiveStep(item.step)}
                     className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
                       activeStep === item.step
-                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                        ? 'bg-white/[0.06] text-white font-semibold border-l-2 border-l-zinc-200'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border-l-2 border-l-transparent'
                     }`}
                   >
-                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                    <span className={activeStep === item.step ? 'text-zinc-200' : 'text-zinc-400'}>
                       {item.icon}
                     </span>
                     <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
@@ -2307,13 +2319,13 @@ The system provides deterministic transaction processing, input validation, and 
             </nav>
 
             {/* Group 3: Phase 3 Enterprise Governance & Security */}
-            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-medium text-zinc-400 uppercase tracking-wider">
               {copy.nav.group3}
             </div>
             <nav className="space-y-0.5 px-2">
               {[
-                { step: 8, icon: <ShieldCheck className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 9, icon: <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 8, icon: <ShieldCheck className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 9, icon: <ShieldAlert className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
               ].map((item) => {
                 const meta = copy.nav.steps.find((s) => s.step === item.step)!;
                 return (
@@ -2323,11 +2335,11 @@ The system provides deterministic transaction processing, input validation, and 
                     onClick={() => setActiveStep(item.step)}
                     className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
                       activeStep === item.step
-                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                        ? 'bg-white/[0.06] text-white font-semibold border-l-2 border-l-zinc-200'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border-l-2 border-l-transparent'
                     }`}
                   >
-                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                    <span className={activeStep === item.step ? 'text-zinc-200' : 'text-zinc-400'}>
                       {item.icon}
                     </span>
                     <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
@@ -2337,14 +2349,14 @@ The system provides deterministic transaction processing, input validation, and 
             </nav>
 
             {/* Group 4: Phase 4 Formal Assurance & Consensus */}
-            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-bold text-[#707070] uppercase tracking-wider">
+            <div className="px-3 pt-4 pb-1 text-[10px] font-mono font-medium text-zinc-400 uppercase tracking-wider">
               {copy.nav.group4}
             </div>
             <nav className="space-y-0.5 px-2">
               {[
-                { step: 10, icon: <Code2 className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 11, icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
-                { step: 12, icon: <Share2 className="h-3.5 w-3.5 shrink-0" /> },
+                { step: 10, icon: <Code2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 11, icon: <Users className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
+                { step: 12, icon: <Share2 className="h-3.5 w-3.5 shrink-0" strokeWidth={1.5} /> },
               ].map((item) => {
                 const meta = copy.nav.steps.find((s) => s.step === item.step)!;
                 return (
@@ -2354,11 +2366,11 @@ The system provides deterministic transaction processing, input validation, and 
                     onClick={() => setActiveStep(item.step)}
                     className={`w-full h-[36px] px-2.5 flex items-center gap-2 rounded-[3px] text-[11.5px] font-sans font-medium tracking-tight transition-colors text-left cursor-pointer ${
                       activeStep === item.step
-                        ? 'bg-[#16191F] text-[#EDEDED] font-semibold border-l-2 border-l-[#2563EB]'
-                        : 'text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F]/50 border-l-2 border-l-transparent'
+                        ? 'bg-white/[0.06] text-white font-semibold border-l-2 border-l-zinc-200'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03] border-l-2 border-l-transparent'
                     }`}
                   >
-                    <span className={activeStep === item.step ? 'text-[#3B82F6]' : 'text-[#707070]'}>
+                    <span className={activeStep === item.step ? 'text-zinc-200' : 'text-zinc-400'}>
                       {item.icon}
                     </span>
                     <span className="whitespace-nowrap overflow-hidden text-ellipsis">{meta.label}</span>
@@ -2368,13 +2380,13 @@ The system provides deterministic transaction processing, input validation, and 
             </nav>
           </div>
           {/* Bottom: Collapsible Artifact Explorer Toggle (Closed by Default) */}
-          <div className="border-t border-[#22262E] p-2 bg-[#0B0C0E]/50">
+          <div className="border-t border-white/[0.07] p-2 bg-[#090A0D]/50">
             <button
               onClick={() => setShowArtifactExplorer(!showArtifactExplorer)}
-              className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-mono text-[#A1A1A1] hover:text-[#EDEDED] hover:bg-[#16191F] rounded-[3px] transition-colors cursor-pointer"
+              className="w-full flex items-center justify-between px-2.5 py-1.5 text-[11px] font-sans text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04] rounded-[3px] transition-colors cursor-pointer"
             >
               <div className="flex items-center gap-1.5">
-                <Folder className="h-3.5 w-3.5 text-[#3B82F6]" />
+                <Folder className="h-3.5 w-3.5 text-zinc-400" strokeWidth={1.5} />
                 <span>{copy.nav.artifactExplorer}</span>
               </div>
               {showArtifactExplorer ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
@@ -3717,13 +3729,6 @@ The system provides deterministic transaction processing, input validation, and 
                 </div>
               </div>
 
-              {/* Quick Export Toolbar for Step 04 */}
-              <QuickExportToolbar
-                compiledState={compiledSdlcState}
-                activeVaultProjectId={activeVaultProjectId}
-                locale={locale}
-              />
-
               {/* 100% Full-Width Spreadsheet Grid */}
               <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] overflow-hidden">
                 <RtmSpreadsheetGrid
@@ -4317,12 +4322,7 @@ The system provides deterministic transaction processing, input validation, and 
            * ========================================================================= */}
           {activeStep === 12 && (
             <div className="h-full flex flex-col space-y-2 min-h-0 overflow-hidden">
-              <QuickExportToolbar
-                compiledState={compiledSdlcState}
-                activeVaultProjectId={activeVaultProjectId}
-                locale={locale}
-              />
-              <div className="h-[32px] min-h-[32px] px-1 flex items-center gap-1 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] font-mono text-[10.5px]">
+              <div className="h-[32px] min-h-[32px] px-1 flex items-center gap-1 bg-[#101217] border border-white/[0.07] rounded-[4px] text-[11px]">
                 <button
                   type="button"
                   onClick={() => setStep12View('KNOWLEDGE_GRAPH')}
