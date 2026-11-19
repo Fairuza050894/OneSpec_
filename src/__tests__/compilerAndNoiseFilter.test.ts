@@ -15,7 +15,14 @@ import {
   getSampleValueForControl,
   domainLogicBrainService,
 } from '../services/domainLogicBrainService';
-import type { FeatureModuleSurface, BlindCrawlResult } from '../types/sdlc';
+import { owaspDastService } from '../services/owaspDastService';
+import type {
+  FeatureModuleSurface,
+  BlindCrawlResult,
+  DiscoveredApiEndpoint,
+  DatabaseErdTable,
+  ValidationRuleContract,
+} from '../types/sdlc';
 
 test('Quality Metrics: calculates exact ISO 29119-3 release gate verdicts and pass rates', () => {
   // Scenario A: 100% Pass -> PRODUCTION_GO
@@ -478,4 +485,205 @@ Attendees: Head of Commercial, QA Lead, Logistics Business Analyst
   }
   const greenfieldGuard = evaluateBrdExportGuard(greenfieldCompiled);
   assert.equal(greenfieldGuard.canExport, true);
+});
+
+test('T-19: Empirical Evidence for Security Verdicts and Honest DAST Grading (F-19)', async () => {
+  const dummyEndpoints: DiscoveredApiEndpoint[] = [
+    {
+      id: 'ep-login',
+      method: 'POST',
+      path: '/api/v1/auth/login',
+      controllerPath: 'auth.controller.ts',
+      lineNumber: 10,
+      summary: 'User Login Endpoint',
+      authRequired: true,
+      linkedTestCaseIds: [],
+      linkedRequirementId: 'REQ-01',
+    },
+    {
+      id: 'ep-orders',
+      method: 'GET',
+      path: '/api/v1/orders/:id',
+      controllerPath: 'orders.controller.ts',
+      lineNumber: 45,
+      summary: 'Order details endpoint',
+      authRequired: true,
+      linkedTestCaseIds: [],
+      linkedRequirementId: 'REQ-02',
+    },
+  ];
+
+  const dummyTables: DatabaseErdTable[] = [
+    {
+      id: 'tbl-users',
+      tableName: 'Users',
+      primaryKeys: ['id'],
+      columns: [
+        { name: 'id', type: 'UUID', isPrimaryKey: true, isForeignKey: false, isNullable: false },
+        { name: 'tenant_id', type: 'UUID', isPrimaryKey: false, isForeignKey: false, isNullable: false },
+      ],
+    },
+  ];
+
+  const dummyValidation: ValidationRuleContract[] = [
+    {
+      ruleId: 'VR-01',
+      fieldName: 'username',
+      moduleName: 'Auth',
+      dataType: 'string',
+      constraintExpression: 'length >= 3',
+      httpStatus: 422,
+      exactUiErrorString: 'Username must be at least 3 characters',
+      userStoryId: 'US-01',
+      errorCode: 'ERR_AUTH_01',
+    },
+  ];
+
+  // 1. Acceptance Criterion 1: Tanpa probe nyata -> semua NOT_TESTED, provenance NOT_RUN, grade N/A
+  const unprobedBaseline = owaspDastService.generateDastAudit({
+    targetUrl: 'https://api.enterprise-logistics.test',
+    appName: 'Logistics Core API',
+    apiEndpoints: dummyEndpoints,
+    databaseTables: dummyTables,
+    validationRules: dummyValidation,
+  });
+
+  assert.equal(
+    unprobedBaseline.securityPostureGrade,
+    'N/A',
+    'Unprobed baseline must have securityPostureGrade N/A'
+  );
+  assert.equal(
+    unprobedBaseline.testedVectorsCount,
+    0,
+    'Unprobed baseline must have testedVectorsCount === 0'
+  );
+  assert.equal(
+    unprobedBaseline.coverageTestedText,
+    'Cakupan diuji: 0 dari 10',
+    'Coverage text must accurately display "Cakupan diuji: 0 dari 10"'
+  );
+  assert.equal(
+    unprobedBaseline.corsAudit.status,
+    'NOT_TESTED',
+    'CORS audit without live probe must be NOT_TESTED'
+  );
+
+  // Verify all findings are NOT_TESTED, have provenance NOT_RUN, and have no evidence
+  assert.equal(unprobedBaseline.findings.length, 10, 'Must cover all 10 OWASP API categories');
+  for (const finding of unprobedBaseline.findings) {
+    assert.equal(
+      finding.status,
+      'NOT_TESTED',
+      `Finding ${finding.id} (${finding.owaspCategory}) must be NOT_TESTED without empirical probe`
+    );
+    assert.equal(
+      finding.provenance,
+      'NOT_RUN',
+      `Finding ${finding.id} must have provenance NOT_RUN`
+    );
+    assert.equal(
+      finding.evidence,
+      undefined,
+      `Finding ${finding.id} must not have evidence attached when unprobed`
+    );
+    assert.equal(
+      finding.observedResponse.includes('HTTP 429 observed after threshold breach'),
+      false,
+      `Finding ${finding.id} must not claim HTTP 429 was observed without evidence`
+    );
+  }
+
+  // 2. Acceptance Criterion 2: Dengan respons mock 403 -> VERIFIED_SECURE memuat status 403 di evidence
+  const probedWith403 = await owaspDastService.executeLiveActiveDastAudit({
+    targetUrl: 'https://api.enterprise-logistics.test',
+    appName: 'Logistics Core API',
+    apiEndpoints: dummyEndpoints,
+    databaseTables: dummyTables,
+    validationRules: dummyValidation,
+    mockProbeResponses: {
+      authProbeStatus: 403,
+      authProbeHeaders: { 'content-type': 'application/json', 'server': 'envoy' },
+      authProbeBody: '{"error":"Forbidden"}',
+    },
+  });
+
+  const api2 = probedWith403.findings.find((f) => f.owaspCategory === 'API2:2023');
+  assert.ok(api2, 'API2:2023 finding must exist');
+  assert.equal(api2.status, 'VERIFIED_SECURE', 'API2 with 403 response must be VERIFIED_SECURE');
+  assert.equal(api2.provenance, 'OBSERVED_PROBE', 'API2 must have provenance OBSERVED_PROBE');
+  assert.ok(api2.evidence, 'API2 must have evidence attached');
+  assert.equal(
+    api2.evidence?.response.status,
+    403,
+    'API2 evidence must record response status 403'
+  );
+  assert.equal(api2.evidence?.request.method, 'POST');
+  assert.ok(api2.evidence?.request.url.includes('/api/v1/auth/login'));
+  assert.ok(api2.evidence?.probedAt, 'Evidence must record probedAt timestamp');
+  assert.ok(api2.evidence?.response.bodyHash, 'Evidence must record response body hash');
+
+  assert.equal(probedWith403.testedVectorsCount, 1, 'Tested vectors count must be 1');
+  assert.equal(probedWith403.coverageTestedText, 'Cakupan diuji: 1 dari 10');
+  assert.equal(probedWith403.securityPostureGrade, 'A', 'Tested vector secure -> Grade A');
+
+  // Verify API4 (Rate Limiting) in probedWith403 without 429:
+  const api4Untested = probedWith403.findings.find((f) => f.owaspCategory === 'API4:2023');
+  assert.ok(api4Untested);
+  assert.equal(api4Untested.status, 'NOT_TESTED');
+  assert.equal(
+    api4Untested.observedResponse.includes('HTTP 429 observed after threshold breach'),
+    false,
+    'API4 must not contain fake HTTP 429 narrative'
+  );
+
+  // 3. Rate Limit Probe: Narasi "HTTP 429 observed after threshold breach" hanya boleh muncul bila status === 429 di evidence
+  const probedWith429 = await owaspDastService.executeLiveActiveDastAudit({
+    targetUrl: 'https://api.enterprise-logistics.test',
+    appName: 'Logistics Core API',
+    apiEndpoints: dummyEndpoints,
+    databaseTables: dummyTables,
+    validationRules: dummyValidation,
+    mockProbeResponses: {
+      authProbeStatus: 403,
+      rateLimitStatus: 429,
+      rateLimitHeaders: { 'retry-after': '60' },
+      rateLimitBody: 'Too Many Requests',
+    },
+  });
+
+  const api4Probed = probedWith429.findings.find((f) => f.owaspCategory === 'API4:2023');
+  assert.ok(api4Probed);
+  assert.equal(api4Probed.status, 'VERIFIED_SECURE');
+  assert.equal(api4Probed.provenance, 'OBSERVED_PROBE');
+  assert.ok(api4Probed.evidence);
+  assert.equal(api4Probed.evidence?.response.status, 429);
+  assert.equal(
+    api4Probed.observedResponse,
+    'HTTP 429 Too Many Requests observed after threshold breach.',
+    'HTTP 429 observed narrative is only present when status 429 is in evidence'
+  );
+  assert.equal(probedWith429.testedVectorsCount, 2);
+  assert.equal(probedWith429.coverageTestedText, 'Cakupan diuji: 2 dari 10');
+
+  // 4. Vulnerable unauthenticated endpoint (status 200 observed on protected route)
+  const probedLeaked = await owaspDastService.executeLiveActiveDastAudit({
+    targetUrl: 'https://api.enterprise-logistics.test',
+    appName: 'Logistics Core API',
+    apiEndpoints: dummyEndpoints,
+    databaseTables: dummyTables,
+    validationRules: dummyValidation,
+    mockProbeResponses: {
+      authProbeStatus: 200,
+      authProbeBody: '{"secret":"unauthorized_data"}',
+    },
+  });
+
+  const api2Leaked = probedLeaked.findings.find((f) => f.owaspCategory === 'API2:2023');
+  assert.ok(api2Leaked);
+  assert.equal(api2Leaked.status, 'VULNERABLE');
+  assert.equal(api2Leaked.severity, 'CRITICAL');
+  assert.equal(api2Leaked.provenance, 'OBSERVED_PROBE');
+  assert.equal(api2Leaked.evidence?.response.status, 200);
+  assert.equal(probedLeaked.securityPostureGrade, 'F', 'Critical vulnerability must yield Grade F');
 });

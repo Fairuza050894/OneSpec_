@@ -1029,7 +1029,7 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
     rtmRows,
     executionTraces,
     gateVerdict: compilerGateVerdict,
-    dastStatus: (owaspDastSummary?.totalEndpointsScanned ?? 0) > 0 ? 'COMPLETED' : 'NOT_RUN',
+    dastStatus: (owaspDastSummary?.testedVectorsCount ?? 0) > 0 ? 'COMPLETED' : 'NOT_RUN',
     dastFindings: owaspDastSummary?.findings,
     complianceRate: complianceAssessment?.scorecard?.overallComplianceRate,
     isAsBuiltOnly: true,

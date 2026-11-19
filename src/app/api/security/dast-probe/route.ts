@@ -128,6 +128,10 @@ export async function POST(req: NextRequest) {
       apiEndpoints,
       databaseTables,
       validationRules,
+      mockProbeResponses: {
+        headStatus: getStatus,
+        headHeaders: measuredHeaders,
+      },
     }).catch(() =>
       owaspDastService.generateDastAudit({
         targetUrl,

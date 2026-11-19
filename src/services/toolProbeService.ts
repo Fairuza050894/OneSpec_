@@ -159,13 +159,14 @@ export class ToolProbeService {
       case 'owasp-zap':
       case 'owasp-zap-dast': {
         const dast = state?.owaspDastSummary;
-        if (dast && dast.findings && dast.findings.length > 0) {
+        const testedCount = dast?.testedVectorsCount ?? 0;
+        if (dast && testedCount > 0) {
           return {
             toolId: 'owasp-zap',
             name: 'OWASP ZAP DAST',
             status: 'VERIFIED',
             latencyMs: 31,
-            liveEvidence: `Active HTTP security probe • ${dast.findings.length} temuan keamanan dievaluasi`,
+            liveEvidence: `Active HTTP security probe • ${testedCount} vektor keamanan diuji secara empiris`,
             provenance: 'MEASURED_HTTP_PROBE',
             connectionMode: 'LIVE_PROBE',
           };

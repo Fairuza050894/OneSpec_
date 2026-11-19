@@ -172,7 +172,12 @@ ${assessment.findings
 - **Category:** ${f.owaspCategory} (${f.categoryName})
 - **CWE:** ${f.cweMapping}
 - **CVSS Score:** \`${f.cvssScore}\` (\`${f.severity}\`)
-- **Status:** \`${f.status}\`
+- **Status:** \`${f.status}\` (\`${f.provenance}\`)
+${
+  f.evidence
+    ? `- **Empirical Evidence:** \`${f.evidence.request.method} ${f.evidence.request.url}\` → HTTP \`${f.evidence.response.status}\` (${f.evidence.probedAt})`
+    : '- **Empirical Evidence:** None (NOT_RUN)'
+}
 - **Observed Response:** ${f.observedResponse}
 - **Remediation Action:** ${f.remediationAction}
 \`\`\`typescript
@@ -211,6 +216,8 @@ ${f.remediationPatchSnippet}
                 ? 'bg-[#059669]/20 text-[#10B981]'
                 : assessment.securityPostureGrade === 'B'
                 ? 'bg-[#D97706]/20 text-[#F59E0B]'
+                : assessment.securityPostureGrade === 'N/A'
+                ? 'bg-[#707070]/20 text-[#A1A1A1] border border-[#707070]/40'
                 : 'bg-[#DC2626]/20 text-[#EF4444]'
             }`}
           >
@@ -281,6 +288,8 @@ ${f.remediationPatchSnippet}
                   ? 'text-[#10B981]'
                   : assessment.securityPostureGrade === 'B'
                   ? 'text-[#F59E0B]'
+                  : assessment.securityPostureGrade === 'N/A'
+                  ? 'text-[#A1A1A1]'
                   : 'text-[#EF4444]'
               }`}
             >
@@ -312,9 +321,11 @@ ${f.remediationPatchSnippet}
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Coverage</span>
             <span className="text-[18px] font-bold text-[#3B82F6] tabular-nums">
-              {assessment.owaspTop10CoveragePercent}%
+              {assessment.testedVectorsCount ?? 0} / {assessment.totalVectorsCount ?? 10}
             </span>
-            <span className="text-[9.5px] text-[#A1A1A1]">OWASP Top 10</span>
+            <span className="text-[9.5px] text-[#A1A1A1]">
+              {assessment.coverageTestedText || `Cakupan diuji: ${assessment.testedVectorsCount ?? 0} dari 10`}
+            </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Endpoints</span>
@@ -333,7 +344,7 @@ ${f.remediationPatchSnippet}
             {/* Filter buttons */}
             <div className="flex items-center justify-between pb-2 border-b border-[#22262E]">
               <div className="flex items-center gap-1 bg-[#111317] border border-[#22262E] p-0.5 rounded-[3px] text-[10.5px]">
-                {(['ALL', 'CRITICAL', 'HIGH', 'POTENTIAL_RISK', 'VERIFIED_SECURE'] as const).map((s) => (
+                {(['ALL', 'CRITICAL', 'HIGH', 'POTENTIAL_RISK', 'VERIFIED_SECURE', 'NOT_TESTED'] as const).map((s) => (
                   <button
                     key={s}
                     onClick={() => setSelectedSeverity(s)}
@@ -391,7 +402,20 @@ ${f.remediationPatchSnippet}
                       </td>
                       <td className="p-2.5 font-bold text-[#8B5CF6] border-r border-[#22262E]">{f.endpoint}</td>
                       <td className="p-2.5 border-r border-[#22262E] text-[#A1A1A1] text-[10.5px]">
-                        {f.observedResponse}
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`px-1 py-0.2 rounded-[2px] font-mono text-[9px] font-bold ${
+                              f.provenance === 'OBSERVED_PROBE'
+                                ? 'bg-[#059669]/20 text-[#10B981]'
+                                : 'bg-[#707070]/20 text-[#707070]'
+                            }`}
+                          >
+                            {f.provenance === 'OBSERVED_PROBE' ? 'PROBED' : 'UNTESTED'}
+                          </span>
+                          <span className="truncate max-w-[280px]" title={f.observedResponse}>
+                            {f.observedResponse}
+                          </span>
+                        </div>
                       </td>
                       <td className="p-2.5">
                         <span
@@ -400,7 +424,9 @@ ${f.remediationPatchSnippet}
                               ? 'bg-[#059669]/20 text-[#10B981]'
                               : f.status === 'POTENTIAL_RISK'
                               ? 'bg-[#D97706]/20 text-[#F59E0B]'
-                              : 'bg-[#DC2626]/20 text-[#EF4444]'
+                              : f.status === 'VULNERABLE'
+                              ? 'bg-[#DC2626]/20 text-[#EF4444]'
+                              : 'bg-[#707070]/20 text-[#A1A1A1] border border-[#707070]/40'
                           }`}
                         >
                           {f.status.replace(/_/g, ' ')}
@@ -426,6 +452,65 @@ ${f.remediationPatchSnippet}
                 </div>
 
                 <p className="text-[11px] text-[#A1A1A1] font-sans">{selectedFinding.description}</p>
+
+                {/* Empirical HTTP Probe Evidence Box */}
+                {selectedFinding.evidence ? (
+                  <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] text-[10.5px] font-mono space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#10B981] font-bold uppercase tracking-wider text-[10px]">
+                        ● Empirical HTTP Evidence ({selectedFinding.provenance})
+                      </span>
+                      <span className="text-[#707070] text-[9.5px]">{selectedFinding.evidence.probedAt}</span>
+                    </div>
+                    <div className="text-[#EDEDED]">
+                      <span className="text-[#38BDF8] font-bold">{selectedFinding.evidence.request.method}</span>{' '}
+                      <span className="text-[#A1A1A1]">{selectedFinding.evidence.request.url}</span> →{' '}
+                      <span
+                        className={`font-bold ${
+                          selectedFinding.evidence.response.status >= 200 &&
+                          selectedFinding.evidence.response.status < 300
+                            ? 'text-[#EF4444]'
+                            : selectedFinding.evidence.response.status === 401 ||
+                              selectedFinding.evidence.response.status === 403 ||
+                              selectedFinding.evidence.response.status === 404 ||
+                              selectedFinding.evidence.response.status === 429
+                            ? 'text-[#10B981]'
+                            : 'text-[#F59E0B]'
+                        }`}
+                      >
+                        HTTP {selectedFinding.evidence.response.status}
+                      </span>
+                    </div>
+                    {selectedFinding.evidence.response.headersSubset &&
+                      Object.keys(selectedFinding.evidence.response.headersSubset).length > 0 && (
+                        <div className="pt-1 border-t border-[#1C2029] text-[9.5px] text-[#707070] space-y-0.5">
+                          <span className="text-[#A1A1A1] font-bold">Response Headers Subset:</span>
+                          {Object.entries(selectedFinding.evidence.response.headersSubset).map(([hk, hv]) => (
+                            <div key={hk} className="truncate">
+                              <span className="text-[#8B5CF6]">{hk}:</span> {hv}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    {selectedFinding.evidence.response.bodyHash && (
+                      <div className="text-[9px] text-[#707070] pt-0.5">
+                        Payload Hash:{' '}
+                        <span className="text-[#A1A1A1]">{selectedFinding.evidence.response.bodyHash}</span>
+                        {selectedFinding.evidence.request.headersHash && (
+                          <span>
+                            {' '}| Req Hash:{' '}
+                            <span className="text-[#A1A1A1]">{selectedFinding.evidence.request.headersHash}</span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-2.5 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] text-[10.5px] text-[#707070] font-mono flex items-center justify-between">
+                    <span>Status: Belum diuji secara empiris (NOT_RUN).</span>
+                    <span className="text-[9.5px] text-[#A1A1A1]">Jalankan Uji DAST Aktif untuk merekam bukti HTTP</span>
+                  </div>
+                )}
 
                 {selectedFinding.reproductionCurl && (
                   <div className="space-y-1">
@@ -465,10 +550,12 @@ ${f.remediationPatchSnippet}
                   className={`badge-tag px-1.5 py-0.2 rounded font-bold text-[9.5px] ${
                     assessment.corsAudit.status === 'SECURE'
                       ? 'bg-[#059669]/20 text-[#10B981]'
+                      : assessment.corsAudit.status === 'NOT_TESTED'
+                      ? 'bg-[#707070]/20 text-[#A1A1A1] border border-[#707070]/40'
                       : 'bg-[#DC2626]/20 text-[#EF4444]'
                   }`}
                 >
-                  {assessment.corsAudit.status}
+                  {assessment.corsAudit.status.replace(/_/g, ' ')}
                 </span>
               </div>
 

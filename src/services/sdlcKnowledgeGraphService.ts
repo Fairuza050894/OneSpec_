@@ -646,7 +646,7 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
     const majorBugs = bugReports.filter((b) => b.severity === 'MAJOR').length;
     const bugsCount = bugReports.length;
 
-    const securityGrade = owaspDastSummary?.securityPostureGrade || 'A';
+    const securityGrade = owaspDastSummary?.securityPostureGrade || 'N/A';
     const complianceScore = complianceAssessment?.scorecard?.overallComplianceRate ?? 92;
     const uatAcceptedCount = uatFlows.filter((u) => u.uatStatus === 'ACCEPTED' || u.uatStatus === 'ACCEPTED_WITH_NOTES').length;
     const totalUats = Math.max(uatFlows.length, 1);
@@ -656,7 +656,7 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
       validationRules.some((v) => /pass|sandi|user|email/i.test(v.fieldName));
     const tablesCount = databaseTables.length;
 
-    const secScore = securityGrade.startsWith('A') ? 100 : securityGrade === 'B' ? 85 : securityGrade === 'C' ? 68 : 45;
+    const secScore = securityGrade.startsWith('A') ? 100 : securityGrade === 'B' ? 85 : securityGrade === 'C' ? 68 : securityGrade === 'N/A' ? 75 : 45;
     const rawScore = Math.round(
       passRate * 0.4 +
         secScore * 0.25 +
@@ -877,10 +877,24 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
           {
             stepNumber: 'Step 09',
             stepTitlePlain: '9. Audit Celah Keamanan (DAST)',
-            statusBadge: badgeLabel(securityGrade.startsWith('A') || securityGrade === 'B' ? 'PASS' : 'FAIL'),
-            statusTone: securityGrade.startsWith('A') || securityGrade === 'B' ? 'PASS' : 'FAIL',
+            statusBadge: badgeLabel(
+              securityGrade.startsWith('A') || securityGrade === 'B'
+                ? 'PASS'
+                : securityGrade === 'N/A'
+                ? 'WARN'
+                : 'FAIL'
+            ),
+            statusTone:
+              securityGrade.startsWith('A') || securityGrade === 'B'
+                ? 'PASS'
+                : securityGrade === 'N/A'
+                ? 'WARN'
+                : 'FAIL',
             whatWasChecked: 'Menguji ketahanan sistem terhadap akses ilegal, injeksi, dan salah konfigurasi.',
-            plainResult: `Nilai keamanan Grade ${securityGrade} dengan ${owaspDastSummary?.vulnerabilitiesCount?.critical || 0} temuan kritis.`,
+            plainResult:
+              securityGrade === 'N/A'
+                ? `Status keamanan belum diuji secara empiris (${owaspDastSummary?.coverageTestedText || 'Cakupan diuji: 0 dari 10'}).`
+                : `Nilai keamanan Grade ${securityGrade} dengan ${owaspDastSummary?.vulnerabilitiesCount?.critical || 0} temuan kritis.`,
             businessImpact: 'Menjaga akun pengguna dan data bisnis tetap aman dari peretasan.',
             targetStepId: 9,
           },
@@ -993,10 +1007,24 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
           {
             stepNumber: 'Step 09',
             stepTitlePlain: '9. Security Vulnerability Assessment',
-            statusBadge: badgeLabel(securityGrade.startsWith('A') || securityGrade === 'B' ? 'PASS' : 'FAIL'),
-            statusTone: securityGrade.startsWith('A') || securityGrade === 'B' ? 'PASS' : 'FAIL',
+            statusBadge: badgeLabel(
+              securityGrade.startsWith('A') || securityGrade === 'B'
+                ? 'PASS'
+                : securityGrade === 'N/A'
+                ? 'WARN'
+                : 'FAIL'
+            ),
+            statusTone:
+              securityGrade.startsWith('A') || securityGrade === 'B'
+                ? 'PASS'
+                : securityGrade === 'N/A'
+                ? 'WARN'
+                : 'FAIL',
             whatWasChecked: 'Probed ingress authentication, session guards, and OWASP API Top 10 vectors.',
-            plainResult: `Achieved Security Grade ${securityGrade} with ${owaspDastSummary?.vulnerabilitiesCount?.critical || 0} critical vulnerability findings.`,
+            plainResult:
+              securityGrade === 'N/A'
+                ? `Security posture not empirically probed yet (${owaspDastSummary?.coverageTestedText || 'Cakupan diuji: 0 dari 10'}).`
+                : `Achieved Security Grade ${securityGrade} with ${owaspDastSummary?.vulnerabilitiesCount?.critical || 0} critical vulnerability findings.`,
             businessImpact: 'Protects user accounts and business records from unauthorized access.',
             targetStepId: 9,
           },
@@ -1900,7 +1928,7 @@ ${handoff ? `${handoff.summaryEn}\n\n**Auth Flow:** ${handoff.authFlowGuideEn}\n
     const regDiff = params.regressionDiffSummary;
     const book4Markdown = isId
       ? `# BUKU 4: Laporan QA, Matriks Uji (RTM ISO 29119), Log Bug, Regresi & UAT — ${appName}
-**Total Skenario:** ${testScenarios.length} · **Total Test Case:** ${totalTests} · **Lulus:** ${passedTests} (${passRatePercent}%) · **Temuan Bug:** ${bugReports.length} · **Keamanan:** Grade ${securityGrade} · **Kepatuhan:** ${complianceRatePercent}%
+**Total Skenario:** ${testScenarios.length} · **Total Test Case:** ${totalTests} · **Lulus:** ${passedTests} (${passRatePercent}%) · **Temuan Bug:** ${bugReports.length} · **Keamanan:** ${securityGrade === 'N/A' ? 'N/A (Belum Diuji)' : `Grade ${securityGrade}`} · **Kepatuhan:** ${complianceRatePercent}%
 
 ${regDiff ? `## 1. Perbandingan Regresi vs Snapshot Sebelumnya (${regDiff.comparedAgainstLabel})\n${regDiff.plainDiffSummary}\n- **Delta Pass Rate:** ${regDiff.passRateDelta >= 0 ? `+${regDiff.passRateDelta}%` : `${regDiff.passRateDelta}%`}\n- **Modul Baru:** ${regDiff.newModulesAdded.join(', ') || '-'}\n- **Bug Terselesaikan:** ${regDiff.bugsResolved.join(', ') || '-'}\n- **Regresi Baru:** ${regDiff.newBugsIntroduced.join(', ') || '-'}\n` : ''}
 
@@ -1910,7 +1938,7 @@ ${bugReports.length > 0 ? bugReports.map((b) => `- **${b.bugId} [${b.severity}] 
 ## 3. Daftar UAT Sign-Off (${uatFlows.length})
 ${uatFlows.map((u) => `- **${u.uatId} (${u.moduleName}):** ${u.businessScenarioTitle} — Status: **${u.uatStatus}**`).join('\n')}`
       : `# BOOK 4: QA Engineering Report, RTM (ISO 29119), Defect Log, Regression & UAT — ${appName}
-**Scenarios:** ${testScenarios.length} · **Test Cases:** ${totalTests} · **Passed:** ${passedTests} (${passRatePercent}%) · **Defects:** ${bugReports.length} · **Security:** Grade ${securityGrade} · **Compliance:** ${complianceRatePercent}%
+**Scenarios:** ${testScenarios.length} · **Test Cases:** ${totalTests} · **Passed:** ${passedTests} (${passRatePercent}%) · **Defects:** ${bugReports.length} · **Security:** ${securityGrade === 'N/A' ? 'N/A (Not Tested)' : `Grade ${securityGrade}`} · **Compliance:** ${complianceRatePercent}%
 
 ${regDiff ? `## 1. Regression Diff vs Prior Snapshot (${regDiff.comparedAgainstLabel})\n${regDiff.plainDiffSummaryEn}\n- **Pass Rate Delta:** ${regDiff.passRateDelta >= 0 ? `+${regDiff.passRateDelta}%` : `${regDiff.passRateDelta}%`}\n- **New Modules:** ${regDiff.newModulesAdded.join(', ') || '-'}\n- **Bugs Resolved:** ${regDiff.bugsResolved.join(', ') || '-'}\n- **New Regressions:** ${regDiff.newBugsIntroduced.join(', ') || '-'}\n` : ''}
 
