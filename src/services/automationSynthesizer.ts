@@ -841,6 +841,8 @@ export default function () {
     return {
       vus,
       durationSeconds: duration,
+      requested: { vus, durationSeconds: duration },
+      effective: { vus, durationSeconds: duration },
       totalRequests,
       throughputRps,
       errorRatePercent: 0,

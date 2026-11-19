@@ -949,6 +949,14 @@ export interface K6LatencyPercentiles {
 export interface K6MetricSummary {
   vus: number;
   durationSeconds: number;
+  requested?: {
+    vus: number;
+    durationSeconds: number;
+  };
+  effective?: {
+    vus: number;
+    durationSeconds: number;
+  };
   totalRequests: number;
   throughputRps: number;
   errorRatePercent: number;

@@ -1,5 +1,6 @@
-import { filterSafeCookiesForTarget } from '@/lib/serverSecurity';
+import { filterSafeCookiesForTarget, validateUrlForSsrf } from '@/lib/serverSecurity';
 import { guardedFetch } from '@/lib/guardedFetch';
+import { buildK6Script } from '@/lib/k6ScriptBuilder';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -454,28 +455,13 @@ export async function POST(req: NextRequest) {
   if (k6Binary && targetReachable) {
     const summaryPath = path.join(os.tmpdir(), `k6-summary-${Date.now()}.json`);
     const scriptPath = path.join(os.tmpdir(), `k6-script-${Date.now()}.js`);
-    const actualVus = Math.min(vus, 20);
-    const actualDuration = Math.min(durationSeconds, 5);
-
-    const k6Script = `
-import http from 'k6/http';
-import { check } from 'k6';
-
-export const options = {
-  vus: ${actualVus},
-  duration: '${actualDuration}s',
-};
-
-export default function () {
-  const res = http.get('${primaryProbeUrl}', {
-    headers: { 'User-Agent': 'OneSpec-K6-Empirical/1.0' },
-    timeout: '5s',
-  });
-  check(res, { 'status is nominal': (r) => r.status < 500 });
-}
-`;
+    const maxK6Vus = Math.max(1, Number(process.env.ONESPEC_K6_MAX_VUS) || 20);
+    const maxK6Duration = Math.max(1, Number(process.env.ONESPEC_K6_MAX_DURATION_S) || 5);
+    const actualVus = Math.min(vus, maxK6Vus);
+    const actualDuration = Math.min(durationSeconds, maxK6Duration);
 
     try {
+      const k6Script = buildK6Script(primaryProbeUrl, actualVus, actualDuration, [primaryProbeUrl, 'http://127.0.0.1:3000']);
       fs.writeFileSync(scriptPath, k6Script);
       execFileSync(k6Binary, ['run', scriptPath, `--summary-export=${summaryPath}`], {
         timeout: 15000,
@@ -501,6 +487,8 @@ export default function () {
         k6Metrics = {
           vus: actualVus,
           durationSeconds: actualDuration,
+          requested: { vus, durationSeconds },
+          effective: { vus: actualVus, durationSeconds: actualDuration },
           totalRequests,
           throughputRps,
           errorRatePercent,
@@ -571,10 +559,13 @@ export default function () {
     const totalRequests = probeBurstCount;
     const throughputRps = Math.round(totalRequests / Math.max(1, durationSeconds));
     const errorRatePercent = totalRequests > 0 ? Math.round((probeErrors / totalRequests) * 10000) / 100 : 0;
+    const maxProbeDuration = Math.min(durationSeconds, 5);
 
     k6Metrics = {
       vus: probeBurstCount,
       durationSeconds,
+      requested: { vus, durationSeconds },
+      effective: { vus: probeBurstCount, durationSeconds: maxProbeDuration },
       totalRequests,
       throughputRps,
       errorRatePercent,

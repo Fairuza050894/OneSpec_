@@ -11,6 +11,7 @@ import {
 } from '../lib/serverSecurity';
 import { middleware } from '../middleware';
 import { guardedFetch } from '../lib/guardedFetch';
+import { buildK6Script } from '../lib/k6ScriptBuilder';
 import { computeUnifiedQualityMetrics, isNoiseUiControlOrInternalId, cleanProjectDisplayName, type CompiledSdlcState } from '../services/sdlcCompiler';
 import { ReaBridgeService } from '../services/reaBridge';
 
@@ -399,4 +400,54 @@ test('Test 10: guardedFetch and expanded SSRF defenses (T-03: F-04, F-05)', asyn
       return true;
     }
   );
+});
+
+test('Test 11: k6 script generation injection defense & effective load parameters (T-04: F-06, F-15)', async () => {
+  // (a) Malicious URL with JavaScript injection does not break syntax or allow code execution
+  const injectionUrl = "http://x/'+process.exit(1)+'";
+  const script = buildK6Script(injectionUrl, 10, 5, [injectionUrl]);
+
+  // Ensure TARGET is safely encoded as a JSON string literal and not unquoted/interpolated directly into http.get
+  assert.ok(script.includes('const TARGET = "http://x/\'+process.exit(1)+\'";'));
+  assert.ok(script.includes('http.get(TARGET,'));
+  assert.ok(!script.includes("http.get('http://x/'+process.exit(1)+',"));
+
+  // (b) Target URL pointing to metadata endpoint is blocked before writing script
+  assert.throws(
+    () => {
+      buildK6Script('http://169.254.169.254/latest/meta-data', 10, 5);
+    },
+    (err: Error) => {
+      assert.match(err.message, /SSRF Blocked.*metadata/i);
+      return true;
+    }
+  );
+
+  // (c) Effective parameters reporting in K6MetricSummary
+  // Calling /api/runner/execute with VUs=50 must return requested: { vus: 50 } and clamped effective: { vus: 20 } or probe count
+  const req = new NextRequest('http://localhost:3000/api/runner/execute', {
+    method: 'POST',
+    headers: {
+      origin: 'http://localhost:3000',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      targetUrl: 'http://127.0.0.1:3000',
+      vus: 50,
+      durationSeconds: 15,
+      apiEndpoints: [{ path: '/api/health', method: 'GET' }],
+    }),
+  });
+
+  const { POST } = await import('../app/api/runner/execute/route');
+  const res = await POST(req);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+
+  assert.ok(data.k6Metrics, 'Response must include k6Metrics');
+  assert.deepEqual(data.k6Metrics.requested, { vus: 50, durationSeconds: 15 });
+  assert.ok(data.k6Metrics.effective, 'k6Metrics must report effective parameters');
+  assert.ok(typeof data.k6Metrics.effective.vus === 'number');
+  assert.ok(data.k6Metrics.effective.vus <= 25, 'Effective VUs must be clamped according to environment bounds');
+  assert.ok(data.k6Metrics.provenance === 'EMPIRICAL_K6' || data.k6Metrics.provenance === 'HTTP_CONCURRENCY_PROBE');
 });

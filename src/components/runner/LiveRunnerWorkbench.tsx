@@ -1515,11 +1515,26 @@ COMMIT;
               <div className="flex items-center justify-between text-[11px] font-medium text-zinc-400">
                 <span>{isId ? 'VU Aktif' : 'Active VUs'}</span>
                 <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-white/[0.04] border border-white/[0.07] text-zinc-300">
-                  EMPIRICAL
+                  {k6Metrics?.provenance || 'EMPIRICAL'}
                 </span>
               </div>
               <div className="text-base font-semibold font-mono tabular-nums text-zinc-100 mt-0.5">
-                {selectedVus} <span className="text-xs text-zinc-400 font-normal">({selectedDuration}s)</span>
+                {k6Metrics?.effective && k6Metrics.effective.vus !== selectedVus ? (
+                  <>
+                    {selectedVus}{' '}
+                    <span className="text-xs text-amber-400 font-normal">
+                      (eff: {k6Metrics.effective.vus})
+                    </span>{' '}
+                    <span className="text-xs text-zinc-400 font-normal">
+                      ({k6Metrics.effective.durationSeconds ?? selectedDuration}s)
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {selectedVus}{' '}
+                    <span className="text-xs text-zinc-400 font-normal">({selectedDuration}s)</span>
+                  </>
+                )}
               </div>
             </div>
 
