@@ -17,6 +17,7 @@ const PRIVATE_IPV4_PATTERNS = [
   /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/, // 172.16.0.0/12 Private network
   /^192\.168\.\d{1,3}\.\d{1,3}$/,     // 192.168.0.0/16 Private network
   /^169\.254\.\d{1,3}\.\d{1,3}$/,     // 169.254.0.0/16 Link-local / Cloud metadata (AWS, GCP, Azure)
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}$/, // 100.64.0.0/10 Carrier-grade NAT
   /^0\.0\.0\.0$/,                     // 0.0.0.0
 ];
 
@@ -40,7 +41,10 @@ const BLOCKED_LOCAL_HOSTNAMES = new Set([
  * Under zero circumstances may metadata services be accessed.
  */
 export function isMetadataHost(hostname: string): boolean {
-  const clean = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
+  let clean = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
+  if (clean.startsWith('::ffff:')) {
+    clean = clean.slice(7);
+  }
   if (METADATA_HOSTNAMES.has(clean)) return true;
   if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(clean)) return true;
   return false;
@@ -48,15 +52,28 @@ export function isMetadataHost(hostname: string): boolean {
 
 /**
  * Checks whether an IP or hostname belongs to private/loopback address space.
+ * Includes Carrier-grade NAT (100.64.0.0/10), IPv6 unique local (fc00::/7), and IPv4-mapped IPv6.
  */
 export function isPrivateOrLoopbackHost(hostname: string): boolean {
-  const clean = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
+  let clean = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '');
+
+  // Handle IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1 or ::ffff:100.64.0.1)
+  if (clean.startsWith('::ffff:')) {
+    const ipv4 = clean.slice(7);
+    return isPrivateOrLoopbackHost(ipv4) || isMetadataHost(ipv4);
+  }
+
   if (BLOCKED_LOCAL_HOSTNAMES.has(clean)) return true;
   for (const regex of PRIVATE_IPV4_PATTERNS) {
     if (regex.test(clean)) return true;
   }
-  // IPv6 loopback and unique local addresses
-  if (clean === '::1' || clean === '::' || clean.startsWith('fe80:') || clean.startsWith('fc00:') || clean.startsWith('fd00:')) {
+  // IPv6 loopback, link-local, and unique local addresses (fc00::/7 covers prefixes fc and fd)
+  if (
+    clean === '::1' ||
+    clean === '::' ||
+    clean.startsWith('fe80:') ||
+    /^(fc|fd)[0-9a-f]{0,2}:/i.test(clean)
+  ) {
     return true;
   }
   // Decimal or hex encoded IP representations (e.g. 2130706433 or 0x7f000001)

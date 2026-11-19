@@ -10,6 +10,7 @@ import {
   allowedOriginSet,
 } from '../lib/serverSecurity';
 import { middleware } from '../middleware';
+import { guardedFetch } from '../lib/guardedFetch';
 import { computeUnifiedQualityMetrics, isNoiseUiControlOrInternalId, cleanProjectDisplayName, type CompiledSdlcState } from '../services/sdlcCompiler';
 import { ReaBridgeService } from '../services/reaBridge';
 
@@ -313,4 +314,89 @@ test('Test 9: WebSocket origin whitelist validation & CSWSH defense (F-09)', () 
     mockSocket.close(1008, 'Policy Violation: Unauthorized WebSocket Origin');
   }
   assert.equal(closeEvent, null);
+});
+
+test('Test 10: guardedFetch and expanded SSRF defenses (T-03: F-04, F-05)', async () => {
+  // (c) Detection of Carrier-grade NAT, IPv4-mapped IPv6, and IPv6 unique local addresses
+  assert.equal(isPrivateOrLoopbackHost('::ffff:127.0.0.1'), true);
+  assert.equal(isPrivateOrLoopbackHost('100.64.0.1'), true);
+  assert.equal(isPrivateOrLoopbackHost('100.127.255.254'), true);
+  assert.equal(isPrivateOrLoopbackHost('100.63.1.1'), false);
+  assert.equal(isPrivateOrLoopbackHost('100.128.0.1'), false);
+  assert.equal(isPrivateOrLoopbackHost('fc00::1'), true);
+  assert.equal(isPrivateOrLoopbackHost('fd12:3456::1'), true);
+  assert.equal(isMetadataHost('::ffff:169.254.169.254'), true);
+  assert.equal(isMetadataHost('169.254.169.254'), true);
+
+  // (a) Redirect from public host to http://169.254.169.254/ is strictly blocked
+  const mockRedirectFetch: typeof fetch = async (input, init) => {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: 'http://169.254.169.254/latest/meta-data',
+      },
+    });
+  };
+  const mockPublicDns = async () => [{ address: '93.184.216.34', family: 4 }];
+
+  await assert.rejects(
+    async () => {
+      await guardedFetch('http://example.com/login', {
+        fetchFn: mockRedirectFetch,
+        lookupFn: mockPublicDns,
+      });
+    },
+    (err: Error) => {
+      assert.match(err.message, /SSRF Blocked.*metadata/i);
+      return true;
+    }
+  );
+
+  // (b) Hostname resolving to 127.0.0.1 via DNS is rejected unless in allowlist
+  const mockRebindDns = async () => [{ address: '127.0.0.1', family: 4 }];
+  const mockSuccessFetch: typeof fetch = async () => new Response('{"ok":true}', { status: 200 });
+
+  await assert.rejects(
+    async () => {
+      await guardedFetch('http://rebinding-attack.com/api', {
+        fetchFn: mockSuccessFetch,
+        lookupFn: mockRebindDns,
+      });
+    },
+    (err: Error) => {
+      assert.match(err.message, /SSRF: hostname meresolusi ke alamat privat/i);
+      return true;
+    }
+  );
+
+  // When hostname is explicitly in allowedHosts, DNS resolving to private IP is permitted
+  const resAllowedHost = await guardedFetch('http://rebinding-attack.com/api', {
+    allowedHosts: ['rebinding-attack.com'],
+    fetchFn: mockSuccessFetch,
+    lookupFn: mockRebindDns,
+  });
+  assert.equal(resAllowedHost.status, 200);
+
+  // (d) Project target host in allowlist (e.g. 10.10.15.79) can be accessed safely
+  const resProjectHost = await guardedFetch('http://10.10.15.79:3000/api/dashboard', {
+    allowedHosts: ['http://10.10.15.79:3000'],
+    fetchFn: mockSuccessFetch,
+  });
+  assert.equal(resProjectHost.status, 200);
+
+  // DNS resolving to metadata endpoint is blocked unconditionally even if claimed in allowedHosts
+  const mockDnsToMetadata = async () => [{ address: '169.254.169.254', family: 4 }];
+  await assert.rejects(
+    async () => {
+      await guardedFetch('http://metadata-bypass.evil.com/leak', {
+        allowedHosts: ['metadata-bypass.evil.com'],
+        fetchFn: mockSuccessFetch,
+        lookupFn: mockDnsToMetadata,
+      });
+    },
+    (err: Error) => {
+      assert.match(err.message, /SSRF: hostname meresolusi ke endpoint metadata/i);
+      return true;
+    }
+  );
 });

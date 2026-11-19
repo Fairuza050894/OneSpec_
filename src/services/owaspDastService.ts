@@ -20,6 +20,7 @@ import type {
   DiscoveredFeatureModule,
   GapAuditItem,
 } from '@/types/sdlc';
+import { guardedFetch } from '@/lib/guardedFetch';
 
 export type OwaspApiCategory =
   | 'API1:2023' // Broken Object Level Authorization (BOLA)
@@ -116,19 +117,21 @@ export class OwaspDastService {
     try {
       const abortCtrl = new AbortController();
       const timer = setTimeout(() => abortCtrl.abort(new Error('Probe timeout')), 4000);
-      let headRes = await fetch(params.targetUrl, {
+      let headRes = await guardedFetch(params.targetUrl, {
         method: 'HEAD',
         signal: abortCtrl.signal,
         headers: { 'User-Agent': 'OneSpec-LiveDast-Probe/2.0' },
+        allowedHosts: [params.targetUrl],
       }).catch(() => null);
 
       if (!headRes || !headRes.ok) {
         const getCtrl = new AbortController();
         const getTimer = setTimeout(() => getCtrl.abort(new Error('Probe timeout')), 4000);
-        headRes = await fetch(params.targetUrl, {
+        headRes = await guardedFetch(params.targetUrl, {
           method: 'GET',
           signal: getCtrl.signal,
           headers: { 'User-Agent': 'OneSpec-LiveDast-Probe/2.0' },
+          allowedHosts: [params.targetUrl],
         }).catch(() => null);
         clearTimeout(getTimer);
       }
@@ -157,13 +160,14 @@ export class OwaspDastService {
         const probeTarget = new URL(protectedEp.path, params.targetUrl).toString();
         const probeCtrl = new AbortController();
         const probeTimer = setTimeout(() => probeCtrl.abort(new Error('Probe timeout')), 4000);
-        const probeRes = await fetch(probeTarget, {
+        const probeRes = await guardedFetch(probeTarget, {
           method: protectedEp.method || 'GET',
           signal: probeCtrl.signal,
           headers: {
             'Accept': 'application/json',
             'User-Agent': 'OneSpec-LiveDast-Probe/2.0',
           },
+          allowedHosts: [params.targetUrl, probeTarget],
         }).catch(() => null);
         clearTimeout(probeTimer);
 

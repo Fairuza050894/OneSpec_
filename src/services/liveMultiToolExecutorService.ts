@@ -16,6 +16,7 @@ import { workspaceVaultService } from './workspaceVaultService';
 import { aiAugmentedQaService, type AiAugmentedQaReport } from './aiAugmentedQaService';
 import { toolProbeService, type ToolProbeResult } from './toolProbeService';
 import type { DiscoveredApiEndpoint, ValidationRuleContract } from '@/types/sdlc';
+import { guardedFetch } from '@/lib/guardedFetch';
 
 export type { ToolProbeResult };
 
@@ -244,7 +245,10 @@ export class LiveMultiToolExecutorService {
 
     if (isHttp) {
       try {
-        const res = await fetch(targetUrl, { signal: AbortSignal.timeout(2500) });
+        const res = await guardedFetch(targetUrl, {
+          signal: AbortSignal.timeout(2500),
+          allowedHosts: [targetUrl],
+        });
         if (res.status < 500) isLiveReachable = true;
       } catch {
         isLiveReachable = false;
@@ -480,10 +484,11 @@ export class LiveMultiToolExecutorService {
       if (isHttp) {
         const start = Date.now();
         try {
-          const res = await fetch(fullUrl, {
+          const res = await guardedFetch(fullUrl, {
             method: ep.method,
             headers: { Accept: 'application/json' },
             signal: AbortSignal.timeout(3000),
+            allowedHosts: [fullUrl, targetUrl],
           });
           latencyMs = Date.now() - start;
           positiveStatus = res.status;

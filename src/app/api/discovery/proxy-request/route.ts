@@ -7,6 +7,7 @@ import {
   verifyInternalOriginOrToken,
   type StoredAuthCookie,
 } from '@/lib/serverSecurity';
+import { guardedFetch } from '@/lib/guardedFetch';
 
 export async function POST(req: NextRequest) {
   try {
@@ -108,7 +109,10 @@ export async function POST(req: NextRequest) {
     }
 
     const t0 = performance.now();
-    const res = await fetch(fullUrl, fetchInit);
+    const res = await guardedFetch(fullUrl, {
+      ...fetchInit,
+      allowedHosts: [fullUrl],
+    });
     const latencyMs = Math.max(1, Math.round(performance.now() - t0));
     const rawText = await res.text().catch(() => '');
 

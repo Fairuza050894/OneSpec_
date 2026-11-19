@@ -7,6 +7,7 @@ import { triModalDiscoveryService } from '../../services/triModalDiscoveryServic
 import { unifiedReportGenerator } from '../../services/unifiedReportGenerator';
 import { blindCrawlerService } from '../../services/blindCrawlerService';
 import { filterSafeCookiesForTarget } from '../../lib/serverSecurity';
+import { guardedFetch } from '../../lib/guardedFetch';
 import type {
   GitRefOption,
   UploadArchiveTelemetry,
@@ -494,9 +495,10 @@ export const discoveryRoutes: FastifyPluginAsync = async (fastify) => {
       if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
         const start = performance.now();
         try {
-          const resp = await fetch(targetUrl, {
+          const resp = await guardedFetch(targetUrl, {
             headers: defaultHeaders,
             signal: AbortSignal.timeout(6000),
+            allowedHosts: [targetUrl],
           });
           targetStatus = resp.status;
           liveLatency = Math.max(1, Math.round(performance.now() - start));

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { owaspDastService, type SecurityHeaderAudit } from '@/services/owaspDastService';
 import type { DiscoveredApiEndpoint, DatabaseErdTable, ValidationRuleContract } from '@/types/sdlc';
+import { guardedFetch } from '@/lib/guardedFetch';
 
 interface DastProbeRequestBody {
   targetUrl?: string;
@@ -36,10 +37,11 @@ export async function POST(req: NextRequest) {
 
     try {
       // 1. Live GET / HEAD Probe to capture security response headers
-      const headRes = await fetch(fullProbeUrl, {
+      const headRes = await guardedFetch(fullProbeUrl, {
         method: 'HEAD',
         headers: { 'User-Agent': 'OneSpec-OWASP-DAST/1.0' },
         signal: AbortSignal.timeout(4000),
+        allowedHosts: [fullProbeUrl, 'http://127.0.0.1:3000'],
       });
       getStatus = headRes.status;
       headRes.headers.forEach((value, key) => {
@@ -48,7 +50,10 @@ export async function POST(req: NextRequest) {
     } catch {
       // If external target fails, check localhost
       try {
-        const localRes = await fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(2000) });
+        const localRes = await guardedFetch('http://127.0.0.1:3000/', {
+          signal: AbortSignal.timeout(2000),
+          allowedHosts: ['http://127.0.0.1:3000'],
+        });
         getStatus = localRes.status;
         localRes.headers.forEach((value, key) => {
           measuredHeaders[key.toLowerCase()] = value;
@@ -58,13 +63,14 @@ export async function POST(req: NextRequest) {
 
     try {
       // 2. Live CORS OPTIONS pre-flight probe with adversarial origin
-      const optionsRes = await fetch(fullProbeUrl, {
+      const optionsRes = await guardedFetch(fullProbeUrl, {
         method: 'OPTIONS',
         headers: {
           Origin: 'https://adversarial-origin.test',
           'Access-Control-Request-Method': 'POST',
         },
         signal: AbortSignal.timeout(3000),
+        allowedHosts: [fullProbeUrl],
       });
       optionsStatus = optionsRes.status;
       corsOriginHeader = optionsRes.headers.get('access-control-allow-origin') || '';

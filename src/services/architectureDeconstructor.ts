@@ -14,6 +14,7 @@ import type {
   BrdMatrixRow,
   CrawledModuleSummary,
 } from '@/types/sdlc';
+import { guardedFetch } from '@/lib/guardedFetch';
 
 export interface ArchitectureDeconstructionInput {
   appName: string;
@@ -1892,11 +1893,12 @@ export class ${clientClassName} {
         if (qs) url += \`?\${qs}\`;
       }
 
-      const res = await fetch(url, {
+      const res = await guardedFetch(url, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
+        allowedHosts: [this.baseUrl, url],
       });
 
       const json = await res.json().catch(() => ({}));

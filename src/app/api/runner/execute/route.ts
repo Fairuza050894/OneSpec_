@@ -1,4 +1,5 @@
 import { filterSafeCookiesForTarget } from '@/lib/serverSecurity';
+import { guardedFetch } from '@/lib/guardedFetch';
 
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
@@ -91,10 +92,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const t0 = performance.now();
-    const probeRes = await fetch(primaryProbeUrl, {
+    const probeRes = await guardedFetch(primaryProbeUrl, {
       method: primaryMethod,
       headers: defaultHeaders,
       signal: AbortSignal.timeout(6000),
+      allowedHosts: [primaryProbeUrl, 'http://127.0.0.1:3000'],
     });
     primaryLatencyMs = Math.max(1, Math.round(performance.now() - t0));
     primaryStatus = probeRes.status;
@@ -126,7 +128,10 @@ export async function POST(req: NextRequest) {
     // If external target is unreachable in isolated local sandbox, probe local server
     try {
       const t0 = performance.now();
-      const localRes = await fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(3000) });
+      const localRes = await guardedFetch('http://127.0.0.1:3000/', {
+        signal: AbortSignal.timeout(3000),
+        allowedHosts: ['http://127.0.0.1:3000'],
+      });
       primaryLatencyMs = Math.max(1, Math.round(performance.now() - t0));
       primaryStatus = localRes.status;
       targetReachable = true;
@@ -146,10 +151,11 @@ export async function POST(req: NextRequest) {
     const fullUrl = probeBaseUrl.replace(/\/$/, '') + (ep.path.startsWith('/') ? ep.path : `/${ep.path}`);
     try {
       const t0 = performance.now();
-      const res = await fetch(fullUrl, {
+      const res = await guardedFetch(fullUrl, {
         method: ep.method,
         headers: defaultHeaders,
         signal: AbortSignal.timeout(2500),
+        allowedHosts: [probeBaseUrl, primaryProbeUrl],
       }).catch(() => null);
       const measured = res ? Math.max(1, Math.round(performance.now() - t0)) : primaryLatencyMs;
       endpointLatencies.set(ep.path, measured);
@@ -534,10 +540,11 @@ export default function () {
     const probeTasks = Array.from({ length: probeBurstCount }).map(async () => {
       const tStart = performance.now();
       try {
-        const pRes = await fetch(primaryProbeUrl, {
+        const pRes = await guardedFetch(primaryProbeUrl, {
           method: 'GET',
           headers: defaultHeaders,
           signal: AbortSignal.timeout(3000),
+          allowedHosts: [primaryProbeUrl],
         });
         const elapsed = Math.max(1, Math.round(performance.now() - tStart));
         if (pRes.status >= 400) probeErrors++;
