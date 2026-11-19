@@ -109,10 +109,10 @@ test('Test 4: isNoiseUiControlOrInternalId purges framework noise, radix IDs, an
   assert.equal(isNoiseUiControlOrInternalId('ctrl+k'), true);
   assert.equal(isNoiseUiControlOrInternalId('id'), true);
   assert.equal(isNoiseUiControlOrInternalId('en'), true);
-  assert.equal(isNoiseUiControlOrInternalId('fairuza.restu'), true);
+  assert.equal(isNoiseUiControlOrInternalId('budi.santoso', { currentUsername: 'budi.santoso' }), true);
   assert.equal(isNoiseUiControlOrInternalId('Baris per halaman:'), true);
   assert.equal(isNoiseUiControlOrInternalId('Rows per page:'), true);
-  assert.equal(isNoiseUiControlOrInternalId('menu profil pengguna'), true);
+  assert.equal(isNoiseUiControlOrInternalId('menu profil pengguna', { ignoreExact: ['menu profil pengguna'] }), true);
   assert.equal(isNoiseUiControlOrInternalId('toggle sidebar'), true);
   assert.equal(isNoiseUiControlOrInternalId('logout'), true);
   assert.equal(isNoiseUiControlOrInternalId('keluar'), true);

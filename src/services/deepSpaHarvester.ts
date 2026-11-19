@@ -1459,8 +1459,8 @@ export async function runDeepSpaHarvester(
               if (!s) return true;
               const l = s.toLowerCase();
               if (/^(_r_|radix-|headlessui-|el-id-|v-input-|mui-|field-_r_|select_\d+|input_\d+|field_\d+|nav-button-)/i.test(s)) return true;
-              if (/^(⌘k|ctrl\+k|id|en|in|fairuza\.restu|admin|baris per halaman:?|rows per page:?|katalog|sales quotation|menu profil pengguna|cari fitur.*|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i.test(s) || /^(⌘k|ctrl\+k|id|en|in|fairuza\.restu|admin|baris per halaman:?|rows per page:?|katalog|sales quotation|menu profil pengguna|cari fitur.*|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i.test(l)) return true;
-              if (l.includes('_r_') || l.startsWith('radix-') || l.startsWith('headlessui-') || l.startsWith('nav-button-') || /^field[-\s_]+r[-\s_]+d/i.test(l) || /^field[-\s_]+r[-\s_]+g/i.test(l) || l.includes('baris per halaman') || l.includes('rows per page') || l.includes('menu profil pengguna')) return true;
+              if (/^(⌘k|ctrl\+k|id|en|in|baris per halaman:?|rows per page:?|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i.test(s) || /^(⌘k|ctrl\+k|id|en|in|baris per halaman:?|rows per page:?|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i.test(l)) return true;
+              if (l.includes('_r_') || l.startsWith('radix-') || l.startsWith('headlessui-') || l.startsWith('nav-button-') || /^field[-\s_]+r[-\s_]+d/i.test(l) || /^field[-\s_]+r[-\s_]+g/i.test(l) || l.includes('baris per halaman') || l.includes('rows per page')) return true;
               return false;
             };
 

@@ -24,6 +24,12 @@ import type {
   UatFeatureFlow,
   DatabaseErdTable,
 } from '@/types/sdlc';
+import {
+  isNoiseUiControlOrInternalId as libIsNoiseUiControlOrInternalId,
+  sanitizeStatementText,
+  detectGlobalChromeLabels,
+  type NoiseRules,
+} from '@/lib/noiseFilter';
 import { synthesizeFourQaDeliverables, type SynthesizedRtmRow } from './rtmSynthesizer';
 import { generateCanonicalBpmn2Xml } from './bpmnXmlGenerator';
 import { gapAuditorService } from './gapAuditorService';
@@ -108,60 +114,16 @@ export interface CompiledSdlcState {
 
 /**
  * Filter out framework-generated internal IDs, global navbar chrome, pagination, and avatar tokens.
- * Strict Enterprise standard (Wave 1): Zero DOM noise in BRD, PRD, Wireframe & Gap Audit.
+ * Strict Enterprise standard (Wave 2 / T-16): Centralized delegation to src/lib/noiseFilter.ts.
  */
-export function isNoiseUiControlOrInternalId(nameOrLabel: string | null | undefined): boolean {
-  if (!nameOrLabel) return true;
-  const raw = String(nameOrLabel).trim();
-  if (!raw) return true;
-  const lower = raw.toLowerCase();
-
-  // Framework auto-generated IDs regex
-  const frameworkIdPattern = /^(_r_|radix-|headlessui-|el-id-|v-input-|mui-|field-_r_|select_\d+|input_\d+|field_\d+|nav-button-)/i;
-  if (frameworkIdPattern.test(raw)) return true;
-
-  // Global navigation chrome, language, shortcut, or pagination exact regex
-  const chromePattern = /^(⌘k|ctrl\+k|id|en|in|fairuza\.restu|admin|baris per halaman:?|rows per page:?|katalog|sales quotation|menu profil pengguna|cari fitur.*|buka menu|toggle sidebar|logout|keluar|sign out|previous|next|selanjutnya|sebelumnya)$/i;
-  if (chromePattern.test(raw) || chromePattern.test(lower)) return true;
-
-  // Substring checks for auto-generated tokens
-  if (
-    lower.includes('_r_') ||
-    lower.startsWith('radix-') ||
-    lower.startsWith('headlessui-') ||
-    lower.startsWith('nav-button-') ||
-    lower.startsWith('el-id-') ||
-    lower.startsWith('mui-') ||
-    lower.startsWith('v-input-') ||
-    /^select[_\s-]?\d+$/i.test(lower) ||
-    /^input[_\s-]?\d+$/i.test(lower) ||
-    /^field[_\s-]?\d+$/i.test(lower) ||
-    /^field[_\s-]?_r_/i.test(lower) ||
-    /^field[-\s_]+r[-\s_]+d/i.test(lower) ||
-    /^field[-\s_]+r[-\s_]+g/i.test(lower) ||
-    /^kolom\s+isian\s+#?\d+$/i.test(lower) ||
-    /^filter\s+pilihan\s+#?\d+$/i.test(lower)
-  ) {
-    return true;
-  }
-
-  // Substring checks for global navigation / chrome / avatar
-  if (
-    lower.includes('baris per halaman') ||
-    lower.includes('rows per page') ||
-    lower.includes('menu profil pengguna') ||
-    lower.includes('toggle sidebar') ||
-    lower.includes('buka menu') ||
-    lower === '⌘k' ||
-    lower === 'ctrl+k' ||
-    lower === 'fairuza.restu' ||
-    lower === 'fairuza'
-  ) {
-    return true;
-  }
-
-  return false;
+export function isNoiseUiControlOrInternalId(
+  nameOrLabel: string | null | undefined,
+  rules?: NoiseRules
+): boolean {
+  return libIsNoiseUiControlOrInternalId(nameOrLabel, rules);
 }
+
+export { sanitizeStatementText, detectGlobalChromeLabels, type NoiseRules };
 
 /**
  * Clean and resolve target project display name (pure client-safe string helper).
@@ -516,6 +478,20 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
     }
   }
 
+  // Data-driven global chrome detection (elements on >= 80% pages) & project noise rules
+  const detectedChrome = detectGlobalChromeLabels(
+    (discoveredModules || []).map((m) => ({
+      pagePath: m.pagePath,
+      interactiveControls: (m.inputs || []).map((i) => ({ label: i.name || i.labelText })),
+      buttons: (m.buttons || []).map((b) => ({ name: b })),
+    }))
+  );
+
+  const noiseRules: NoiseRules = {
+    detectedGlobalChromeLabels: detectedChrome,
+    currentUsername: crawlResult.discoveredAuthContext?.jwtClaims?.preferred_username || undefined,
+  };
+
   const discoveredBrdRows: BrdMatrixRow[] =
     crawlResult.inferredBusinessRules && crawlResult.inferredBusinessRules.length > 0
       ? crawlResult.inferredBusinessRules
@@ -532,20 +508,15 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
                 const heading = modMatch[3];
                 const targetMod = discoveredModules.find((m) => m.moduleName === modName || m.pagePath === modPath);
                 const rawInputs = (targetMod?.inputs || []).map((i: { name?: string; placeholder?: string }) => i.name || i.placeholder || '').filter(Boolean);
-                const cleanInputs = rawInputs.filter((i: string) => !isNoiseUiControlOrInternalId(i));
+                const cleanInputs = rawInputs.filter((i: string) => !isNoiseUiControlOrInternalId(i, noiseRules));
                 const domainInputs = cleanInputs.length > 0
                   ? cleanInputs
-                  : ['Origin', 'Destination', 'Filter Tipe', 'Filter Business Unit', 'Nama Penawaran', 'Customer & PIC'];
+                  : ['Data Entitas', 'Parameter Operasi', 'Kriteria Input'];
                 const cleanApis = targetMod?.apis?.length || 1;
                 stmt = `Modul "${modName}" (${modPath}) HARUS mengelola alur kerja "${heading}" meliputi validasi input bisnis (${domainInputs.slice(0, 6).join(', ')}), serta sinkronisasi dengan ${cleanApis} endpoint layanan backend.`;
               }
             }
-            stmt = stmt
-              .replace(/⌘k|ctrl\+k|id|en|fairuza\.restu|baris per halaman:?|rows per page:?|nav-button-catalog|select_\d+|field-_r_\w+/gi, '')
-              .replace(/\(\s*,\s*/g, '(')
-              .replace(/,\s*\)/g, ')')
-              .replace(/\s{2,}/g, ' ')
-              .trim();
+            stmt = sanitizeStatementText(stmt, noiseRules);
 
             return {
               ...r,
@@ -553,7 +524,7 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
               provenance: r.provenance || 'AS_BUILT_DISCOVERED',
             };
           })
-          .filter((r) => !isNoiseUiControlOrInternalId(r.moduleName))
+          .filter((r) => !isNoiseUiControlOrInternalId(r.moduleName, noiseRules))
       : [
           {
             ruleId: 'BR-01',

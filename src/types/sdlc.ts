@@ -39,6 +39,13 @@ export interface ProjectWorkspace {
 export type BrdStatus = 'DRAFT' | 'REVIEW' | 'APPROVED' | 'SUPERSEDED';
 export type BusinessRulePriority = 'HIGH' | 'MEDIUM' | 'LOW';
 
+export interface NoiseRules {
+  ignoreExact?: string[];
+  ignoreContains?: string[];
+  currentUsername?: string;
+  detectedGlobalChromeLabels?: string[];
+}
+
 export interface KpiDefinition {
   id: string;
   metric: string;

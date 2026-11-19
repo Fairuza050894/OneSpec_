@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   computeUnifiedQualityMetrics,
   isNoiseUiControlOrInternalId,
+  sanitizeStatementText,
+  detectGlobalChromeLabels,
   type CompiledSdlcState,
 } from '../services/sdlcCompiler';
 
@@ -85,13 +87,10 @@ test('Noise Filter: comprehensively purges framework IDs, chrome controls, and p
     'ctrl+k',
     'id',
     'en',
-    'fairuza.restu',
-    'admin',
     'Baris per halaman:',
     'baris per halaman',
     'Rows per page:',
     'rows per page',
-    'menu profil pengguna',
     'toggle sidebar',
     'keluar',
     'logout',
@@ -127,4 +126,37 @@ test('Noise Filter: comprehensively purges framework IDs, chrome controls, and p
       `Expected genuine business entity "${entity}" NOT to be filtered as noise`
     );
   }
+});
+
+test('T-16: Strict Noise Sanitizer & Generalization Test Suite (F-23, F-24, F-28, F-30)', () => {
+  // 1. Mandatory Test Table Row 1: Word boundaries preserve words containing 'id', 'en', 'mu'
+  const input1 = 'identity endpoint(s) Menu';
+  const out1 = sanitizeStatementText(input1);
+  assert.equal(out1, 'identity endpoint(s) Menu', 'Words containing "id", "en", "mu" must NOT be corrupted');
+
+  // 2. Mandatory Test Table Row 2: "Cari ⌘K ID" with "ID" detected as global chrome -> "Cari"
+  const input2 = 'Cari ⌘K ID';
+  const out2 = sanitizeStatementText(input2, { detectedGlobalChromeLabels: ['ID'] });
+  assert.equal(out2, 'Cari', 'Shortcut ⌘K and detected chrome ID must be stripped cleanly');
+
+  // 3. Mandatory Test Table Row 3: "Halo budi.santoso" with currentUsername='budi.santoso' -> "Halo"
+  const input3 = 'Halo budi.santoso';
+  const out3 = sanitizeStatementText(input3, { currentUsername: 'budi.santoso' });
+  assert.equal(out3, 'Halo', 'Dynamic username must be stripped with word boundaries');
+
+  // 4. Mandatory Test Table Row 4: "field-_r_d_" as field name is filtered out
+  assert.equal(isNoiseUiControlOrInternalId('field-_r_d_'), true, 'field-_r_d_ must be recognized as noise');
+
+  // 5. Mandatory Test Table Row 5: Domain features like "Katalog" or "Sales Quotation" are NOT filtered out
+  assert.equal(isNoiseUiControlOrInternalId('Katalog'), false, 'Domain entity "Katalog" must NOT be filtered out');
+  assert.equal(isNoiseUiControlOrInternalId('Sales Quotation'), false, 'Domain entity "Sales Quotation" must NOT be filtered out');
+
+  // 6. Data-driven chrome detector: Elements appearing on >= 80% pages are detected
+  const crawledPages = [
+    { pagePath: '/dashboard', buttons: [{ name: 'ID' }, { name: 'Simpan Data' }] },
+    { pagePath: '/users', buttons: [{ name: 'ID' }, { name: 'Tambah Pengguna' }] },
+    { pagePath: '/settings', buttons: [{ name: 'ID' }, { name: 'Update Profil' }] },
+  ];
+  const detected = detectGlobalChromeLabels(crawledPages, 0.8);
+  assert.deepEqual(detected, ['ID'], 'Button "ID" on 100% of pages must be detected as global chrome');
 });
