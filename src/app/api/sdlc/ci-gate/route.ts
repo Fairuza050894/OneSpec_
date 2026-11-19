@@ -39,7 +39,7 @@ export interface CiGateEvaluationResult {
       score: number;
       evidence: string;
     };
-    iso5055_SreReadinessScore: {
+    oneSpec_InternalReadinessScore: {
       status: 'PASS' | 'FAIL';
       score: number;
       evidence: string;
@@ -174,13 +174,13 @@ function evaluateCiGates(
       : `Security Gate Alert: Critical vulnerabilities found (${criticalBugs} bugs, ${criticalDast} DAST) or RBAC unverified.`,
   };
 
-  // 5. ISO 5055: SRE Readiness Score (>= 80%)
+  // 5. Skor Kesiapan Produksi Internal OneSpec (>= 80%) (F-21: Skor Kesiapan Internal)
   const sreScore = sreScorecard.overallSreScore;
   const srePass = sreScore >= 80;
   const gate5 = {
     status: srePass ? ('PASS' as const) : ('FAIL' as const),
     score: sreScore,
-    evidence: `SRE Production Readiness Review score: ${sreScore}% (Benchmark: >= 80%, Bus-Factor Index: ${sreScorecard.busFactorEliminationPercent}%).`,
+    evidence: `Skor kesiapan produksi internal OneSpec: ${sreScore}% (Ambang batas internal: >= 80%, Bus-Factor Index: ${sreScorecard.busFactorEliminationPercent}%).`,
   };
 
   const allPassed =
@@ -233,7 +233,7 @@ function evaluateCiGates(
 
   return {
     timestamp: new Date().toISOString(),
-    pipelineStandard: 'ONESPEC-ENTERPRISE-CI-GATE-V2 (ISO 29148 · ISO 29119 · ISO 26514 · OWASP 2023 · ISO 5055)',
+    pipelineStandard: 'ONESPEC-ENTERPRISE-CI-GATE-V2 (Mengacu pada ISO/IEC/IEEE 29148 · ISO/IEC/IEEE 29119 · ISO/IEC/IEEE 26514 · OWASP ASVS · Skor Kesiapan Internal OneSpec)',
     projectId,
     projectName: state.appName,
     targetUrl: state.targetUrl,
@@ -246,7 +246,7 @@ function evaluateCiGates(
       iso29119_QaPassRate: gate2,
       iso26514_ZeroUndocumentedControls: gate3,
       owasp2023_ZeroCriticalVulnerabilities: gate4,
-      iso5055_SreReadinessScore: gate5,
+      oneSpec_InternalReadinessScore: gate5,
     },
     roiValuation,
     merkleAuditSealHash,

@@ -183,14 +183,28 @@ export function ComplianceBinderWorkbench(props: ComplianceBinderWorkbenchProps)
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] text-[#707070] uppercase font-bold truncate">{key}</span>
-                    <span className="text-[#10B981] font-bold text-[13px] tabular-nums">{fw.scorePercent}%</span>
+                    <span className="text-[#3B82F6] font-bold text-[11px] tabular-nums">
+                      {fw.passed} dari {fw.total} kontrol
+                    </span>
                   </div>
                   <div className="text-[12px] font-sans font-bold text-[#EDEDED] truncate">{fw.name}</div>
-                  <div className="flex items-center justify-between pt-1 border-t border-[#22262E]/60 text-[10px]">
-                    <span className="text-[#A1A1A1]">Passed Controls:</span>
-                    <strong className="text-[#10B981] tabular-nums">
-                      {fw.passed} / {fw.total}
-                    </strong>
+                  <div className="pt-1 border-t border-[#22262E]/60 text-[10px] text-[#A1A1A1] space-y-0.5">
+                    <div className="flex items-center justify-between">
+                      <span>Cakupan Dinilai:</span>
+                      <strong className="text-[#10B981] tabular-nums">
+                        {fw.passed} dari {fw.total} kontrol berlaku
+                      </strong>
+                    </div>
+                    {key === 'ISO_27001' && (
+                      <div className="text-[9px] text-[#707070] leading-tight">
+                        (2 kontrol teknis SDLC A.8 dari 93 kontrol ISO 27001)
+                      </div>
+                    )}
+                    {key === 'PCI_DSS' && (
+                      <div className="text-[9px] text-[#707070] leading-tight">
+                        (2 kontrol web &amp; sesi dari standar PCI-DSS)
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -425,17 +439,33 @@ export function ComplianceBinderWorkbench(props: ComplianceBinderWorkbenchProps)
                       <tr>
                         <th className="p-2 border-r border-[#22262E]">Regulatory Framework</th>
                         <th className="p-2 border-r border-[#22262E]">Jurisdiction Scope</th>
-                        <th className="p-2 border-r border-[#22262E]">Audited Controls</th>
-                        <th className="p-2">Compliance Score</th>
+                        <th className="p-2 border-r border-[#22262E]">Cakupan Kontrol Dinilai</th>
+                        <th className="p-2">Status Kesesuaian Teruji</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#22262E] bg-[#111317]">
-                      {Object.entries(scorecard.frameworkSummary).map(([, fw]) => (
+                      {Object.entries(scorecard.frameworkSummary).map(([key, fw]) => (
                         <tr key={fw.name}>
-                          <td className="p-2 font-bold text-[#EDEDED] border-r border-[#22262E]">{fw.name}</td>
+                          <td className="p-2 font-bold text-[#EDEDED] border-r border-[#22262E]">
+                            <div>{fw.name}</div>
+                            {key === 'ISO_27001' && (
+                              <div className="text-[9px] text-[#707070] font-normal">
+                                Cakupan terbatas: 2 dari 93 kontrol ISO 27001 Annex A
+                              </div>
+                            )}
+                            {key === 'PCI_DSS' && (
+                              <div className="text-[9px] text-[#707070] font-normal">
+                                Cakupan terbatas: 2 kontrol teknis dari persyaratan PCI-DSS
+                              </div>
+                            )}
+                          </td>
                           <td className="p-2 text-[#A1A1A1] border-r border-[#22262E]">Financial &amp; Invariant Controls</td>
-                          <td className="p-2 text-[#EDEDED] border-r border-[#22262E]">{fw.passed} / {fw.total} Passed</td>
-                          <td className="p-2 font-bold text-[#10B981]">{fw.scorePercent}%</td>
+                          <td className="p-2 text-[#EDEDED] border-r border-[#22262E]">
+                            {fw.passed} dari {fw.total} kontrol berlaku dinilai
+                          </td>
+                          <td className="p-2 font-bold text-[#10B981]">
+                            {fw.passed === fw.total ? 'Terpenuhi (Kontrol Teruji)' : `${fw.passed}/${fw.total} Teruji`}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

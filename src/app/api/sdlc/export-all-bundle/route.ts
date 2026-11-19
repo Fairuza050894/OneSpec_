@@ -133,28 +133,28 @@ async function handleExportBundle(req: NextRequest) {
       standardsCompliance: [
         {
           standard: 'ISO/IEC/IEEE 29148:2018',
-          scope: 'Requirements Engineering & StRS/SyRS Specification Synthesis',
-          status: 'COMPLIANT',
+          scope: 'Mengacu pada sintaks rekayasa persyaratan & sintesis spesifikasi',
+          status: 'ALIGNED',
         },
         {
-          standard: 'ISO/IEC/IEEE 29119-3/5:2022',
-          scope: 'Multi-Dimensional RTM, Test Cases & Executable Automation Parity',
-          status: 'COMPLIANT',
+          standard: 'ISO/IEC/IEEE 29119-3:2021',
+          scope: 'Selaras dengan penataan RTM multi-dimensi & paritas otomatisasi pengujian',
+          status: 'ALIGNED',
         },
         {
           standard: 'ISO/IEC/IEEE 26514:2022',
-          scope: '9-Section Systems & Software User Documentation with Visual Callouts',
-          status: 'COMPLIANT',
+          scope: 'Mengacu pada struktur panduan pengguna 9-bagian dengan visual callout',
+          status: 'ALIGNED',
         },
         {
           standard: 'ISO/IEC 25010:2023',
-          scope: 'Software Product Quality Models & Quality Characteristics',
-          status: 'COMPLIANT',
+          scope: 'Selaras dengan taksonomi karakteristik kualitas produk perangkat lunak',
+          status: 'ALIGNED',
         },
         {
-          standard: 'ISO/IEC 27001:2022 & OWASP API Top 10 (2023)',
-          scope: 'Information Security Governance & Dynamic Application Security Testing',
-          status: 'COMPLIANT',
+          standard: 'ISO/IEC 27001:2022 & OWASP ASVS v4.0',
+          scope: 'Mengacu pada Kontrol A.8 SDLC & pengujian keamanan aplikasi dinamis (DAST)',
+          status: 'ALIGNED',
         },
       ],
       artifactCatalog: [

@@ -17,6 +17,7 @@ import type {
 } from '@/types/sdlc';
 import type { SynthesizedRtmRow } from './rtmSynthesizer';
 import { createCryptographicSeal, verifySeal } from '@/lib/safeCrypto';
+import { ISO_CLAIMS, formatControlCoverage } from '@/lib/isoClaims';
 
 export type RegulatoryFramework = 'UU_PDP' | 'POJK_BI' | 'ISO_27001' | 'PCI_DSS';
 
@@ -59,6 +60,8 @@ export interface ComplianceScorecard {
       total: number;
       passed: number;
       scorePercent: number;
+      coverageDescription: string;
+      scopeNote: string;
     }
   >;
   piiExposureAudit: {
@@ -358,11 +361,18 @@ export class ComplianceBinderService {
     frameworks.forEach((fw) => {
       const fwControls = controls.filter((c) => c.framework === fw);
       const passed = fwControls.filter((c) => c.evidenceStatus === 'VERIFIED_COMPLIANT').length;
+      const claim = ISO_CLAIMS[fw];
+      const standardTotal = claim?.totalStandardControls;
+      const coverageDescription = formatControlCoverage(passed, fwControls.length, standardTotal);
+      const scopeNote = claim?.assessmentNote || `${passed} dari ${fwControls.length} kontrol yang berlaku dinilai`;
+
       frameworkSummary[fw] = {
         name: frameworkNames[fw],
         total: fwControls.length,
         passed,
         scorePercent: fwControls.length > 0 ? Math.round((passed / fwControls.length) * 100) : 100,
+        coverageDescription,
+        scopeNote,
       };
     });
 

@@ -28,6 +28,7 @@ export interface Iso9001DocumentControlSheet {
   versionNumber: string;
   lifecycleStatus: 'APPROVED & RELEASED' | 'IN TECHNICAL REVIEW' | 'WORKING DRAFT';
   classification: string;
+  standardReference?: string;
   effectiveDate: string;
   nextReviewDate: string;
   preparedBy: string;
@@ -207,7 +208,7 @@ export class EnterpriseLibraryPortalService {
         author: state.releaseSignOff?.approvedBy || 'OneSpec Autonomous SDLC Engine',
         modulesAndApisCount: `${modCnt} Modules · ${apiCnt} APIs`,
         qaPassRate: `${passedTests}/${totTests} (${passRate}%)`,
-        changeSummary: 'Baseline ISO 9001 / 29148 / 29119 / 26514 Living Documentation Compilation',
+        changeSummary: 'Baseline Living Documentation Compilation (Mengacu pada ISO 9001 / 29148 / 29119 / 26514)',
       });
     }
 
@@ -218,7 +219,8 @@ export class EnterpriseLibraryPortalService {
       targetUrl,
       versionNumber,
       lifecycleStatus,
-      classification: 'INTERNAL ENTERPRISE CONFIDENTIAL — ISO 9001 / 29148 / 29119 / 26514 CONTROLLED',
+      classification: 'INTERNAL ENTERPRISE CONFIDENTIAL — Mengacu pada Standar ISO 9001 / 29148 / 29119 / 26514',
+      standardReference: 'Mengacu pada prinsip pengendalian informasi terdokumentasi ISO 9001:2015 Klausul 7.5',
       effectiveDate,
       nextReviewDate,
       preparedBy: 'OneSpec Autonomous SDLC Engine & Lead BA/QA/Tech Writer',
