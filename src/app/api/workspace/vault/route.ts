@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
       createSnapshot?: boolean;
       versionLabel?: string;
       signature?: ReleaseAuditSignatureRecord;
+      prerequisites?: import('@/services/workspaceVaultService').ReleaseSignOffPrerequisites;
     };
 
     if (body.action === 'APPEND_AUDIT_SIGNATURE') {
@@ -46,6 +47,27 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+
+      if (body.prerequisites) {
+        const signOffRes = workspaceVaultService.recordReleaseSignOff(
+          body.projectId,
+          body.signature,
+          body.prerequisites
+        );
+        if (!signOffRes.success) {
+          return NextResponse.json(
+            { success: false, error: signOffRes.error },
+            { status: 400 }
+          );
+        }
+        return NextResponse.json({
+          success: true,
+          data: signOffRes.record,
+          certificate: signOffRes.certificate,
+          projects: workspaceVaultService.listProjects(),
+        });
+      }
+
       const saved = workspaceVaultService.appendAuditSignature(body.projectId, body.signature);
       if (!saved) {
         return NextResponse.json(

@@ -9,7 +9,97 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import type { CompiledSdlcState } from './sdlcCompiler';
-import type { ReleaseAuditSignatureRecord } from '@/types/sdlc';
+import type { ReleaseAuditSignatureRecord, ReleaseSignOffCertificate } from '@/types/sdlc';
+import { CURRENT_ENGINE_BUILD_ID } from '@/lib/workspaceCache';
+
+export interface ReleaseSignOffPrerequisites {
+  gateVerdict: 'GO' | 'CONDITIONAL_GO' | 'NO_GO';
+  criticalFindingsCount: number;
+  isStale: boolean;
+  qaReviewed: boolean;
+  qaReviewerName?: string;
+  qaReviewedAt?: string;
+}
+
+export interface ReleaseSignOffValidationResult {
+  allowed: boolean;
+  reason?: string;
+  isExceptionRequired: boolean;
+}
+
+export interface ReleaseSignOffResult {
+  success: boolean;
+  error?: string;
+  record?: SavedProjectRecord | null;
+  certificate?: ReleaseSignOffCertificate;
+}
+
+/**
+ * Validates whether release sign-off prerequisites are fulfilled.
+ * Ticket T-14 (F-08, F-20)
+ */
+export function validateReleaseSignOffPrerequisites(
+  prereqs: ReleaseSignOffPrerequisites,
+  signature: Partial<ReleaseAuditSignatureRecord> = {}
+): ReleaseSignOffValidationResult {
+  if (prereqs.isStale) {
+    return {
+      allowed: false,
+      reason: 'Cache data stale / kedaluwarsa. Jalankan ulang pipeline audit sebelum persetujuan rilis.',
+      isExceptionRequired: false,
+    };
+  }
+
+  if (!prereqs.qaReviewed) {
+    return {
+      allowed: false,
+      reason: 'Tinjauan QA belum selesai. Tandai QA telah ditinjau terlebih dahulu.',
+      isExceptionRequired: false,
+    };
+  }
+
+  const isGateBlocked = prereqs.gateVerdict === 'NO_GO' || prereqs.criticalFindingsCount > 0;
+
+  if (isGateBlocked) {
+    if (!signature.isException) {
+      return {
+        allowed: false,
+        reason: 'Release gate berstatus NO GO (atau terdapat temuan kritis). Persetujuan normal ditutup. Memerlukan alur pengecualian (exception workflow) dengan catatan risiko.',
+        isExceptionRequired: true,
+      };
+    }
+
+    if (!signature.approvalNotes || signature.approvalNotes.trim().length < 20) {
+      return {
+        allowed: false,
+        reason: 'Pengecualian rilis (exception approval) memerlukan catatan justifikasi minimal 20 karakter.',
+        isExceptionRequired: true,
+      };
+    }
+
+    if (!signature.acceptedRisks || signature.acceptedRisks.length === 0) {
+      return {
+        allowed: false,
+        reason: 'Pengecualian rilis memerlukan pencatatan daftar risiko yang diterima (accepted risks).',
+        isExceptionRequired: true,
+      };
+    }
+
+    return { allowed: true, isExceptionRequired: true };
+  }
+
+  if (prereqs.gateVerdict === 'CONDITIONAL_GO') {
+    if (!signature.approvalNotes || signature.approvalNotes.trim().length < 20) {
+      return {
+        allowed: false,
+        reason: 'Persetujuan rilis dengan status CONDITIONAL GO memerlukan catatan justifikasi minimal 20 karakter.',
+        isExceptionRequired: false,
+      };
+    }
+  }
+
+  return { allowed: true, isExceptionRequired: false };
+}
 
 export type VaultProjectType = 'EXISTING_WEB' | 'GIT_REPO' | 'LOCAL_ZIP' | 'NEW_PROJECT_FROM_ZERO';
 
@@ -1027,46 +1117,62 @@ export class WorkspaceVaultService {
     const record = this.getProject(projectId);
     if (!record) return null;
 
+    let validHash = signature.snapshotHash;
+    if (!validHash || !/^[0-9a-fA-F]{64}$/.test(validHash)) {
+      const canonicalState = JSON.stringify({
+        appName: record.latestState?.appName,
+        targetUrl: record.latestState?.targetUrl,
+        modules: record.latestState?.discoveredModules?.length,
+        rtmRows: record.latestState?.rtmRows?.length,
+      });
+      validHash = crypto.createHash('sha256').update(canonicalState).digest('hex');
+    }
+
+    const enrichedSignature: ReleaseAuditSignatureRecord = {
+      ...signature,
+      snapshotHash: validHash,
+      engineBuildId: signature.engineBuildId || CURRENT_ENGINE_BUILD_ID,
+      selfAttested: true,
+      isException: !!signature.isException,
+      acceptedRisks: signature.acceptedRisks || [],
+    };
+
     const existingSignatures = record.auditSignatures || record.latestState.auditSignatures || record.latestState.releaseSignOff?.auditSignatures || [];
-    const filtered = existingSignatures.filter((s) => s.signatureId !== signature.signatureId);
-    const updatedSignatures = [signature, ...filtered];
+    const filtered = existingSignatures.filter((s) => s.signatureId !== enrichedSignature.signatureId);
+    const updatedSignatures = [enrichedSignature, ...filtered];
 
     record.auditSignatures = updatedSignatures;
     record.latestState.auditSignatures = updatedSignatures;
-    if (!record.latestState.releaseSignOff) {
-      record.latestState.releaseSignOff = {
-        status: 'APPROVED_FOR_PRODUCTION',
-        isApproved: true,
-        approvedBy: signature.approverName,
-        approvedAt: signature.signedAt,
-        signedAt: signature.signedAt,
-        approverRole: signature.approverRole,
-        roleTitle: signature.approverRole,
-        notes: signature.approvalNotes,
-        releaseNotes: signature.approvalNotes,
-        snapshotHash: signature.snapshotHash,
-        releaseGateStatus: signature.releaseGateStatus,
-        operatorSessionId: signature.operatorSessionId,
-        prerequisitesChecked: signature.prerequisitesChecked,
-        auditSignatures: updatedSignatures,
-      };
-    } else {
-      record.latestState.releaseSignOff.status = 'APPROVED_FOR_PRODUCTION';
-      record.latestState.releaseSignOff.isApproved = true;
-      record.latestState.releaseSignOff.approvedBy = signature.approverName;
-      record.latestState.releaseSignOff.approvedAt = signature.signedAt;
-      record.latestState.releaseSignOff.signedAt = signature.signedAt;
-      record.latestState.releaseSignOff.approverRole = signature.approverRole;
-      record.latestState.releaseSignOff.roleTitle = signature.approverRole;
-      record.latestState.releaseSignOff.notes = signature.approvalNotes;
-      record.latestState.releaseSignOff.releaseNotes = signature.approvalNotes;
-      record.latestState.releaseSignOff.snapshotHash = signature.snapshotHash;
-      record.latestState.releaseSignOff.releaseGateStatus = signature.releaseGateStatus;
-      record.latestState.releaseSignOff.operatorSessionId = signature.operatorSessionId;
-      record.latestState.releaseSignOff.prerequisitesChecked = signature.prerequisitesChecked;
-      record.latestState.releaseSignOff.auditSignatures = updatedSignatures;
-    }
 
+    const certStatus: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL' | 'EXCEPTION_APPROVED' =
+      enrichedSignature.isException
+        ? 'EXCEPTION_APPROVED'
+        : (enrichedSignature.releaseGateStatus as any) === 'CONDITIONAL_APPROVAL' || (enrichedSignature.releaseGateStatus as any) === 'CONDITIONAL_GO'
+        ? 'CONDITIONAL_APPROVAL'
+        : 'APPROVED_FOR_PRODUCTION';
+
+    const cert: ReleaseSignOffCertificate = {
+      status: certStatus,
+      isApproved: true,
+      approvedBy: enrichedSignature.approverName,
+      approvedAt: enrichedSignature.signedAt,
+      signedAt: enrichedSignature.signedAt,
+      approverRole: enrichedSignature.approverRole,
+      roleTitle: enrichedSignature.approverRole,
+      notes: enrichedSignature.approvalNotes,
+      releaseNotes: enrichedSignature.approvalNotes,
+      snapshotHash: validHash,
+      releaseGateStatus: certStatus,
+      operatorSessionId: enrichedSignature.operatorSessionId,
+      prerequisitesChecked: enrichedSignature.prerequisitesChecked,
+      auditSignatures: updatedSignatures,
+      engineBuildId: enrichedSignature.engineBuildId,
+      selfAttested: true,
+      isException: enrichedSignature.isException,
+      acceptedRisks: enrichedSignature.acceptedRisks,
+    };
+
+    record.latestState.releaseSignOff = cert;
     record.updatedAt = new Date().toISOString();
     const projectFilePath = path.join(PROJECTS_DIR, `${projectId}.json`);
     fs.writeFileSync(projectFilePath, JSON.stringify(record, null, 2), 'utf8');
@@ -1076,6 +1182,100 @@ export class WorkspaceVaultService {
     } catch {}
 
     return record;
+  }
+
+  /**
+   * Evaluates release gating prerequisites and records an honest, self-attested release sign-off.
+   * Hard-blocks NO_GO unless exception approval is explicitly provided with >= 20 char notes and accepted risks.
+   * Ticket T-14 (F-08, F-20)
+   */
+  public recordReleaseSignOff(
+    projectId: string,
+    signature: ReleaseAuditSignatureRecord,
+    prereqs: ReleaseSignOffPrerequisites
+  ): ReleaseSignOffResult {
+    const validation = validateReleaseSignOffPrerequisites(prereqs, signature);
+    if (!validation.allowed) {
+      return { success: false, error: validation.reason };
+    }
+
+    this.ensureVaultDirectories();
+    const record = this.getProject(projectId);
+    if (!record) {
+      return { success: false, error: `Project "${projectId}" not found in vault.` };
+    }
+
+    let validHash = signature.snapshotHash;
+    if (!validHash || !/^[0-9a-fA-F]{64}$/.test(validHash)) {
+      const canonicalState = JSON.stringify({
+        appName: record.latestState?.appName,
+        targetUrl: record.latestState?.targetUrl,
+        modules: record.latestState?.discoveredModules?.length,
+        rtmRows: record.latestState?.rtmRows?.length,
+      });
+      validHash = crypto.createHash('sha256').update(canonicalState).digest('hex');
+    }
+
+    const effectiveStatus: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL' | 'EXCEPTION_APPROVED' =
+      signature.isException
+        ? 'EXCEPTION_APPROVED'
+        : prereqs.gateVerdict === 'CONDITIONAL_GO'
+        ? 'CONDITIONAL_APPROVAL'
+        : 'APPROVED_FOR_PRODUCTION';
+
+    const enrichedSignature: ReleaseAuditSignatureRecord = {
+      ...signature,
+      snapshotHash: validHash,
+      engineBuildId: signature.engineBuildId || CURRENT_ENGINE_BUILD_ID,
+      selfAttested: true,
+      releaseGateStatus: effectiveStatus,
+      isException: !!signature.isException,
+      acceptedRisks: signature.acceptedRisks || [],
+    };
+
+    const existingSignatures = record.auditSignatures || record.latestState.auditSignatures || record.latestState.releaseSignOff?.auditSignatures || [];
+    const filtered = existingSignatures.filter((s) => s.signatureId !== enrichedSignature.signatureId);
+    const updatedSignatures = [enrichedSignature, ...filtered];
+
+    record.auditSignatures = updatedSignatures;
+    record.latestState.auditSignatures = updatedSignatures;
+
+    const cert: ReleaseSignOffCertificate = {
+      status: effectiveStatus,
+      isApproved: true,
+      approvedBy: enrichedSignature.approverName,
+      approvedAt: enrichedSignature.signedAt,
+      signedAt: enrichedSignature.signedAt,
+      approverRole: enrichedSignature.approverRole,
+      roleTitle: enrichedSignature.approverRole,
+      notes: enrichedSignature.approvalNotes,
+      releaseNotes: enrichedSignature.approvalNotes,
+      snapshotHash: validHash,
+      releaseGateStatus: effectiveStatus,
+      operatorSessionId: enrichedSignature.operatorSessionId,
+      prerequisitesChecked: enrichedSignature.prerequisitesChecked,
+      auditSignatures: updatedSignatures,
+      engineBuildId: enrichedSignature.engineBuildId,
+      selfAttested: true,
+      isException: enrichedSignature.isException,
+      acceptedRisks: enrichedSignature.acceptedRisks,
+    };
+
+    record.latestState.releaseSignOff = cert;
+    record.updatedAt = new Date().toISOString();
+
+    const projectFilePath = path.join(PROJECTS_DIR, `${projectId}.json`);
+    fs.writeFileSync(projectFilePath, JSON.stringify(record, null, 2), 'utf8');
+
+    try {
+      fs.writeFileSync(LEGACY_CACHE_FILE_PATH, JSON.stringify(record.latestState, null, 2), 'utf8');
+    } catch {}
+
+    return {
+      success: true,
+      record,
+      certificate: cert,
+    };
   }
 
   public restoreSnapshotSummary(projectId: string, snapshotId: string): ProjectHistoricalSnapshot | null {

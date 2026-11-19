@@ -513,20 +513,26 @@ export interface ReleaseAuditSignatureRecord {
   approverName: string;
   approverRole: string;
   signedAt: string; // ISO-8601
-  snapshotHash: string; // SHA-256
+  snapshotHash: string; // SHA-256 (64 hex characters)
+  engineBuildId?: string;
+  selfAttested?: boolean;
   releaseGateStatus: string;
   approvalNotes: string;
   operatorSessionId?: string;
   prerequisitesChecked: string[];
+  isException?: boolean;
+  acceptedRisks?: string[];
 }
 
 export interface ReleaseSignOffCertificate {
-  status: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL';
+  status: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL' | 'EXCEPTION_APPROVED';
   approvedBy: string;
   roleTitle: string;
   releaseNotes: string;
   signedAt: string;
   snapshotHash?: string;
+  engineBuildId?: string;
+  selfAttested?: boolean;
   releaseGateStatus?: string;
   prerequisitesChecked?: string[];
   operatorSessionId?: string;
@@ -535,6 +541,8 @@ export interface ReleaseSignOffCertificate {
   approvedAt?: string;
   approverRole?: string;
   notes?: string;
+  isException?: boolean;
+  acceptedRisks?: string[];
 }
 
 export interface FeatureModuleSurface {

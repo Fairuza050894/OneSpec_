@@ -28,7 +28,15 @@ import {
   Camera,
   Zap,
   Plus,
+  ShieldAlert,
+  ShieldCheck,
+  UserCheck,
+  Edit2,
+  XCircle,
+  Info,
 } from 'lucide-react';
+import { loadLocalUserProfile, saveLocalUserProfile, type LocalUserProfile } from '@/lib/userProfile';
+import { CURRENT_ENGINE_BUILD_ID } from '@/lib/workspaceCache';
 import {
   sdlcKnowledgeGraphService,
   type KnowledgeGraphSummary,
@@ -60,7 +68,7 @@ import type { SmtFormalVerificationSummary } from '@/services/smtFormalVerifierS
 import type { DelphiConsensusSummary } from '@/services/delphiConsensusService';
 import { architectureDeconstructorService, type DeconstructedArchitecture } from '@/services/architectureDeconstructor';
 import { unifiedReportGenerator } from '@/services/unifiedReportGenerator';
-import type { CompiledSdlcState } from '@/services/sdlcCompiler';
+import { computeUnifiedQualityMetrics, type CompiledSdlcState } from '@/services/sdlcCompiler';
 import { VerifiedArchitectureMapCanvas } from '@/components/architecture/VerifiedArchitectureMapCanvas';
 import type { RegressionDiffSummary } from '@/services/workspaceVaultService';
 import { changeImpactService, type ChangeImpactAnalysisReport } from '@/services/changeImpactService';
@@ -208,14 +216,58 @@ export function UniversalKnowledgeGraphWorkbench({
     }
     return `OP-${Date.now().toString(36).toUpperCase()}`;
   });
-  const [signOffApprover, setSignOffApprover] = useState<string>(compiledState?.releaseSignOff?.approvedBy || 'Principal Lead Architect');
-  const [signOffRole, setSignOffRole] = useState<string>(
-    compiledState?.releaseSignOff?.approverRole || compiledState?.releaseSignOff?.roleTitle || 'Lead Systems Architect'
-  );
+  const [localProfile, setLocalProfile] = useState<LocalUserProfile>(() => loadLocalUserProfile());
+  const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
+  const [profileNameInput, setProfileNameInput] = useState<string>(() => loadLocalUserProfile().name);
+  const [profileRoleInput, setProfileRoleInput] = useState<string>(() => loadLocalUserProfile().role);
+  const [profileEmailInput, setProfileEmailInput] = useState<string>(() => loadLocalUserProfile().email || '');
+
   const [signOffNotes, setSignOffNotes] = useState<string>(compiledState?.releaseSignOff?.notes || compiledState?.releaseSignOff?.releaseNotes || '');
-  const [chkQaGapReviewed, setChkQaGapReviewed] = useState<boolean>(true);
-  const [chkZeroCriticalSec, setChkZeroCriticalSec] = useState<boolean>(true);
   const [isSigning, setIsSigning] = useState<boolean>(false);
+  const [signOffError, setSignOffError] = useState<string | null>(null);
+
+  // QA Review explicit action (T-14: F-08, F-20)
+  const [qaReviewed, setQaReviewed] = useState<boolean>(() => {
+    return !!compiledState?.releaseSignOff?.prerequisitesChecked?.includes('QA_AND_GAP_AUDIT_REVIEWED');
+  });
+  const [qaReviewInfo, setQaReviewInfo] = useState<{ name: string; timestamp: string } | null>(() => {
+    if (compiledState?.releaseSignOff?.prerequisitesChecked?.includes('QA_AND_GAP_AUDIT_REVIEWED')) {
+      return {
+        name: compiledState?.releaseSignOff?.approvedBy || 'QA Lead',
+        timestamp: compiledState?.releaseSignOff?.signedAt || new Date().toISOString(),
+      };
+    }
+    return null;
+  });
+
+  // Exception workflow state
+  const [showExceptionModal, setShowExceptionModal] = useState<boolean>(false);
+  const [exceptionJustification, setExceptionJustification] = useState<string>('');
+  const [acceptedRisks, setAcceptedRisks] = useState<string[]>([
+    'Known critical finding documented in issue tracker with scheduled sprint remediation',
+    'Deployment restricted to isolated staging/canary environment with continuous monitoring',
+  ]);
+  const [customRiskInput, setCustomRiskInput] = useState<string>('');
+
+  const qualityMetrics = useMemo(() => {
+    return computeUnifiedQualityMetrics(compiledState);
+  }, [compiledState]);
+
+  const gateVerdict: 'GO' | 'CONDITIONAL_GO' | 'NO_GO' = useMemo(() => {
+    if (qualityMetrics.releaseGateStatus === 'PRODUCTION_GO') return 'GO';
+    if (qualityMetrics.releaseGateStatus === 'CONDITIONAL_GO') return 'CONDITIONAL_GO';
+    return 'NO_GO';
+  }, [qualityMetrics]);
+
+  const criticalFindingsCount = useMemo(() => {
+    const dastCount = owaspDastSummary?.vulnerabilitiesCount?.critical || 0;
+    const gapCount = (gapAuditItems || []).filter((i) => i.severity === 'CRITICAL').length;
+    return dastCount + gapCount;
+  }, [owaspDastSummary, gapAuditItems]);
+
+  const isGateBlocked = gateVerdict === 'NO_GO' || criticalFindingsCount > 0;
+  const isConditional = gateVerdict === 'CONDITIONAL_GO' && !isGateBlocked;
+  const isPureGo = gateVerdict === 'GO' && criticalFindingsCount === 0;
   const [copiedSdk, setCopiedSdk] = useState<boolean>(false);
 
   const handleCopySdk = () => {
@@ -897,165 +949,628 @@ export function UniversalKnowledgeGraphWorkbench({
                 </div>
               </div>
 
-              {/* Operator Identity & Role Inputs */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-2">
-                <div className="md:col-span-3">
-                  <label className="text-[10px] text-[#707070] uppercase font-bold block mb-1">
-                    {locale === 'id' ? 'Nama Operator / Approver *' : 'Operator / Approver Name *'}
-                  </label>
-                  <input
-                    type="text"
-                    value={signOffApprover}
-                    onChange={(e) => setSignOffApprover(e.target.value)}
-                    placeholder={locale === 'id' ? 'mis. Budi Santoso' : 'e.g. John Doe'}
-                    className="w-full h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
-                  />
-                </div>
-                <div className="md:col-span-3">
-                  <label className="text-[10px] text-[#707070] uppercase font-bold block mb-1">
-                    {locale === 'id' ? 'Peran / Jabatan Otoritas *' : 'Authority Role *'}
-                  </label>
-                  <select
-                    value={signOffRole}
-                    onChange={(e) => setSignOffRole(e.target.value)}
-                    className="w-full h-8 px-2 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none cursor-pointer"
+              {/* Operator Identity & Self-Attestation (T-14: F-08, F-20) */}
+              <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[4px] space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="h-4 w-4 text-[#3B82F6]" />
+                    <span className="font-bold text-[#EDEDED] text-[11px]">
+                      {locale === 'id' ? 'Identitas Operator / Approver' : 'Operator / Approver Identity'}
+                    </span>
+                    <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold rounded-[2px] text-[9px] flex items-center gap-1">
+                      <ShieldAlert className="h-3 w-3" />
+                      self-attested (bukan tanda tangan non-repudiation)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isEditingProfile) {
+                        setProfileNameInput(localProfile.name);
+                        setProfileRoleInput(localProfile.role);
+                        setProfileEmailInput(localProfile.email || '');
+                      }
+                      setIsEditingProfile(!isEditingProfile);
+                    }}
+                    className="px-2 py-1 bg-[#1F2937] hover:bg-[#374151] text-[#E5E7EB] rounded-[3px] text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
                   >
-                    <option value="Lead Systems Architect">Lead Systems Architect</option>
-                    <option value="Lead QA / SDET">Lead QA / SDET</option>
-                    <option value="Release Manager">Release Manager</option>
-                    <option value="DevSecOps Lead">DevSecOps Lead</option>
-                    <option value="Compliance / GRC Officer">Compliance / GRC Officer</option>
-                  </select>
+                    <Edit2 className="h-3 w-3" />
+                    <span>{isEditingProfile ? (locale === 'id' ? 'Tutup Editor' : 'Close Editor') : (locale === 'id' ? 'Ubah Profil' : 'Edit Profile')}</span>
+                  </button>
                 </div>
-                <div className="md:col-span-6">
-                  <label className="text-[10px] text-[#707070] uppercase font-bold block mb-1">
-                    {locale === 'id' ? 'Catatan & Justifikasi Persetujuan' : 'Approval Justification Notes'}
-                  </label>
+
+                {!isEditingProfile ? (
+                  <div className="flex flex-wrap items-center gap-3 text-[11px]">
+                    <div className="text-[#EDEDED]">
+                      <span className="text-[#707070] mr-1.5">{locale === 'id' ? 'Nama:' : 'Name:'}</span>
+                      <strong className={localProfile.name ? 'text-[#EDEDED]' : 'text-rose-400 italic'}>
+                        {localProfile.name || (locale === 'id' ? '(Nama belum diatur)' : '(Name not configured)')}
+                      </strong>
+                    </div>
+                    <div className="text-[#EDEDED]">
+                      <span className="text-[#707070] mr-1.5">{locale === 'id' ? 'Peran / Jabatan:' : 'Role:'}</span>
+                      <span className="text-[#9CA3AF] font-bold">{localProfile.role}</span>
+                    </div>
+                    {localProfile.email && (
+                      <div className="text-[#60A5FA] text-[10px]">
+                        <span className="text-[#707070] mr-1.5">Email:</span>
+                        {localProfile.email}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-2.5 bg-[#16191F] border border-[#2B303B] rounded-[3px] grid grid-cols-1 md:grid-cols-12 gap-2">
+                    <div className="md:col-span-4">
+                      <label className="text-[10px] text-[#A1A1A1] uppercase font-bold block mb-1">
+                        {locale === 'id' ? 'Nama Operator *' : 'Operator Name *'}
+                      </label>
+                      <input
+                        type="text"
+                        value={profileNameInput}
+                        onChange={(e) => setProfileNameInput(e.target.value)}
+                        placeholder="mis. Budi Santoso"
+                        className="w-full h-7 px-2 bg-[#0B0C0E] border border-[#374151] text-[#EDEDED] rounded-[2px] outline-none text-[11px]"
+                      />
+                    </div>
+                    <div className="md:col-span-4">
+                      <label className="text-[10px] text-[#A1A1A1] uppercase font-bold block mb-1">
+                        {locale === 'id' ? 'Peran / Jabatan Otoritas *' : 'Authority Role *'}
+                      </label>
+                      <select
+                        value={profileRoleInput}
+                        onChange={(e) => setProfileRoleInput(e.target.value)}
+                        className="w-full h-7 px-2 bg-[#0B0C0E] border border-[#374151] text-[#EDEDED] rounded-[2px] outline-none text-[11px] cursor-pointer"
+                      >
+                        <option value="Lead Systems Architect">Lead Systems Architect</option>
+                        <option value="Lead QA / SDET">Lead QA / SDET</option>
+                        <option value="Release Manager">Release Manager</option>
+                        <option value="DevSecOps Lead">DevSecOps Lead</option>
+                        <option value="Compliance / GRC Officer">Compliance / GRC Officer</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-4">
+                      <label className="text-[10px] text-[#A1A1A1] uppercase font-bold block mb-1">
+                        Email (Opsional)
+                      </label>
+                      <input
+                        type="email"
+                        value={profileEmailInput}
+                        onChange={(e) => setProfileEmailInput(e.target.value)}
+                        placeholder="operator@company.com"
+                        className="w-full h-7 px-2 bg-[#0B0C0E] border border-[#374151] text-[#EDEDED] rounded-[2px] outline-none text-[11px]"
+                      />
+                    </div>
+                    <div className="md:col-span-12 flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingProfile(false)}
+                        className="px-2.5 py-1 text-[#9CA3AF] hover:text-[#EDEDED] text-[10px] cursor-pointer"
+                      >
+                        {locale === 'id' ? 'Batal' : 'Cancel'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const saved = saveLocalUserProfile({
+                            name: profileNameInput.trim(),
+                            role: profileRoleInput.trim() || 'Lead Systems Architect',
+                            email: profileEmailInput.trim() || undefined,
+                          });
+                          setLocalProfile(saved);
+                          setIsEditingProfile(false);
+                        }}
+                        disabled={!profileNameInput.trim()}
+                        className={`px-3 py-1 text-white font-bold rounded-[2px] text-[10px] ${
+                          profileNameInput.trim() ? 'bg-blue-600 hover:bg-blue-500 cursor-pointer' : 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {locale === 'id' ? 'Simpan Profil' : 'Save Profile'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!localProfile.name.trim() && (
+                  <div className="p-1.5 bg-rose-500/10 border border-rose-500/30 rounded-[2px] text-rose-300 text-[10px] flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                    <span>
+                      {locale === 'id'
+                        ? 'Nama operator wajib diisi sebelum menyetujui rilis produksi. Klik "Ubah Profil" di atas.'
+                        : 'Operator name is required before approving release. Click "Edit Profile" above.'}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Gating Prerequisites (Evaluasi Otomatis & Terverifikasi) */}
+              <div className="p-3 bg-[#0B0C0E] border border-[#22262E] rounded-[4px] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#A1A1A1] uppercase tracking-wider text-[10px]">
+                    {locale === 'id' ? 'Prasyarat Gating (Evaluasi Otomatis):' : 'Gating Prerequisites (Automated Check):'}
+                  </span>
+                  <span className="text-[10px] text-[#707070] font-mono">
+                    Engine Build: <strong className="text-[#EDEDED]">{CURRENT_ENGINE_BUILD_ID}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2 text-[10px]">
+                  {/* Gate Verdict */}
+                  <div className={`p-2 rounded-[3px] border flex flex-col justify-between gap-1 ${
+                    gateVerdict === 'GO'
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : gateVerdict === 'CONDITIONAL_GO'
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
+                    <div className="font-bold uppercase tracking-wider text-[9px] opacity-80">
+                      Release Gate Status
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold text-[11px]">
+                      {gateVerdict === 'GO' ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>GO (Lolos)</span>
+                        </>
+                      ) : gateVerdict === 'CONDITIONAL_GO' ? (
+                        <>
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          <span>CONDITIONAL GO</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-3.5 w-3.5 shrink-0" />
+                          <span>NO GO (Tertutup)</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Critical Security Findings */}
+                  <div className={`p-2 rounded-[3px] border flex flex-col justify-between gap-1 ${
+                    criticalFindingsCount === 0
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  }`}>
+                    <div className="font-bold uppercase tracking-wider text-[9px] opacity-80">
+                      Temuan Keamanan Kritis
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold text-[11px]">
+                      {criticalFindingsCount === 0 ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>0 Temuan Kritis</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-3.5 w-3.5 shrink-0" />
+                          <span>{criticalFindingsCount} Temuan Kritis</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Cache Currency */}
+                  <div className={`p-2 rounded-[3px] border flex flex-col justify-between gap-1 ${
+                    !isStale
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  }`}>
+                    <div className="font-bold uppercase tracking-wider text-[9px] opacity-80">
+                      Status Cache State
+                    </div>
+                    <div className="flex items-center gap-1.5 font-bold text-[11px]">
+                      {!isStale ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>Cache Mutakhir</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          <span>Cache Basi (Jalankan Ulang)</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* QA & Gap Audit Review */}
+                  <div className={`p-2 rounded-[3px] border flex flex-col justify-between gap-1 ${
+                    qaReviewed
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                  }`}>
+                    <div className="font-bold uppercase tracking-wider text-[9px] opacity-80">
+                      Tinjauan QA & Gap Audit
+                    </div>
+                    <div className="flex items-center justify-between gap-1">
+                      {qaReviewed ? (
+                        <div className="flex items-center gap-1.5 font-bold text-[11px]">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span>Ditinjau ({qaReviewInfo?.name || localProfile.name || 'QA'})</span>
+                        </div>
+                      ) : (
+                        <>
+                          <span className="italic text-[#9CA3AF]">Belum Ditinjau</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const reviewerName = localProfile.name.trim() || 'QA Lead';
+                              const reviewedAt = new Date().toISOString();
+                              setQaReviewed(true);
+                              setQaReviewInfo({ name: reviewerName, timestamp: reviewedAt });
+                            }}
+                            className="px-2 py-0.5 bg-blue-600 hover:bg-blue-500 text-white rounded-[2px] text-[9px] font-bold cursor-pointer transition-colors"
+                          >
+                            Tandai Ditinjau
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Justification & Notes Input */}
+                <div className="pt-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] text-[#707070] uppercase font-bold block">
+                      {locale === 'id' ? 'Catatan & Justifikasi Persetujuan' : 'Approval Justification Notes'}
+                      {isConditional && <span className="text-amber-400 ml-1">(* Wajib minimal 20 karakter untuk CONDITIONAL GO)</span>}
+                    </label>
+                    {isConditional && (
+                      <span className={`text-[10px] font-mono ${signOffNotes.trim().length >= 20 ? 'text-emerald-400 font-bold' : 'text-amber-400'}`}>
+                        {signOffNotes.trim().length} / 20 karakter
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={signOffNotes}
                     onChange={(e) => setSignOffNotes(e.target.value)}
-                    placeholder={locale === 'id' ? 'Catatan persetujuan rilis produksi...' : 'Release sign-off notes...'}
-                    className="w-full h-8 px-2.5 bg-[#0B0C0E] border border-[#22262E] text-[#EDEDED] rounded-[3px] outline-none select-text"
+                    placeholder={
+                      isConditional
+                        ? 'Catatan justifikasi conditional approval (min. 20 karakter)...'
+                        : locale === 'id'
+                        ? 'Catatan persetujuan rilis produksi...'
+                        : 'Release sign-off notes...'
+                    }
+                    className="w-full h-8 px-2.5 bg-[#16191F] border border-[#2B303B] text-[#EDEDED] rounded-[3px] outline-none select-text text-[11px]"
                   />
                 </div>
-              </div>
 
-              {/* Gating Prerequisites Checklist */}
-              <div className="p-2.5 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-4 text-[10px]">
-                  <span className="font-bold text-[#A1A1A1] uppercase tracking-wider">
-                    {locale === 'id' ? 'Prasyarat Gating:' : 'Gating Prerequisites:'}
-                  </span>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-[#EDEDED] hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={chkQaGapReviewed}
-                      onChange={(e) => setChkQaGapReviewed(e.target.checked)}
-                      className="rounded bg-[#16191F] border-[#22262E] text-[#10B981] focus:ring-0"
-                    />
-                    <span>{locale === 'id' ? 'Metrik QA & Gap Audit telah ditinjau' : 'QA Metrics & Gap Audit Reviewed'}</span>
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer text-[#EDEDED] hover:text-white">
-                    <input
-                      type="checkbox"
-                      checked={chkZeroCriticalSec}
-                      onChange={(e) => setChkZeroCriticalSec(e.target.checked)}
-                      className="rounded bg-[#16191F] border-[#22262E] text-[#10B981] focus:ring-0"
-                    />
-                    <span>{locale === 'id' ? 'Temuan keamanan kritis = 0' : 'Critical Security Findings = 0'}</span>
-                  </label>
-                </div>
-
-                {isStale && (
-                  <div className="p-2 mb-2 bg-amber-500/10 border border-amber-500/30 rounded-[3px] text-amber-300 text-[11px] font-mono flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
-                    <span>
-                      {locale === 'id'
-                        ? 'Persetujuan rilis nonaktif karena data dikompilasi dengan engine lama (basi). Jalankan ulang pipeline terlebih dahulu.'
-                        : 'Release sign-off is disabled because data was compiled with an older engine (stale). Please re-run the pipeline first.'}
-                    </span>
+                {signOffError && (
+                  <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded-[3px] text-rose-300 text-[11px] flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                    <span>{signOffError}</span>
                   </div>
                 )}
 
-                <button
-                  type="button"
-                  disabled={!signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning || isStale}
-                  title={
-                    isStale
-                      ? locale === 'id'
-                        ? 'Nonaktif: Data dikompilasi dengan engine lama (basi). Jalankan ulang pipeline.'
-                        : 'Disabled: Stale compiled data. Re-run pipeline.'
-                      : undefined
-                  }
-                  onClick={async () => {
-                    setIsSigning(true);
-                    try {
-                      const hashPayload = canonicalJson({
-                        appName: compiledState?.appName,
-                        targetUrl: compiledState?.targetUrl,
-                        totalCases: compiledState?.rtmRows?.length,
-                        modules: compiledState?.discoveredModules?.length,
-                        apis: compiledState?.discoveryResult?.apiEndpoints?.length,
-                      });
-                      const snapshotHash = sha256Hex(hashPayload);
+                {/* Sign-Off Action Bar */}
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-[#22262E]">
+                  <div className="text-[10px] text-[#707070]">
+                    {isGateBlocked ? (
+                      <span className="text-rose-400 font-semibold">
+                        {locale === 'id'
+                          ? 'Gate NO GO: Persetujuan reguler ditutup. Memerlukan alur pengecualian (Exception Approval).'
+                          : 'Gate NO GO: Regular approval closed. Requires formal exception workflow.'}
+                      </span>
+                    ) : isConditional ? (
+                      <span className="text-amber-400">
+                        {locale === 'id'
+                          ? 'Gate CONDITIONAL GO: Diizinkan dengan catatan justifikasi tertulis minimal 20 karakter.'
+                          : 'Gate CONDITIONAL GO: Allowed with justification note of at least 20 characters.'}
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 font-semibold">
+                        {locale === 'id'
+                          ? 'Gate GO: Seluruh prasyarat terpenuhi. Siap dikunci untuk rilis produksi.'
+                          : 'Gate GO: All prerequisites satisfied. Ready to lock for production release.'}
+                      </span>
+                    )}
+                  </div>
 
-                      const nowIso = new Date().toISOString();
-                      const prereqs: string[] = [];
-                      if (chkQaGapReviewed) prereqs.push('QA_AND_GAP_AUDIT_REVIEWED');
-                      if (chkZeroCriticalSec) prereqs.push('ZERO_CRITICAL_SECURITY_FINDINGS');
+                  <div className="flex items-center gap-2">
+                    {/* Exception Action (Only visible when Gate is Blocked) */}
+                    {isGateBlocked && (
+                      <button
+                        type="button"
+                        onClick={() => setShowExceptionModal(true)}
+                        className="h-8 px-3.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 font-bold rounded-[3px] text-[11px] flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+                        <span>{locale === 'id' ? 'Ajukan Pengecualian Rilis (Exception)' : 'Request Release Exception'}</span>
+                      </button>
+                    )}
 
-                      const newSig: ReleaseAuditSignatureRecord = {
-                        signatureId: `SIG-${Date.now()}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase() : Date.now().toString(36).toUpperCase()}`,
-                        approverName: signOffApprover.trim(),
-                        approverRole: signOffRole,
-                        signedAt: nowIso,
-                        snapshotHash,
-                        releaseGateStatus: 'APPROVED_FOR_PRODUCTION',
-                        approvalNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
-                        operatorSessionId,
-                        prerequisitesChecked: prereqs,
-                      };
+                    {/* Standard Sign-Off Button */}
+                    <button
+                      type="button"
+                      disabled={
+                        !localProfile.name.trim() ||
+                        !qaReviewed ||
+                        isStale ||
+                        isSigning ||
+                        isGateBlocked ||
+                        (isConditional && signOffNotes.trim().length < 20)
+                      }
+                      title={
+                        isStale
+                          ? 'Data cache stale / basi. Jalankan ulang pipeline audit.'
+                          : !qaReviewed
+                          ? 'Tinjau QA & Gap Audit terlebih dahulu.'
+                          : !localProfile.name.trim()
+                          ? 'Nama operator wajib diisi.'
+                          : isGateBlocked
+                          ? 'Release Gate NO GO. Gunakan alur pengecualian.'
+                          : isConditional && signOffNotes.trim().length < 20
+                          ? 'Catatan justifikasi minimal 20 karakter dibutuhkan.'
+                          : undefined
+                      }
+                      onClick={async () => {
+                        setSignOffError(null);
+                        setIsSigning(true);
+                        try {
+                          const hashPayload = canonicalJson({
+                            appName: compiledState?.appName,
+                            targetUrl: compiledState?.targetUrl,
+                            totalCases: compiledState?.rtmRows?.length,
+                            modules: compiledState?.discoveredModules?.length,
+                            apis: compiledState?.discoveryResult?.apiEndpoints?.length,
+                          });
+                          const snapshotHash = sha256Hex(hashPayload);
+                          const nowIso = new Date().toISOString();
+                          const prereqs: string[] = ['QA_AND_GAP_AUDIT_REVIEWED'];
+                          if (criticalFindingsCount === 0) prereqs.push('ZERO_CRITICAL_SECURITY_FINDINGS');
 
-                      const existingSigs = compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || [];
-                      const updatedSigs = [newSig, ...existingSigs];
+                          const statusVal: 'APPROVED_FOR_PRODUCTION' | 'CONDITIONAL_APPROVAL' =
+                            isConditional ? 'CONDITIONAL_APPROVAL' : 'APPROVED_FOR_PRODUCTION';
 
-                      onApproveReleaseSignOff?.({
-                        isApproved: true,
-                        status: 'APPROVED_FOR_PRODUCTION',
-                        approvedBy: signOffApprover.trim(),
-                        approverRole: signOffRole,
-                        roleTitle: signOffRole,
-                        notes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
-                        releaseNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
-                        approvedAt: nowIso,
-                        signedAt: nowIso,
-                        snapshotHash,
-                        releaseGateStatus: 'APPROVED_FOR_PRODUCTION',
-                        operatorSessionId,
-                        prerequisitesChecked: prereqs,
-                        auditSignatures: updatedSigs,
-                      });
-                    } finally {
-                      setIsSigning(false);
-                    }
-                  }}
-                  className={`h-8 px-4 rounded-[3px] font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors ${
-                    !signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning || isStale
-                      ? 'bg-[#1E293B] text-[#64748B] cursor-not-allowed border border-[#334155]'
-                      : 'bg-[#059669] hover:bg-[#047857] text-white cursor-pointer'
-                  }`}
-                >
-                  <Check className="h-3.5 w-3.5" />
-                  <span>
-                    {isSigning
-                      ? 'Signing SHA-256...'
-                      : locale === 'id'
-                      ? 'Kunci & Setujui Rilis'
-                      : 'Lock Release Sign-Off'}
-                  </span>
-                </button>
+                          const newSig: ReleaseAuditSignatureRecord = {
+                            signatureId: `SIG-${Date.now()}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase() : Date.now().toString(36).toUpperCase()}`,
+                            approverName: localProfile.name.trim(),
+                            approverRole: localProfile.role,
+                            signedAt: nowIso,
+                            snapshotHash,
+                            engineBuildId: CURRENT_ENGINE_BUILD_ID,
+                            selfAttested: true,
+                            releaseGateStatus: statusVal,
+                            approvalNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
+                            operatorSessionId,
+                            prerequisitesChecked: prereqs,
+                            isException: false,
+                            acceptedRisks: [],
+                          };
+
+                          const existingSigs = compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || [];
+                          const updatedSigs = [newSig, ...existingSigs];
+
+                          onApproveReleaseSignOff?.({
+                            isApproved: true,
+                            status: statusVal,
+                            approvedBy: localProfile.name.trim(),
+                            approverRole: localProfile.role,
+                            roleTitle: localProfile.role,
+                            notes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
+                            releaseNotes: signOffNotes.trim() || 'Verified across ISO 29148, 19510, 29119, and 26514 gates.',
+                            approvedAt: nowIso,
+                            signedAt: nowIso,
+                            snapshotHash,
+                            engineBuildId: CURRENT_ENGINE_BUILD_ID,
+                            selfAttested: true,
+                            releaseGateStatus: statusVal,
+                            operatorSessionId,
+                            prerequisitesChecked: prereqs,
+                            auditSignatures: updatedSigs,
+                            isException: false,
+                            acceptedRisks: [],
+                          });
+                        } catch (err) {
+                          setSignOffError(err instanceof Error ? err.message : 'Failed to record release sign-off.');
+                        } finally {
+                          setIsSigning(false);
+                        }
+                      }}
+                      className={`h-8 px-4 rounded-[3px] font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors text-[11px] ${
+                        !localProfile.name.trim() || !qaReviewed || isStale || isSigning || isGateBlocked || (isConditional && signOffNotes.trim().length < 20)
+                          ? 'bg-[#1E293B] text-[#64748B] cursor-not-allowed border border-[#334155]'
+                          : isConditional
+                          ? 'bg-[#D97706] hover:bg-[#B45309] text-white cursor-pointer'
+                          : 'bg-[#059669] hover:bg-[#047857] text-white cursor-pointer'
+                      }`}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                      <span>
+                        {isSigning
+                          ? 'Signing SHA-256...'
+                          : isGateBlocked
+                          ? (locale === 'id' ? 'Persetujuan Ditutup (Gate NO GO)' : 'Approval Closed (NO GO)')
+                          : isConditional
+                          ? (locale === 'id' ? 'Setujui dengan Catatan (CONDITIONAL GO)' : 'Approve with Notes (CONDITIONAL GO)')
+                          : (locale === 'id' ? 'Kunci & Setujui Rilis (GO)' : 'Lock Release Sign-Off (GO)')}
+                      </span>
+                    </button>
+                  </div>
+                </div>
               </div>
+
+              {/* Exception Approval Modal / Drawer (T-14: F-08, F-20) */}
+              {showExceptionModal && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-[#111317] border border-[#2B303B] rounded-[6px] max-w-xl w-full p-5 space-y-4 shadow-2xl font-mono text-[11px]">
+                    <div className="flex items-start justify-between pb-3 border-b border-[#22262E]">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 text-rose-400 font-bold text-[13px]">
+                          <ShieldAlert className="h-4 w-4" />
+                          <span>Alur Pengecualian Rilis (Release Exception Approval)</span>
+                        </div>
+                        <p className="text-[10px] text-[#A1A1A1] font-sans">
+                          Release Gate berstatus <strong>NO GO</strong> ({criticalFindingsCount} temuan kritis). Sesuai ISO 9001:2015 Klausul 7.5, pengecualian rilis hanya dapat diberikan dengan justifikasi formal tertulis (min. 20 karakter) dan penerimaan risiko eksplisit.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowExceptionModal(false)}
+                        className="text-[#707070] hover:text-[#EDEDED] text-base p-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] text-[#EDEDED] uppercase font-bold">
+                            Catatan Justifikasi Pengecualian *
+                          </label>
+                          <span className={`text-[10px] font-mono ${exceptionJustification.trim().length >= 20 ? 'text-emerald-400 font-bold' : 'text-rose-400'}`}>
+                            {exceptionJustification.trim().length} / 20 karakter
+                          </span>
+                        </div>
+                        <textarea
+                          rows={3}
+                          value={exceptionJustification}
+                          onChange={(e) => setExceptionJustification(e.target.value)}
+                          placeholder="Jelaskan dasar pertimbangan bisnis/teknis mengapa rilis diizinkan meskipun gate NO GO (minimal 20 karakter)..."
+                          className="w-full p-2 bg-[#0B0C0E] border border-[#2B303B] text-[#EDEDED] rounded-[3px] outline-none text-[11px] font-sans"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-[#EDEDED] uppercase font-bold block">
+                          Daftar Risiko yang Diterima (Accepted Risks) *
+                        </label>
+                        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                          {acceptedRisks.map((risk, idx) => (
+                            <div key={idx} className="flex items-center justify-between gap-2 p-1.5 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] text-[10px]">
+                              <span className="text-[#EDEDED] font-sans">• {risk}</span>
+                              <button
+                                type="button"
+                                onClick={() => setAcceptedRisks(acceptedRisks.filter((_, i) => i !== idx))}
+                                className="text-rose-400 hover:text-rose-300 font-bold px-1"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            value={customRiskInput}
+                            onChange={(e) => setCustomRiskInput(e.target.value)}
+                            placeholder="Tambah item risiko yang diterima..."
+                            className="flex-1 h-7 px-2 bg-[#0B0C0E] border border-[#2B303B] text-[#EDEDED] rounded-[2px] outline-none text-[10px] font-sans"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && customRiskInput.trim()) {
+                                e.preventDefault();
+                                setAcceptedRisks([...acceptedRisks, customRiskInput.trim()]);
+                                setCustomRiskInput('');
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (customRiskInput.trim()) {
+                                setAcceptedRisks([...acceptedRisks, customRiskInput.trim()]);
+                                setCustomRiskInput('');
+                              }
+                            }}
+                            className="h-7 px-2.5 bg-[#1F2937] hover:bg-[#374151] text-[#E5E7EB] rounded-[2px] text-[10px] font-bold"
+                          >
+                            Tambah
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#22262E]">
+                      <button
+                        type="button"
+                        onClick={() => setShowExceptionModal(false)}
+                        className="px-3 py-1.5 text-[#9CA3AF] hover:text-[#EDEDED] text-[11px]"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          !localProfile.name.trim() ||
+                          !qaReviewed ||
+                          isStale ||
+                          exceptionJustification.trim().length < 20 ||
+                          acceptedRisks.length === 0
+                        }
+                        onClick={async () => {
+                          const hashPayload = canonicalJson({
+                            appName: compiledState?.appName,
+                            targetUrl: compiledState?.targetUrl,
+                            totalCases: compiledState?.rtmRows?.length,
+                            modules: compiledState?.discoveredModules?.length,
+                            apis: compiledState?.discoveryResult?.apiEndpoints?.length,
+                          });
+                          const snapshotHash = sha256Hex(hashPayload);
+                          const nowIso = new Date().toISOString();
+                          const prereqs: string[] = ['QA_AND_GAP_AUDIT_REVIEWED', 'EXCEPTION_WORKFLOW_APPROVED'];
+
+                          const newSig: ReleaseAuditSignatureRecord = {
+                            signatureId: `SIG-EX-${Date.now()}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase() : Date.now().toString(36).toUpperCase()}`,
+                            approverName: localProfile.name.trim(),
+                            approverRole: localProfile.role,
+                            signedAt: nowIso,
+                            snapshotHash,
+                            engineBuildId: CURRENT_ENGINE_BUILD_ID,
+                            selfAttested: true,
+                            releaseGateStatus: 'EXCEPTION_APPROVED',
+                            approvalNotes: exceptionJustification.trim(),
+                            operatorSessionId,
+                            prerequisitesChecked: prereqs,
+                            isException: true,
+                            acceptedRisks: [...acceptedRisks],
+                          };
+
+                          const existingSigs = compiledState?.auditSignatures || compiledState?.releaseSignOff?.auditSignatures || [];
+                          const updatedSigs = [newSig, ...existingSigs];
+
+                          onApproveReleaseSignOff?.({
+                            isApproved: true,
+                            status: 'EXCEPTION_APPROVED',
+                            approvedBy: localProfile.name.trim(),
+                            approverRole: localProfile.role,
+                            roleTitle: localProfile.role,
+                            notes: exceptionJustification.trim(),
+                            releaseNotes: exceptionJustification.trim(),
+                            approvedAt: nowIso,
+                            signedAt: nowIso,
+                            snapshotHash,
+                            engineBuildId: CURRENT_ENGINE_BUILD_ID,
+                            selfAttested: true,
+                            releaseGateStatus: 'EXCEPTION_APPROVED',
+                            operatorSessionId,
+                            prerequisitesChecked: prereqs,
+                            auditSignatures: updatedSigs,
+                            isException: true,
+                            acceptedRisks: [...acceptedRisks],
+                          });
+
+                          setShowExceptionModal(false);
+                        }}
+                        className={`px-4 py-1.5 font-bold rounded-[3px] text-[11px] ${
+                          !localProfile.name.trim() ||
+                          !qaReviewed ||
+                          isStale ||
+                          exceptionJustification.trim().length < 20 ||
+                          acceptedRisks.length === 0
+                            ? 'bg-[#1E293B] text-[#64748B] cursor-not-allowed border border-[#334155]'
+                            : 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
+                        }`}
+                      >
+                        Kunci Pengecualian Rilis (EXCEPTION_APPROVED)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Riwayat Tanda Tangan Audit (ISO 9001:2015 Klausul 7.5) */}
               <div className="pt-2">
@@ -1100,11 +1615,32 @@ export function UniversalKnowledgeGraphWorkbench({
                             <td className="px-2.5 py-1.5 whitespace-nowrap">
                               <span className="font-bold text-[#EDEDED]">{sig.approverName}</span>
                               <span className="text-[#707070] ml-1">({sig.approverRole})</span>
+                              {sig.selfAttested && (
+                                <span className="ml-1.5 px-1 py-0.2 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[8px] rounded-[2px]" title="Self-attested identity">
+                                  self-attested
+                                </span>
+                              )}
+                              {sig.engineBuildId && (
+                                <div className="text-[8px] text-[#707070] font-mono">
+                                  build: {sig.engineBuildId}
+                                </div>
+                              )}
                             </td>
                             <td className="px-2.5 py-1.5 whitespace-nowrap">
-                              <span className="px-1.5 py-0.2 bg-[#059669]/20 border border-[#059669]/40 text-[#10B981] font-bold rounded-[2px] text-[9px]">
+                              <span className={`px-1.5 py-0.5 border font-bold rounded-[2px] text-[9px] ${
+                                sig.releaseGateStatus === 'APPROVED_FOR_PRODUCTION'
+                                  ? 'bg-[#059669]/20 border-[#059669]/40 text-[#10B981]'
+                                  : sig.releaseGateStatus === 'CONDITIONAL_APPROVAL' || sig.releaseGateStatus === 'CONDITIONAL_GO'
+                                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                                  : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                              }`}>
                                 {sig.releaseGateStatus}
                               </span>
+                              {sig.isException && (
+                                <span className="ml-1 px-1 py-0.2 bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[8px] rounded-[2px] font-bold">
+                                  EXCEPTION
+                                </span>
+                              )}
                             </td>
                             <td className="px-2.5 py-1.5 text-[#60A5FA] font-mono text-[9px] whitespace-nowrap" title={sig.snapshotHash}>
                               {sig.snapshotHash ? `${sig.snapshotHash.slice(0, 16)}...` : 'N/A'}
@@ -1114,11 +1650,16 @@ export function UniversalKnowledgeGraphWorkbench({
                             </td>
                             <td className="px-2.5 py-1.5 text-[#10B981] whitespace-nowrap">
                               {Array.isArray(sig.prerequisitesChecked) && sig.prerequisitesChecked.length >= 2
-                                ? '✓ QA & Zero Sec'
+                                ? '✓ QA & Prereqs'
                                 : '✓ Verified'}
                             </td>
-                            <td className="px-2.5 py-1.5 text-[#A1A1A1] max-w-xs truncate" title={sig.approvalNotes}>
-                              {sig.approvalNotes || '—'}
+                            <td className="px-2.5 py-1.5 text-[#A1A1A1] max-w-xs text-[10px]" title={sig.approvalNotes}>
+                              <div>{sig.approvalNotes || '—'}</div>
+                              {sig.isException && Array.isArray(sig.acceptedRisks) && sig.acceptedRisks.length > 0 && (
+                                <div className="text-[8px] text-rose-300/80 font-sans mt-0.5">
+                                  Risiko: {sig.acceptedRisks.join('; ')}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         ))

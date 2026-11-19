@@ -15,8 +15,8 @@ export interface GuardedFetchInit extends RequestInit {
 async function resolveDns(host: string): Promise<Array<{ address: string; family: number }>> {
   if (typeof window !== 'undefined') return [];
   try {
-    const dnsModule = 'node:dns/promises';
-    const dns = await import(/* webpackIgnore: true */ dnsModule);
+    const loadDns = new Function('return import("node:dns/promises")');
+    const dns = await loadDns();
     return await (dns.default || dns).lookup(host, { all: true });
   } catch {
     return [];
@@ -26,8 +26,8 @@ async function resolveDns(host: string): Promise<Array<{ address: string; family
 async function isIpAddress(host: string): Promise<number> {
   if (typeof window !== 'undefined') return 0;
   try {
-    const netModule = 'node:net';
-    const net = await import(/* webpackIgnore: true */ netModule);
+    const loadNet = new Function('return import("node:net")');
+    const net = await loadNet();
     return (net.default || net).isIP(host);
   } catch {
     return 0;

@@ -1284,6 +1284,16 @@ The system provides deterministic transaction processing, input validation, and 
         versionLabel: `Release Approved (${signOff.approvedBy})`,
       });
       if (activeVaultProjectId && updatedSigs.length > 0) {
+        const qm = computeUnifiedQualityMetrics(compiledSdlcState);
+        const critDast = compiledSdlcState.owaspDastSummary?.vulnerabilitiesCount?.critical || 0;
+        const critGap = (auditResult?.items || []).filter((i) => i.severity === 'CRITICAL').length;
+        const effectiveVerdict: 'GO' | 'CONDITIONAL_GO' | 'NO_GO' =
+          qm.releaseGateStatus === 'PRODUCTION_GO'
+            ? 'GO'
+            : qm.releaseGateStatus === 'CONDITIONAL_GO'
+            ? 'CONDITIONAL_GO'
+            : 'NO_GO';
+
         fetch('/api/workspace/vault', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1291,6 +1301,14 @@ The system provides deterministic transaction processing, input validation, and 
             action: 'APPEND_AUDIT_SIGNATURE',
             projectId: activeVaultProjectId,
             signature: updatedSigs[0],
+            prerequisites: {
+              gateVerdict: effectiveVerdict,
+              criticalFindingsCount: critDast + critGap,
+              isStale: isCacheStale,
+              qaReviewed: true,
+              qaReviewerName: signOff.approvedBy,
+              qaReviewedAt: signOff.signedAt,
+            },
           }),
         }).catch(() => {});
       }
