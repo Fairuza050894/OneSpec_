@@ -14,6 +14,14 @@
   --status-conformant: #10B981;
   --status-warning: #F59E0B;
   --status-defect: #EF4444;
+
+  /* Provenance Evidence Design Tokens (ISO 29119 / Audit Spec Section 3) */
+  --ev-measured: #10B981;
+  --ev-probe: #38BDF8;
+  --ev-observed: #A78BFA;
+  --ev-inferred: #FBBF24;
+  --ev-simulated: #C084FC;
+  --ev-notrun: #94A3B8;
 }
 
 html, body {

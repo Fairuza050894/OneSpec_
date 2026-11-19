@@ -552,3 +552,97 @@ test('Test 13: Provenance model, Measured<T> metrics and NOT_RUN value null enfo
   assert.equal(k6MetricsState.p95Latency.value, 45);
   assert.equal(k6MetricsState.p95Latency.provenance, 'MEASURED_K6');
 });
+
+test('Test 14: EvidenceChip, honest toolProbeService and ungrounded badge elimination (T-07)', async () => {
+  const { toolProbeService } = await import('../services/toolProbeService');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const React = await import('react');
+  const { EvidenceChip } = await import('../components/ui/EvidenceChip');
+  const { MetricValue } = await import('../components/ui/MetricValue');
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+
+  // 1. Unexecuted / empty state yields NOT_RUN and 0 latency for execution tools
+  const emptyState = null;
+  const pwProbeEmpty = toolProbeService.executeToolProbe('playwright', emptyState);
+  assert.equal(pwProbeEmpty.status, 'NOT_RUN');
+  assert.equal(pwProbeEmpty.latencyMs, 0);
+  assert.equal(pwProbeEmpty.provenance, 'NOT_RUN');
+
+  const k6ProbeEmpty = toolProbeService.executeToolProbe('k6', emptyState);
+  assert.equal(k6ProbeEmpty.status, 'NOT_RUN');
+  assert.equal(k6ProbeEmpty.latencyMs, 0);
+  assert.equal(k6ProbeEmpty.provenance, 'NOT_RUN');
+
+  // 2. File export integrations yield FILE_EXPORT and 'Ekspor berkas (tidak terhubung)'
+  const fileExportTools = ['jira', 'zephyr', 'testrail', 'allure', 'github-actions', 'gitlab', 'promptfoo', 'git-patch'];
+  for (const toolId of fileExportTools) {
+    const probe = toolProbeService.executeToolProbe(toolId, emptyState);
+    assert.equal(probe.status, 'NOT_RUN', `${toolId} must be NOT_RUN when unexecuted`);
+    assert.equal(probe.connectionMode, 'FILE_EXPORT', `${toolId} must have connectionMode FILE_EXPORT`);
+    assert.match(probe.liveEvidence, /Ekspor berkas \(tidak terhubung\)/, `${toolId} must indicate disconnected file export`);
+  }
+
+  // 3. Fallback concurrency probe displays Probe HTTP chip and honest label
+  const probeState = {
+    k6Summary: {
+      vus: 10,
+      durationSeconds: 5,
+      totalRequests: 200,
+      throughputRps: 40,
+      errorRatePercent: 0,
+      provenance: 'MEASURED_HTTP_PROBE',
+      latency: { min: 12, avg: 30, med: 25, p90: 40, p95: 55, p99: 70, max: 90 },
+      thresholds: { httpReqFailedPass: true, httpReqDurationP95Pass: true, p95ThresholdMs: 500, p95ActualMs: 55 },
+    },
+  } as unknown as CompiledSdlcState;
+
+  const k6ProbeRes = toolProbeService.executeToolProbe('k6', probeState);
+  assert.equal(k6ProbeRes.provenance, 'MEASURED_HTTP_PROBE');
+  assert.equal(k6ProbeRes.status, 'VERIFIED');
+  assert.match(k6ProbeRes.liveEvidence, /^Probe Konkurensi HTTP \(bukan beban k6\)/);
+  assert.doesNotMatch(k6ProbeRes.liveEvidence, /SLO PASS/);
+
+  // 4. Measured k6 displays k6 provenance
+  const measuredK6State = {
+    k6Summary: {
+      vus: 50,
+      durationSeconds: 10,
+      totalRequests: 1000,
+      throughputRps: 100,
+      errorRatePercent: 0,
+      provenance: 'MEASURED_K6',
+      latency: { min: 10, avg: 20, med: 18, p90: 30, p95: 42, p99: 55, max: 70 },
+      thresholds: { httpReqFailedPass: true, httpReqDurationP95Pass: true, p95ThresholdMs: 500, p95ActualMs: 42 },
+    },
+  } as unknown as CompiledSdlcState;
+
+  const k6MeasuredRes = toolProbeService.executeToolProbe('k6', measuredK6State);
+  assert.equal(k6MeasuredRes.provenance, 'MEASURED_K6');
+  assert.equal(k6MeasuredRes.status, 'VERIFIED');
+  assert.match(k6MeasuredRes.liveEvidence, /\(k6\)/);
+
+  // 5. Component rendering tests for EvidenceChip & MetricValue
+  const chipK6 = renderToStaticMarkup(React.createElement(EvidenceChip, { provenance: 'MEASURED_K6' }));
+  assert.match(chipK6, />k6</);
+
+  const chipProbe = renderToStaticMarkup(React.createElement(EvidenceChip, { provenance: 'MEASURED_HTTP_PROBE' }));
+  assert.match(chipProbe, />Probe HTTP</);
+
+  const chipNotRun = renderToStaticMarkup(React.createElement(EvidenceChip, { provenance: 'NOT_RUN' }));
+  assert.match(chipNotRun, />Belum dijalankan</);
+
+  const metricNull = renderToStaticMarkup(React.createElement(MetricValue, { metric: { value: null, provenance: 'NOT_RUN' } }));
+  assert.match(metricNull, />—</);
+  assert.match(metricNull, />Belum dijalankan</);
+
+  const metricVal = renderToStaticMarkup(React.createElement(MetricValue, { metric: { value: 86, unit: 'ms', provenance: 'MEASURED_K6' } }));
+  assert.match(metricVal, /86/);
+  assert.match(metricVal, />k6</);
+
+  // 6. Source file check: no literal "Connected & Live-Probed" in components or services
+  const workbenchSrc = fs.readFileSync(path.resolve(__dirname, '../components/runner/LiveRunnerWorkbench.tsx'), 'utf-8');
+  assert.equal(workbenchSrc.includes('Connected &amp; Live-Probed'), false, 'LiveRunnerWorkbench must not contain Connected & Live-Probed');
+  assert.equal(workbenchSrc.includes('Connected & Live-Probed'), false, 'LiveRunnerWorkbench must not contain Connected & Live-Probed');
+  assert.equal(workbenchSrc.includes('>EMPIRICAL<'), false, 'LiveRunnerWorkbench must not contain literal >EMPIRICAL<');
+});

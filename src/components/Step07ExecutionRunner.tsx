@@ -6,6 +6,7 @@ import { useStudioLocale } from '@/lib/i18n';
 import type { LiveRunnerWorkbenchProps } from '@/components/runner/LiveRunnerWorkbench';
 import { computeUnifiedQualityMetrics } from '@/services/sdlcCompiler';
 import { ShieldCheck, Activity, Gauge, AlertTriangle, AlertOctagon } from 'lucide-react';
+import { EvidenceChip } from '@/components/ui/EvidenceChip';
 
 const LiveRunnerWorkbench = dynamic(
   () => import('@/components/runner/LiveRunnerWorkbench').then((m) => m.LiveRunnerWorkbench),
@@ -77,12 +78,14 @@ export function Step07ExecutionRunner({
               <span className="text-[#94A3B8]">{isId ? 'Tingkat Kelulusan:' : 'Pass Rate:'}</span>
               <span className="font-mono font-bold text-[#10B981]">{metrics.passRatePercent}%</span>
               <span className="text-[#64748B] text-[10px]">({metrics.passedCases}/{metrics.totalCases})</span>
+              <EvidenceChip provenance={metrics.passRate.provenance} />
             </div>
             <span className="text-[#333A44]">|</span>
             <div className="flex items-center gap-1.5 text-[11px] text-[#CBD5E1]">
               <Activity className="w-3.5 h-3.5 text-[#38BDF8]" />
               <span className="text-[#94A3B8]">P95:</span>
               <span className="font-mono font-bold text-[#EDEDED]">{metrics.p95LatencyMs}ms</span>
+              <EvidenceChip provenance={metrics.p95Latency.provenance} />
             </div>
             <span className="text-[#333A44]">|</span>
             <div className="flex items-center gap-1.5 text-[10.5px]">
