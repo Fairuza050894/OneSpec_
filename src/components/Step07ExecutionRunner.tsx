@@ -34,8 +34,26 @@ export function Step07ExecutionRunner({
   const { copy, locale } = useStudioLocale();
   const isId = locale === 'id';
 
-  const metrics = workbenchProps.compiledState
-    ? computeUnifiedQualityMetrics(workbenchProps.compiledState)
+  const state = workbenchProps.compiledState;
+  const effectiveProps: LiveRunnerWorkbenchProps = {
+    ...workbenchProps,
+    projectName: workbenchProps.projectName || state?.appName || 'OneSpec Application',
+    targetUrl: workbenchProps.targetUrl || state?.targetUrl || 'http://127.0.0.1:3000',
+    rtmRows: workbenchProps.rtmRows || state?.rtmRows || [],
+    discoveryResult: workbenchProps.discoveryResult || state?.discoveryResult,
+    customPipelineStages: workbenchProps.customPipelineStages || state?.pipelineStages,
+    customExecutionTraces: workbenchProps.customExecutionTraces || state?.executionTraces,
+    playwrightCode: workbenchProps.playwrightCode || state?.playwrightSpecCode,
+    k6Code: workbenchProps.k6Code || state?.k6ScriptCode,
+    postmanCode: workbenchProps.postmanCode || state?.postmanCollectionJson,
+    testScenarios: workbenchProps.testScenarios || state?.testScenarios,
+    bugReports: workbenchProps.bugReports || state?.bugReports,
+    uatFlows: workbenchProps.uatFlows || state?.uatFlows,
+    discoveredModules: workbenchProps.discoveredModules || state?.discoveredModules,
+  };
+
+  const metrics = state
+    ? computeUnifiedQualityMetrics(state)
     : null;
 
   return (
@@ -98,7 +116,7 @@ export function Step07ExecutionRunner({
 
       {/* Unified Full-Viewport Workbench (Master Command Bar & 4 Workspace Tabs) */}
       <div className="flex-1 bg-[#101217] border border-white/[0.07] rounded-lg p-2 overflow-hidden flex flex-col min-h-0">
-        <LiveRunnerWorkbench {...workbenchProps} />
+        <LiveRunnerWorkbench {...effectiveProps} />
       </div>
     </div>
   );
