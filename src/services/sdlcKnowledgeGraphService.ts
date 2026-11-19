@@ -2182,7 +2182,7 @@ ${uatFlows.map((u) => `- **${u.uatId} (${u.moduleName}):** ${u.businessScenarioT
     <section id="book2">
       <h2 class="book-title">${esc(lib.book2BusinessAnalyst.title)}</h2>
       <p style="color:#475569;font-size:13px;">${esc(lib.book2BusinessAnalyst.scopeSummary)}</p>
-      <h3>${isId ? 'Aturan Bisnis Normatif (BRD)' : 'Normative Business Rules (BRD)'}</h3>
+      <h3>${(lib.book2BusinessAnalyst.brdRules || []).some((b) => b.origin === 'STAKEHOLDER_SOURCE') ? (isId ? 'Aturan Bisnis Normatif (BRD)' : 'Normative Business Rules (BRD)') : (isId ? 'Aturan As-Built (hasil discovery)' : 'As-Built Rules (Discovery Results)')}</h3>
       <table>
         <thead><tr><th>ID</th><th>${isId ? 'Modul' : 'Module'}</th><th>${isId ? 'Pernyataan' : 'Statement'}</th><th>KPI</th></tr></thead>
         <tbody>${lib.book2BusinessAnalyst.brdRules.map((b) => `<tr><td><code>${esc(b.ruleId)}</code></td><td>${esc(b.moduleName || 'Core')}</td><td>${esc(b.statement)}</td><td>${esc(b.targetKpi)}</td></tr>`).join('')}</tbody>

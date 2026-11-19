@@ -126,6 +126,10 @@ export interface StudioCopy {
     greenfieldNameLabel: string;
     greenfieldNamePlaceholder: string;
     greenfieldHint: string;
+    discoverySummaryTitle: string;
+    humanNotesTitle: string;
+    uploadNotesBtn: string;
+    humanNotesPlaceholder: string;
   };
   step02: {
     title: string;
@@ -141,6 +145,9 @@ export interface StudioCopy {
     title: string;
     subtitle: string;
     tabBrd: string;
+    tabBrdAsBuilt: string;
+    brdExportDisabledNotice: string;
+    exportBrdBtn: string;
     tabPrd: string;
     tabTsd: string;
     tabRawIso: string;
@@ -491,6 +498,10 @@ const EN_COPY: StudioCopy = {
     greenfieldNameLabel: 'NEW PROJECT NAME:',
     greenfieldNamePlaceholder: 'e.g. Vendor Portal Integration v1',
     greenfieldHint: 'Greenfield Mode · Compiles BA, Architecture, DB, APIs & QA Specs directly from Notes',
+    discoverySummaryTitle: 'Autonomous Discovery Summary',
+    humanNotesTitle: 'Human Stakeholder Notes (MoM / PRD)',
+    uploadNotesBtn: 'Upload Notes (.md, .txt, .docx, .vtt)',
+    humanNotesPlaceholder: 'Paste or upload meeting minutes, interview notes, or PRD (.md, .txt, .docx, .vtt)...',
   },
   step02: {
     title: '02. Process Orchestrator & Architecture Engine',
@@ -506,6 +517,9 @@ const EN_COPY: StudioCopy = {
     title: '03. BRD, PRD & TSD/TRD Specification Engine',
     subtitle: 'ISO/IEC/IEEE 29148:2018 (StRS / SyRS / TSD) & IEEE 1016 Software Design Description',
     tabBrd: '1. Business Rules (BRD)',
+    tabBrdAsBuilt: '1. As-Built Rules (Discovery Results)',
+    brdExportDisabledNotice: 'BRD export disabled: Add stakeholder notes/PRD in Step 01',
+    exportBrdBtn: 'Export BRD (.md)',
     tabPrd: '2. Validation Contracts (PRD)',
     tabTsd: '3. Technical Specs (TSD / TRD)',
     tabRawIso: '4. Raw ISO Spec',
@@ -856,6 +870,10 @@ const ID_COPY: StudioCopy = {
     greenfieldNameLabel: 'NAMA PROJECT BARU:',
     greenfieldNamePlaceholder: 'mis. Portal Integrasi Vendor v1',
     greenfieldHint: 'Mode Greenfield · Menyusun Spek BA, Arsitektur, DB, API & QA langsung dari Catatan',
+    discoverySummaryTitle: 'Ringkasan discovery otomatis',
+    humanNotesTitle: 'Notulen Pemangku Kepentingan (Manusia)',
+    uploadNotesBtn: 'Unggah Notulen (.md, .txt, .docx, .vtt)',
+    humanNotesPlaceholder: 'Tempel atau unggah notulen rapat, wawancara, atau dokumen PRD (.md, .txt, .docx, .vtt)...',
   },
   step02: {
     title: '02. Orkestrator Proses & Mesin Arsitektur',
@@ -871,6 +889,9 @@ const ID_COPY: StudioCopy = {
     title: '03. Mesin Spesifikasi BRD, PRD & TSD/TRD',
     subtitle: 'ISO/IEC/IEEE 29148:2018 (StRS / SyRS / TSD) & Deskripsi Desain Perangkat Lunak IEEE 1016',
     tabBrd: '1. Aturan Bisnis (BRD)',
+    tabBrdAsBuilt: '1. Aturan As-Built (hasil discovery)',
+    brdExportDisabledNotice: 'Ekspor BRD dinonaktifkan: Tambahkan notulen/PRD di Step 01',
+    exportBrdBtn: 'Ekspor BRD (.md)',
     tabPrd: '2. Kontrak Validasi (PRD)',
     tabTsd: '3. Spesifikasi Teknis (TSD/TRD)',
     tabRawIso: '4. Dokumen ISO Mentah',

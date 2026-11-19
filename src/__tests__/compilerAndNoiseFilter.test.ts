@@ -5,6 +5,9 @@ import {
   isNoiseUiControlOrInternalId,
   sanitizeStatementText,
   detectGlobalChromeLabels,
+  synthesizeFullSdlcFromCrawl,
+  compileGreenfieldFromMoM,
+  evaluateBrdExportGuard,
   type CompiledSdlcState,
 } from '../services/sdlcCompiler';
 import {
@@ -12,7 +15,7 @@ import {
   getSampleValueForControl,
   domainLogicBrainService,
 } from '../services/domainLogicBrainService';
-import type { FeatureModuleSurface } from '../types/sdlc';
+import type { FeatureModuleSurface, BlindCrawlResult } from '../types/sdlc';
 
 test('Quality Metrics: calculates exact ISO 29119-3 release gate verdicts and pass rates', () => {
   // Scenario A: 100% Pass -> PRODUCTION_GO
@@ -324,4 +327,155 @@ test('T-17: DOM Control Classification & Login Scenario Isolation (F-25, F-26)',
     catalogSearchScenarios.length >= 1,
     'Module with genuine searchbox must generate [DATA-DRIVEN SEARCH] scenario'
   );
+});
+
+test('T-18: Genuine BRD Separation from As-Built Discovery (F-27)', () => {
+  const mockCrawlResult: BlindCrawlResult = {
+    targetUrl: 'https://app.logistics.co.id/portal',
+    appName: 'Logistics Enterprise Portal',
+    crawledAt: new Date().toISOString(),
+    durationMs: 450,
+    discoveredPages: ['/login', '/dashboard', '/rates'],
+    discoveredForms: [
+      {
+        formId: 'form-tariff',
+        action: '/api/v1/rates',
+        method: 'POST',
+        submitSelector: 'button[type="submit"]',
+        inputs: [
+          { name: 'origin', type: 'text', required: true, selector: 'input[name="origin"]' },
+          { name: 'destination', type: 'text', required: true, selector: 'input[name="destination"]' },
+        ],
+      },
+    ],
+    extractedApis: [
+      {
+        id: 'api-rates',
+        method: 'GET',
+        path: '/api/v1/rates',
+        controllerPath: 'rates.controller.ts',
+        lineNumber: 12,
+        summary: 'Fetch rate cards',
+        linkedTestCaseIds: [],
+        linkedRequirementId: 'REQ-01',
+      },
+    ],
+    inferredBusinessRules: [
+      {
+        ruleId: 'BR-01',
+        category: 'BUSINESS_LOGIC',
+        statement: 'The "Rates" module (/rates) SHALL govern "Commercial Pricing" workflows.',
+        targetKpi: '—',
+        sourceMoMLine: 'Feature "Rates" at /rates',
+        priority: 'HIGH',
+        origin: 'AS_BUILT_DISCOVERED',
+      },
+    ],
+    inferredValidationContracts: [],
+    baselineSummary: '# [AUTONOMOUS ZERO-DOC DISCOVERY SUMMARY]\nDiscovered from autonomous crawler on https://app.logistics.co.id/portal',
+    bpmnXml: '',
+    databaseTables: [],
+    domBindings: [],
+  };
+
+  // 1. Acceptance Criterion 1 (Tanpa Notulen):
+  // Without stakeholder notes, all rules MUST have origin === 'AS_BUILT_DISCOVERED' and BRD export is blocked
+  const zeroDocCompiled = synthesizeFullSdlcFromCrawl(mockCrawlResult, '');
+  assert.equal(zeroDocCompiled.hasSourceRequirements, false, 'Without MoM, hasSourceRequirements must be false');
+
+  // Verify all rules have origin 'AS_BUILT_DISCOVERED'
+  for (const rule of zeroDocCompiled.brdMatrixRows) {
+    assert.equal(
+      rule.origin,
+      'AS_BUILT_DISCOVERED',
+      `Rule ${rule.ruleId} must have origin AS_BUILT_DISCOVERED, got ${rule.origin}`
+    );
+    assert.notEqual(
+      rule.targetKpi,
+      '100.00% Functional Conformance',
+      `Rule ${rule.ruleId} must not contain generic KPI "100.00% Functional Conformance"`
+    );
+  }
+
+  // Verify evaluateBrdExportGuard blocks BRD export and specifies the exact reason
+  const zeroDocGuard = evaluateBrdExportGuard(zeroDocCompiled);
+  assert.equal(zeroDocGuard.canExport, false, 'BRD export must be blocked when no stakeholder MoM/PRD exists');
+  assert.equal(
+    zeroDocGuard.reason,
+    'Tambahkan notulen/PRD di Step 01',
+    'Guard must return exact required prompt: "Tambahkan notulen/PRD di Step 01"'
+  );
+  assert.equal(
+    zeroDocGuard.tabTitleId,
+    '1. Aturan As-Built (hasil discovery)',
+    'Step 03 tab title in Indonesian must be "1. Aturan As-Built (hasil discovery)"'
+  );
+  assert.equal(
+    zeroDocGuard.tabTitleEn,
+    '1. As-Built Rules (Discovery Results)',
+    'Step 03 tab title in English must be "1. As-Built Rules (Discovery Results)"'
+  );
+  assert.equal(zeroDocGuard.asBuiltOnly, true);
+
+  // 2. Acceptance Criterion 2 (Dengan Notulen):
+  // With stakeholder notes, rules parsed from notes MUST have origin === 'STAKEHOLDER_SOURCE' and include sourceQuote
+  const stakeholderMoM = `[MoM - 2026-11-19] Commercial Logistics Requirements Workshop
+Attendees: Head of Commercial, QA Lead, Logistics Business Analyst
+
+1. Core Business Rules:
+- [REQ-01] System SHALL validate origin port and destination terminal with strict non-empty checks. Target KPI: 0% Orphan Dispatches
+- [REQ-02] System SHALL reject duplicate rate cards for identical transport routes with HTTP 409 Conflict. Target KPI: Zero duplicate rates
+- [REQ-03] System SHALL enforce approval workflow before published tariffs can be utilized by sales teams.`;
+
+  const momCompiled = synthesizeFullSdlcFromCrawl(mockCrawlResult, stakeholderMoM);
+  assert.equal(momCompiled.hasSourceRequirements, true, 'With MoM, hasSourceRequirements must be true');
+
+  const stakeholderRules = momCompiled.brdMatrixRows.filter(
+    (r) => r.origin === 'STAKEHOLDER_SOURCE'
+  );
+  assert.ok(
+    stakeholderRules.length >= 3,
+    `Expected at least 3 stakeholder rules parsed from MoM, got ${stakeholderRules.length}`
+  );
+
+  for (const rule of stakeholderRules) {
+    assert.equal(rule.origin, 'STAKEHOLDER_SOURCE');
+    assert.ok(
+      rule.sourceQuote && rule.sourceQuote.length > 5,
+      `Stakeholder rule ${rule.ruleId} must contain source quote citation`
+    );
+    assert.ok(
+      rule.sourceMoMLine && rule.sourceMoMLine.length > 5,
+      `Stakeholder rule ${rule.ruleId} must contain source MoM line`
+    );
+  }
+
+  // Verify extracted KPI
+  const req01 = stakeholderRules.find((r) => r.ruleId === 'REQ-SRC-01');
+  assert.ok(req01, 'REQ-SRC-01 must be present');
+  assert.equal(req01?.targetKpi, '0% Orphan Dispatches', 'Target KPI must be extracted from source text');
+
+  // Verify evaluateBrdExportGuard permits BRD export with genuine MoM
+  const momGuard = evaluateBrdExportGuard(momCompiled);
+  assert.equal(momGuard.canExport, true, 'BRD export must be allowed when stakeholder MoM is provided');
+  assert.equal(momGuard.tabTitleId, '1. Aturan Bisnis (BRD)');
+  assert.equal(momGuard.tabTitleEn, '1. Business Rules (BRD)');
+  assert.equal(momGuard.asBuiltOnly, false);
+
+  // 3. Greenfield Project Compilation from MoM
+  const greenfieldCompiled = compileGreenfieldFromMoM('Commercial Route Manager', stakeholderMoM);
+  assert.equal(greenfieldCompiled.hasSourceRequirements, true);
+  const greenfieldStakeholderRules = greenfieldCompiled.brdMatrixRows.filter(
+    (r) => r.origin === 'STAKEHOLDER_SOURCE'
+  );
+  assert.ok(
+    greenfieldStakeholderRules.length >= 1,
+    'Greenfield compilation must produce stakeholder rules from MoM'
+  );
+  for (const rule of greenfieldStakeholderRules) {
+    assert.equal(rule.origin, 'STAKEHOLDER_SOURCE');
+    assert.ok(rule.sourceQuote, 'Greenfield rule must include source quote');
+  }
+  const greenfieldGuard = evaluateBrdExportGuard(greenfieldCompiled);
+  assert.equal(greenfieldGuard.canExport, true);
 });

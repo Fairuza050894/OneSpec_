@@ -65,6 +65,10 @@ export interface BusinessRule {
   complianceReference?: string | null; // e.g. "ISO 29148 Section 5.2.4"
   createdAt: string | Date;
   updatedAt: string | Date;
+  origin?: RequirementOrigin;
+  sourceCitation?: string | null;
+  sourceQuote?: string | null;
+  targetKpi?: string | null;
 
   // Bi-directional links
   userStories?: UserStory[];
@@ -131,6 +135,8 @@ export interface ValidationRuleContract {
   provenance?: RequirementProvenance;
 }
 
+export type RequirementOrigin = 'STAKEHOLDER_SOURCE' | 'AS_BUILT_DISCOVERED';
+
 export interface BrdMatrixRow {
   ruleId: string; // "BR-01"
   category: string;
@@ -141,6 +147,8 @@ export interface BrdMatrixRow {
   complianceReference?: string;
   moduleName?: string;
   provenance?: RequirementProvenance;
+  origin?: RequirementOrigin;
+  sourceQuote?: string;
 }
 
 export interface HttpContractSpec {

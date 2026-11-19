@@ -5343,14 +5343,19 @@ export class BlindCrawlerService {
       moduleName?: string
     ) => {
       const ruleId = `BR-${String(inferredBusinessRules.length + 1).padStart(2, '0')}`;
+      const cleanKpi =
+        !targetKpi || /100\.00% (?:Functional Conformance|Input Validation Accuracy|Data Integrity)/i.test(targetKpi)
+          ? '—'
+          : targetKpi;
       inferredBusinessRules.push({
         ruleId,
         category,
         statement,
-        targetKpi,
+        targetKpi: cleanKpi,
         sourceMoMLine,
         priority: 'HIGH',
         moduleName,
+        origin: 'AS_BUILT_DISCOVERED',
       });
     };
 
@@ -5400,7 +5405,7 @@ export class BlindCrawlerService {
       addBusinessRule(
         'BUSINESS_LOGIC',
         `The "${mod.moduleName}" module (${mod.pagePath}) SHALL govern "${headingText}" workflows across ${controlsDesc}, ${apiSummary}.`,
-        '100.00% Functional Conformance',
+        '—',
         `Feature "${mod.moduleName}" at ${mod.pagePath}`,
         mod.moduleName
       );
@@ -5419,7 +5424,7 @@ export class BlindCrawlerService {
       addBusinessRule(
         'DATA_INTEGRITY',
         `Form "${cleanFormName}" MUST validate completeness and format of (${humanFields}) prior to submission.`,
-        '100.00% Input Validation Accuracy',
+        '—',
         `Form "${cleanFormName}" at ${finalUrl}`
       );
     }
@@ -5433,7 +5438,7 @@ export class BlindCrawlerService {
       addBusinessRule(
         'DATA_INTEGRITY',
         `Data table "${cleanTableName}" MUST preserve schema consistency across columns (${tbl.columns.join(', ')}) during read and write operations.`,
-        '100.00% Data Integrity',
+        '—',
         `Table "${cleanTableName}" (${tbl.moduleName || tbl.pagePath || 'Primary View'})`,
         tbl.moduleName
       );

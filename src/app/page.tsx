@@ -101,7 +101,7 @@ import { GapAuditorWorkbench } from '@/components/audit/GapAuditorWorkbench';
 import { gapAuditorService } from '@/services/gapAuditorService';
 import { getDefaultErdTables, generateOpenApi31SpecClient } from '@/services/discoveryDefaults';
 import { automationSynthesizerService } from '@/services/automationSynthesizer';
-import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, computeUnifiedQualityMetrics, cleanProjectDisplayName, type CompiledSdlcState } from '@/services/sdlcCompiler';
+import { synthesizeFullSdlcFromCrawl, compileGreenfieldFromMoM, computeUnifiedQualityMetrics, cleanProjectDisplayName, evaluateBrdExportGuard, type CompiledSdlcState } from '@/services/sdlcCompiler';
 import { architectureDeconstructorService, type UpstreamLinkedProjectInfo } from '@/services/architectureDeconstructor';
 import type { ChangeImpactAnalysisReport } from '@/services/changeImpactService';
 import type { ProjectIndexEntry, SavedProjectRecord, ProjectHistoricalSnapshot, RegressionDiffSummary, VaultProjectType } from '@/services/workspaceVaultService';
@@ -1516,6 +1516,32 @@ The system provides deterministic transaction processing, input validation, and 
     appendTerminalLog('[TSD/TRD] Exported ISO/IEC/IEEE 29148 Section 8 & IEEE 1016 Technical Design Document.');
   };
 
+  const brdGuard = evaluateBrdExportGuard({
+    hasSourceRequirements: compiledSdlcState?.hasSourceRequirements,
+    brdMatrixRows,
+  });
+
+  const handleDownloadBrdMarkdown = () => {
+    if (!brdGuard.canExport) return;
+    const brdMd = `# ISO/IEC/IEEE 29148:2018 Business Requirements Document (BRD)
+## Project: ${cleanProjectDisplayName(activeWorkspace?.name, currentTargetUrl)}
+Generated at: ${new Date().toISOString()}
+
+### Normative Stakeholder Business Rules
+| Rule ID | Category | Business Rule Statement | Target KPI | Source Reference |
+|---------|----------|-------------------------|------------|------------------|
+${brdMatrixRows.map((r) => `| ${r.ruleId} | ${r.category} | ${r.statement.replace(/\|/g, '\\|')} | ${r.targetKpi || '—'} | ${r.sourceQuote || r.sourceMoMLine} |`).join('\n')}
+`;
+    const blob = new Blob([brdMd], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `ISO29148_BRD_${(activeWorkspace?.name || 'Project').replace(/[^a-zA-Z0-9]/g, '_')}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+    appendTerminalLog('[BRD] Exported ISO/IEC/IEEE 29148 Business Requirements Document (BRD).');
+  };
+
   // STEP 1: Probe Target URL Login Surface (Zero Hardcoded Fields)
   const handleProbeLoginSurface = async (overrideUrl?: string) => {
     const rawTarget = (overrideUrl ?? blindTargetUrl ?? '').trim();
@@ -2750,7 +2776,7 @@ The system provides deterministic transaction processing, input validation, and 
                         : 'text-[#A1A1A1] hover:text-[#EDEDED]'
                     }`}
                   >
-                    {copy.step03.tabBrd}
+                    {locale === 'id' ? brdGuard.tabTitleId : brdGuard.tabTitleEn}
                   </button>
                   <button
                     onClick={() => setStep3SubTab('PRD_CONTRACT')}
@@ -2794,9 +2820,46 @@ The system provides deterministic transaction processing, input validation, and 
                 </div>
               </div>
 
-              {/* View 1: BRD Matrix Table */}
+              {/* View 1: BRD Matrix Table & As-Built Separation (T-18 / F-27) */}
               {step3SubTab === 'BRD_MATRIX' && (
                 <div className="flex-1 bg-[#111317] border border-[#22262E] rounded-[4px] flex flex-col overflow-hidden min-h-0">
+                  {/* BRD / As-Built Rules Control Bar */}
+                  <div className="min-h-[38px] py-1.5 bg-[#16191F] border-b border-[#22262E] px-4 flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] shrink-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[#EDEDED] font-bold truncate">
+                        {brdGuard.canExport
+                          ? (locale === 'id' ? 'Aturan Bisnis Pemangku Kepentingan (BRD / StRS)' : 'Stakeholder Business Rules (BRD / StRS)')
+                          : (locale === 'id' ? 'Aturan As-Built (Hasil Discovery Otomatis)' : 'As-Built Rules (Autonomous Discovery Results)')}
+                      </span>
+                      <span className={`badge-tag px-2 py-0.5 font-bold text-[10px] shrink-0 tabular-nums ${
+                        brdGuard.canExport ? 'bg-[#059669]/20 text-[#10B981]' : 'bg-[#D97706]/20 text-[#F59E0B]'
+                      }`}>
+                        {brdGuard.canExport ? 'STAKEHOLDER SOURCE' : 'AS-BUILT DISCOVERED'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!brdGuard.canExport ? (
+                        <div
+                          className="flex items-center gap-1.5 px-2.5 py-1 bg-[#1F1608] border border-[#F59E0B]/30 text-[#FBBF24] rounded-[2px] text-[11px]"
+                          title={locale === 'id' ? 'Tambahkan notulen/PRD di Step 01' : 'Add stakeholder notes/PRD in Step 01'}
+                        >
+                          <AlertCircle className="h-3 w-3 text-[#F59E0B]" />
+                          <span>{copy.step03.brdExportDisabledNotice}</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleDownloadBrdMarkdown}
+                          className="flex items-center gap-1 px-2.5 py-1 bg-[#0B0C0E] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] rounded-[2px] transition-colors cursor-pointer"
+                          title="Download ISO 29148 BRD Specification Markdown"
+                        >
+                          <Download className="h-3 w-3 text-[#3B82F6]" />
+                          <span>{copy.step03.exportBrdBtn}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="flex-1 overflow-auto min-h-0">
                     <table className="w-full table-fixed border-collapse text-left text-[12.5px]">
                       <thead className="bg-[#16191F] text-[#707070] border-b border-[#22262E] sticky top-0 font-mono text-[11px] uppercase z-10">
@@ -2818,7 +2881,14 @@ The system provides deterministic transaction processing, input validation, and 
                             className="hover:bg-[#16191F] cursor-pointer transition-colors"
                           >
                             <td className="py-3 px-3 font-mono font-bold text-[#3B82F6] border-r border-[#22262E] whitespace-nowrap">
-                              {r.ruleId}
+                              <div className="flex items-center gap-1.5">
+                                <span>{r.ruleId}</span>
+                                {r.origin === 'STAKEHOLDER_SOURCE' ? (
+                                  <span className="badge-tag px-1 py-0.2 bg-[#059669]/20 text-[#10B981] font-mono text-[9px]">SRC</span>
+                                ) : (
+                                  <span className="badge-tag px-1 py-0.2 bg-[#D97706]/15 text-[#F59E0B] font-mono text-[9px]">DISC</span>
+                                )}
+                              </div>
                             </td>
                             <td className="py-3 px-3 font-mono text-[11px] text-[#A1A1A1] border-r border-[#22262E] whitespace-nowrap">
                               <span className="badge-tag px-1.5 py-0.5 bg-[#16191F] border border-[#22262E] text-[#EDEDED]">
@@ -2829,10 +2899,16 @@ The system provides deterministic transaction processing, input validation, and 
                               {r.statement}
                             </td>
                             <td className="py-3 px-3 font-mono text-[#059669] font-medium border-r border-[#22262E] break-words text-[12px]">
-                              {r.targetKpi}
+                              {r.targetKpi || '—'}
                             </td>
                             <td className="py-3 px-3 text-[#707070] font-mono text-[11.5px] break-all">
-                              {r.sourceMoMLine}
+                              {r.sourceQuote ? (
+                                <div title={`Source Quote: ${r.sourceQuote}`}>
+                                  <span className="text-[#93C5FD]">{r.sourceMoMLine}</span>
+                                </div>
+                              ) : (
+                                r.sourceMoMLine
+                              )}
                             </td>
                           </tr>
                         ))}

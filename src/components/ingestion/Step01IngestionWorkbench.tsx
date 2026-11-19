@@ -21,6 +21,7 @@ import {
   Lock,
   Link2,
   Layers,
+  Upload,
 } from 'lucide-react';
 import type {
   LoginSurfaceProbeResult,
@@ -178,6 +179,67 @@ export function Step01IngestionWorkbench({
   selectedEntityId,
   maskSensitiveText,
 }: Step01IngestionWorkbenchProps) {
+  const isAutonomousZeroDoc =
+    rawMoMNotes.trim().startsWith('# [AUTONOMOUS ZERO-DOC') ||
+    rawMoMNotes.trim().startsWith('[AUTONOMOUS ZERO-DOC');
+
+  const [activeNotesMode, setActiveNotesMode] = React.useState<'HUMAN_MOM' | 'AUTONOMOUS_SUMMARY'>(
+    isAutonomousZeroDoc ? 'AUTONOMOUS_SUMMARY' : 'HUMAN_MOM'
+  );
+  const [humanNotes, setHumanNotes] = React.useState<string>(
+    isAutonomousZeroDoc ? '' : rawMoMNotes
+  );
+  const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (isAutonomousZeroDoc) {
+      if (activeNotesMode === 'HUMAN_MOM' && !humanNotes) {
+        setActiveNotesMode('AUTONOMOUS_SUMMARY');
+      }
+    } else if (rawMoMNotes.length > 0 && activeNotesMode === 'HUMAN_MOM') {
+      setHumanNotes(rawMoMNotes);
+    }
+  }, [rawMoMNotes, isAutonomousZeroDoc]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const fileName = file.name.toLowerCase();
+    if (fileName.endsWith('.docx')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const buffer = event.target?.result as ArrayBuffer;
+          const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+          const matches = text.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+          if (matches && matches.length > 0) {
+            const extractedText = matches.map((m) => m.replace(/<[^>]+>/g, '')).join(' ');
+            setHumanNotes(extractedText);
+            setRawMoMNotes(extractedText);
+            setActiveNotesMode('HUMAN_MOM');
+          } else {
+            const fallback = `[Imported from ${file.name}]\nDocument uploaded. Please paste notes if formatted.`;
+            setHumanNotes(fallback);
+            setRawMoMNotes(fallback);
+            setActiveNotesMode('HUMAN_MOM');
+          }
+        } catch (err) {
+          console.error('Failed to parse docx:', err);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const text = (event.target?.result as string) || '';
+        setHumanNotes(text);
+        setRawMoMNotes(text);
+        setActiveNotesMode('HUMAN_MOM');
+      };
+      reader.readAsText(file);
+    }
+  };
+
   return (
     <div className="min-h-full flex flex-col space-y-3">
       {/* Canvas Header & Primary Action Button */}
@@ -903,25 +965,91 @@ export function Step01IngestionWorkbench({
       </div>
 
       <div className="flex-1 grid grid-cols-12 gap-4 min-h-[280px]">
-        {/* Left Column: Raw Stakeholder MoM & Notes (Hidden in Executive Mode) */}
+        {/* Left Column: Raw Stakeholder MoM & Notes / Autonomous Discovery Summary */}
         {displayMode !== 'EXECUTIVE' && (
           <div className="col-span-12 lg:col-span-5 flex flex-col bg-[#111317] border border-[#22262E] rounded-[4px] p-3 space-y-2.5 min-h-[280px]">
-            <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E] shrink-0">
-              <div className="flex items-center gap-2">
-                <FileText className="h-3.5 w-3.5 text-[#3B82F6]" />
-                <span className="text-[12.5px] font-bold text-[#EDEDED]">{copy.step01.momCardTitle}</span>
+            {/* Header with Dual Tabs: Human Notes vs Autonomous Summary */}
+            <div className="flex flex-wrap items-center justify-between pb-1.5 border-b border-[#22262E] gap-2 shrink-0">
+              <div className="flex items-center gap-1 bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[3px]">
+                <button
+                  type="button"
+                  onClick={() => setActiveNotesMode('HUMAN_MOM')}
+                  className={`px-2 py-0.5 text-[11px] font-mono rounded-[2px] transition-colors cursor-pointer ${
+                    activeNotesMode === 'HUMAN_MOM'
+                      ? 'bg-[#2563EB] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  {copy.step01.humanNotesTitle}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveNotesMode('AUTONOMOUS_SUMMARY')}
+                  className={`px-2 py-0.5 text-[11px] font-mono rounded-[2px] transition-colors cursor-pointer flex items-center gap-1 ${
+                    activeNotesMode === 'AUTONOMOUS_SUMMARY'
+                      ? 'bg-[#D97706] text-white font-bold'
+                      : 'text-[#A1A1A1] hover:text-[#EDEDED]'
+                  }`}
+                >
+                  <span>{copy.step01.discoverySummaryTitle}</span>
+                  {isAutonomousZeroDoc && (
+                    <span className="px-1 py-0.2 bg-black/40 text-[9px] rounded uppercase font-bold text-amber-200">
+                      CRAWL
+                    </span>
+                  )}
+                </button>
               </div>
-              <span className="text-[10.5px] font-mono text-[#707070] tabular-nums">
-                {rawMoMNotes.length} {copy.step01.charsLabel} · {extractedEntities.length}{' '}
-                {copy.step01.invariantsLabel}
-              </span>
+
+              {activeNotesMode === 'HUMAN_MOM' ? (
+                <div>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept=".md,.txt,.docx,.vtt,text/plain,text/markdown"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1 px-2 py-0.5 bg-[#16191F] border border-[#22262E] hover:border-[#3B82F6] text-[#EDEDED] text-[10.5px] font-mono rounded-[2px] transition-colors cursor-pointer"
+                    title={copy.step01.uploadNotesBtn}
+                  >
+                    <Upload className="h-3 w-3 text-[#3B82F6]" />
+                    <span>{copy.step01.uploadNotesBtn}</span>
+                  </button>
+                </div>
+              ) : (
+                <span className="text-[10px] font-mono text-[#F59E0B] uppercase font-bold">
+                  {locale === 'id' ? 'Hasil Discovery Otomatis' : 'Autonomous Discovery'}
+                </span>
+              )}
             </div>
 
-            <textarea
-              value={rawMoMNotes}
-              onChange={(e) => setRawMoMNotes(e.target.value)}
-              className="flex-1 w-full min-h-[160px] bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-2.5 text-[12px] font-mono leading-[1.55] text-[#EDEDED] resize-none outline-none focus:border-[#3B82F6]"
-            />
+            {activeNotesMode === 'HUMAN_MOM' ? (
+              <textarea
+                value={humanNotes}
+                onChange={(e) => {
+                  setHumanNotes(e.target.value);
+                  setRawMoMNotes(e.target.value);
+                }}
+                placeholder={copy.step01.humanNotesPlaceholder}
+                className="flex-1 w-full min-h-[160px] bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-2.5 text-[12px] font-mono leading-[1.55] text-[#EDEDED] resize-none outline-none focus:border-[#3B82F6]"
+              />
+            ) : (
+              <div className="flex-1 flex flex-col space-y-2 min-h-[160px] overflow-hidden">
+                <div className="px-2 py-1 bg-[#1F1608] border border-[#F59E0B]/30 rounded text-[10.5px] font-mono text-[#FBBF24]">
+                  {locale === 'id'
+                    ? 'Ringkasan ini dihasilkan dari penelusuran as-built tanpa dokumen sumber. Unggah atau tempel notulen manusia di tab sebelah untuk menghasilkan BRD normatif.'
+                    : 'This summary was compiled from as-built discovery without source documents. Upload or paste human notes in the other tab to generate normative BRD.'}
+                </div>
+                <textarea
+                  readOnly
+                  value={rawMoMNotes}
+                  className="flex-1 w-full min-h-[130px] bg-[#0B0C0E] border border-[#22262E] rounded-[3px] p-2.5 text-[11px] font-mono leading-[1.5] text-[#A1A1A1] resize-none outline-none cursor-default"
+                />
+              </div>
+            )}
 
             <div className="px-2.5 py-1.5 bg-[#0B0C0E] border border-[#22262E] rounded-[3px] text-[11px] text-[#A1A1A1] font-mono flex items-center justify-between gap-2 shrink-0">
               <span className="whitespace-nowrap">{copy.step01.activeScopeLabel}</span>

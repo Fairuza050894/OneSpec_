@@ -644,7 +644,14 @@ export class ModernDocumentExporterService {
     addHeading1(lib.book2BusinessAnalyst.title);
     addBody(lib.book2BusinessAnalyst.scopeSummary);
 
-    addHeading2(isId ? 'Aturan Bisnis Normatif (BRD)' : 'Normative Business Rules (BRD)');
+    const hasStakeholderBrd = (lib.book2BusinessAnalyst.brdRules || []).some(
+      (b) => b.origin === 'STAKEHOLDER_SOURCE'
+    );
+    addHeading2(
+      hasStakeholderBrd
+        ? (isId ? 'Aturan Bisnis Normatif (BRD)' : 'Normative Business Rules (BRD)')
+        : (isId ? 'Aturan As-Built (hasil discovery)' : 'As-Built Rules (Discovery Results)')
+    );
     children.push(
       makeStyledTable(
         isId ? ['ID', 'Modul', 'Pernyataan Aturan Bisnis', 'Target KPI'] : ['ID', 'Module', 'Business Rule Statement', 'Target KPI'],

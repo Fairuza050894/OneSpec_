@@ -452,28 +452,39 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
       const match = line.match(/^(?:[-*•]|\d+[.)]|#{1,3})\s*(?:\[?(?:BR|REQ|RULE)[-_ ]?(\d+)\]?[:\-]?)?\s*(.+)$/i);
       if (match && match[2] && match[2].length > 10) {
         const text = match[2].replace(/\*\*/g, '').trim();
-        if (!/^(stakeholder|mom|notes|catatan|target host|application name|harvest timestamp|overview)/i.test(text)) {
+        if (
+          !text.endsWith(':') &&
+          !/^(stakeholder|mom|notes|catatan|target host|application name|harvest timestamp|overview|core business|business rule|functional requirement|requirements|persyaratan)/i.test(text)
+        ) {
+          const kpiMatch = text.match(/(?:target\s+kpi|kpi)\s*[:=]\s*([^.,;\n]+)/i) || line.match(/(?:target\s+kpi|kpi)\s*[:=]\s*([^.,;\n]+)/i);
+          const extractedKpi = kpiMatch ? kpiMatch[1].trim() : '—';
+          const ruleNum = match[1] ? String(match[1]).padStart(2, '0') : String(ruleIdx++).padStart(2, '0');
           sourceBrdRows.push({
-            ruleId: `REQ-SRC-${String(ruleIdx++).padStart(2, '0')}`,
+            ruleId: `REQ-SRC-${ruleNum}`,
             category: 'BUSINESS_LOGIC',
             statement: text,
-            targetKpi: 'Adhere to Stakeholder Business Requirement Contract',
+            targetKpi: extractedKpi,
             sourceMoMLine: line.slice(0, 100),
+            sourceQuote: line,
             priority: 'HIGH',
             provenance: 'SOURCE_REQUIREMENT',
+            origin: 'STAKEHOLDER_SOURCE',
           });
         }
       }
     }
     if (sourceBrdRows.length === 0) {
+      const kpiMatch = candidateUserNotes.match(/(?:target\s+kpi|kpi)\s*[:=]\s*([^.,;\n]+)/i);
       sourceBrdRows.push({
         ruleId: 'REQ-SRC-01',
         category: 'BUSINESS_LOGIC',
         statement: candidateUserNotes.slice(0, 200).replace(/\n/g, ' '),
-        targetKpi: 'Stakeholder Baseline Specification Adherence',
+        targetKpi: kpiMatch ? kpiMatch[1].trim() : '—',
         sourceMoMLine: 'Stakeholder MoM Input',
+        sourceQuote: candidateUserNotes.slice(0, 200),
         priority: 'HIGH',
         provenance: 'SOURCE_REQUIREMENT',
+        origin: 'STAKEHOLDER_SOURCE',
       });
     }
   }
@@ -518,10 +529,17 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
             }
             stmt = sanitizeStatementText(stmt, noiseRules);
 
+            const cleanKpi =
+              !r.targetKpi || /100\.00% (?:Functional Conformance|Input Validation Accuracy|Data Integrity)/i.test(r.targetKpi)
+                ? '—'
+                : r.targetKpi;
+
             return {
               ...r,
               statement: stmt,
+              targetKpi: cleanKpi,
               provenance: r.provenance || 'AS_BUILT_DISCOVERED',
+              origin: 'AS_BUILT_DISCOVERED' as const,
             };
           })
           .filter((r) => !isNoiseUiControlOrInternalId(r.moduleName, noiseRules))
@@ -534,15 +552,17 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
             sourceMoMLine: `Discovered from ${targetUrl} (route: ${apis[0]?.path || '/'})`,
             priority: 'HIGH',
             provenance: 'AS_BUILT_DISCOVERED',
+            origin: 'AS_BUILT_DISCOVERED',
           },
           {
             ruleId: 'BR-02',
             category: 'DATA_INTEGRITY',
             statement: `Sistem HARUS memvalidasi seluruh parameter input bisnis dan menolak pengiriman yang tidak memenuhi invarian kontrak.`,
-            targetKpi: 'Input Rejection Accuracy: 100.00%',
+            targetKpi: '—',
             sourceMoMLine: `Extracted from form elements on ${targetUrl}`,
             priority: 'HIGH',
             provenance: 'AS_BUILT_DISCOVERED',
+            origin: 'AS_BUILT_DISCOVERED',
           },
           {
             ruleId: 'BR-03',
@@ -552,6 +572,7 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
             sourceMoMLine: `Discovered from server latency telemetry on ${targetUrl}`,
             priority: 'HIGH',
             provenance: 'AS_BUILT_DISCOVERED',
+            origin: 'AS_BUILT_DISCOVERED',
           },
         ];
 
@@ -569,11 +590,12 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
           ruleId: `BR-${String(discoveredBrdRows.length + 1).padStart(2, '0')}`,
           category: inv.category,
           statement: inv.statement,
-          targetKpi: inv.targetKpi,
+          targetKpi: inv.targetKpi || '—',
           sourceMoMLine: `Domain Brain (${mod.moduleName}: ${mod.routePath})`,
           priority: 'HIGH',
           moduleName: mod.moduleName,
           provenance: 'AS_BUILT_DISCOVERED',
+          origin: 'AS_BUILT_DISCOVERED',
         });
       }
     }
@@ -581,7 +603,7 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
 
   const brdMatrixRows: BrdMatrixRow[] = hasSourceRequirements
     ? [...sourceBrdRows, ...discoveredBrdRows]
-    : discoveredBrdRows;
+    : discoveredBrdRows.map((r) => ({ ...r, origin: 'AS_BUILT_DISCOVERED' as const }));
 
   // 4. Validation Rules (Step 02/03 - PRD) — Filter framework noise IDs and global chrome
   let validationRules: ValidationRuleContract[] =
@@ -1367,10 +1389,13 @@ export function compileGreenfieldFromMoM(projectName: string, rawMoMText: string
       ruleId: brId,
       category: isAuthFeat ? 'SECURITY_LIMIT' : 'BUSINESS_LOGIC',
       statement: `Modul "${feat.moduleName}" (${feat.routePath}) HARUS mengelola proses bisnis sesuai kebutuhan: ${summarySentence}.`,
-      targetKpi: isAuthFeat ? '100% Protected Session Gate' : '100.00% Spec Conformance',
+      targetKpi: isAuthFeat ? 'Protected Session Gate' : '—',
       sourceMoMLine: feat.summaryLines[0] || feat.moduleName,
+      sourceQuote: feat.summaryLines[0] || feat.moduleName,
       priority: 'HIGH',
       moduleName: feat.moduleName,
+      provenance: 'SOURCE_REQUIREMENT',
+      origin: 'STAKEHOLDER_SOURCE',
     });
 
     extractedEntities.push({
@@ -1518,4 +1543,42 @@ export function compileGreenfieldFromMoM(projectName: string, rawMoMText: string
   compiled.hasSourceRequirements = true;
   compiled.badgeText = `GREENFIELD PROJECT: ${cleanProjectName} · ${parsedFeatures.length} Modules, ${extractedApis.length} Proposed APIs, ${databaseTables.length} DB Tables`;
   return compiled;
+}
+
+export interface BrdExportGuardResult {
+  canExport: boolean;
+  reason?: string;
+  tabTitleEn: string;
+  tabTitleId: string;
+  asBuiltOnly: boolean;
+}
+
+/**
+ * T-18 / F-27: Strict Guard for BRD Export and Step 03 Tab Title
+ * Disables BRD export when only as-built discovery exists without stakeholder MoM/PRD.
+ */
+export function evaluateBrdExportGuard(state: {
+  hasSourceRequirements?: boolean;
+  brdMatrixRows?: BrdMatrixRow[];
+}): BrdExportGuardResult {
+  const hasStakeholderRules =
+    Boolean(state.hasSourceRequirements) ||
+    (state.brdMatrixRows || []).some((r) => r.origin === 'STAKEHOLDER_SOURCE');
+
+  if (!hasStakeholderRules) {
+    return {
+      canExport: false,
+      reason: 'Tambahkan notulen/PRD di Step 01',
+      tabTitleEn: '1. As-Built Rules (Discovery Results)',
+      tabTitleId: '1. Aturan As-Built (hasil discovery)',
+      asBuiltOnly: true,
+    };
+  }
+
+  return {
+    canExport: true,
+    tabTitleEn: '1. Business Rules (BRD)',
+    tabTitleId: '1. Aturan Bisnis (BRD)',
+    asBuiltOnly: false,
+  };
 }
