@@ -768,8 +768,10 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
         ? Math.round(executionTraces.reduce((acc, t) => acc + t.totalDurationMs, 0) / executionTraces.length)
         : 95;
     const piiFields = complianceAssessment?.scorecard?.piiExposureAudit?.piiFieldsDetected || [];
-    const smtScore = smtVerificationSummary?.formalTrustScore ?? 100;
+    const smtZ3 = smtVerificationSummary?.z3Installed ?? false;
+    const smtTrust = smtVerificationSummary?.formalTrustScore ?? null;
     const smtTotal = smtVerificationSummary?.totalInvariants ?? validationRules.length;
+    const smtProven = smtVerificationSummary?.provenCount ?? 0;
     const arbScore = delphiConsensusSummary?.consensusScorePercent ?? 98;
     const arbVerdict = delphiConsensusSummary?.clearanceVerdict || 'UNANIMOUSLY_APPROVED';
     const componentCount =
@@ -883,10 +885,14 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
           {
             stepNumber: 'Step 10',
             stepTitlePlain: '10. Pembuktian Logika Bebas Salah Hitung',
-            statusBadge: badgeLabel(smtScore >= 95 ? 'PASS' : 'WARN'),
-            statusTone: smtScore >= 95 ? 'PASS' : 'WARN',
+            statusBadge: !smtZ3
+              ? (isId ? 'Spesifikasi Saja' : 'Spec Generated')
+              : badgeLabel((smtTrust ?? 0) >= 95 ? 'PASS' : 'WARN'),
+            statusTone: !smtZ3 ? 'WARN' : (smtTrust ?? 0) >= 95 ? 'PASS' : 'WARN',
             whatWasChecked: 'Memverifikasi secara matematis bahwa aturan batas input dan transaksi bebas kontradiksi.',
-            plainResult: `${smtVerificationSummary?.provenCount ?? smtTotal}/${smtTotal} aturan terbukti konsisten (${smtScore}% terverifikasi).`,
+            plainResult: !smtZ3
+              ? `Spesifikasi logika SMT-LIB v2 selesai (${smtTotal} invarian). Solver Z3 belum dijalankan.`
+              : `${smtProven}/${smtTotal} aturan terbukti konsisten (${smtTrust}% terverifikasi).`,
             businessImpact: 'Memberi kepastian bahwa kalkulasi dan validasi sistem tidak bertabrakan.',
             targetStepId: 10,
           },
@@ -995,10 +1001,14 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
           {
             stepNumber: 'Step 10',
             stepTitlePlain: '10. Formal Logic & Invariant Proofs',
-            statusBadge: badgeLabel(smtScore >= 95 ? 'PASS' : 'WARN'),
-            statusTone: smtScore >= 95 ? 'PASS' : 'WARN',
+            statusBadge: !smtZ3
+              ? 'Spec Generated'
+              : badgeLabel((smtTrust ?? 0) >= 95 ? 'PASS' : 'WARN'),
+            statusTone: !smtZ3 ? 'WARN' : (smtTrust ?? 0) >= 95 ? 'PASS' : 'WARN',
             whatWasChecked: 'Mathematically proved input boundaries and state constraints are contradiction-free.',
-            plainResult: `${smtVerificationSummary?.provenCount ?? smtTotal} of ${smtTotal} invariants formally verified (${smtScore}% soundness).`,
+            plainResult: !smtZ3
+              ? `SMT-LIB v2 specifications generated (${smtTotal} invariants). Z3 theorem prover not executed.`
+              : `${smtProven} of ${smtTotal} invariants formally verified (${smtTrust}% soundness).`,
             businessImpact: 'Guarantees business rules cannot conflict or miscalculate edge cases.',
             targetStepId: 10,
           },

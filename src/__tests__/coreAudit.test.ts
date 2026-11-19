@@ -14,6 +14,10 @@ import { guardedFetch } from '../lib/guardedFetch';
 import { buildK6Script } from '../lib/k6ScriptBuilder';
 import { computeUnifiedQualityMetrics, isNoiseUiControlOrInternalId, cleanProjectDisplayName, type CompiledSdlcState } from '../services/sdlcCompiler';
 import { ReaBridgeService } from '../services/reaBridge';
+import { smtFormalVerifierService } from '../services/smtFormalVerifierService';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 test('Test 1: serverSecurity blocks SSRF to metadata IP and unauthorized private/loopback hosts', () => {
   // Cloud metadata endpoint
@@ -724,4 +728,128 @@ test('Test 15: Real SHA-256 canonical hashing, ECDSA P-256 seal and non-repudiat
     'https://test.pancaran-group.co.id'
   );
   assert.equal(scorecardTampered, false, 'Tampered scorecard must fail seal verification');
+});
+
+test('Test 16: SMT Formal Verifier truthfulness and noise elimination (T-09: F-12, F-30)', () => {
+  // 1. z3Installed = false yields formalTrustScore === null, provenCount === 0, and no PROVEN_CORRECT/UNSAT
+  const noZ3Summary = smtFormalVerifierService.verifyInvariants({
+    appName: 'Pancaran Test App',
+    targetUrl: 'https://test.pancaran-group.co.id',
+    apiEndpoints: [],
+    databaseTables: [{ id: 'tbl-01', tableName: 'Shipments', columns: [], primaryKeys: ['id'] }],
+    validationRules: [
+      {
+        ruleId: 'VR-01',
+        userStoryId: 'REQ-US-01',
+        fieldName: 'weight_kg',
+        dataType: 'number',
+        constraintExpression: 'weight_kg > 0',
+        errorCode: 'ERR_INVALID_WEIGHT',
+        httpStatus: 422,
+        exactUiErrorString: 'Berat harus lebih dari 0',
+      },
+      {
+        ruleId: 'VR-02',
+        userStoryId: 'REQ-US-02',
+        fieldName: 'password',
+        dataType: 'string',
+        constraintExpression: '^.{6,64}$',
+        errorCode: 'ERR_PASS_LEN',
+        httpStatus: 400,
+        exactUiErrorString: 'Password minimal 6 karakter',
+      },
+      // Noise fields that should be purged
+      {
+        ruleId: 'select_3',
+        userStoryId: 'REQ-US-03',
+        fieldName: 'field-_r_d_',
+        dataType: 'string',
+        constraintExpression: '^.{1,10}$',
+        errorCode: 'ERR_NOISE',
+        httpStatus: 400,
+        exactUiErrorString: 'Noise error',
+      },
+    ],
+    businessRules: [],
+    customZ3Binary: null, // explicitly simulate no Z3 installed
+  });
+
+  assert.equal(noZ3Summary.z3Installed, false, 'z3Installed must be false when binary is null');
+  assert.equal(noZ3Summary.formalTrustScore, null, 'formalTrustScore must be null (not 100) when z3 is not installed');
+  assert.equal(noZ3Summary.provenCount, 0, 'provenCount must be 0 when z3 is not installed');
+
+  // Verify no invariant claims PROVEN_CORRECT or UNSAT
+  for (const inv of noZ3Summary.invariants) {
+    assert.notEqual(inv.solverVerdict, 'PROVEN_CORRECT', `Invariant ${inv.id} must not claim PROVEN_CORRECT when Z3 did not run`);
+    assert.notEqual(inv.solverSatisfiability, 'UNSAT', `Invariant ${inv.id} must not claim UNSAT when Z3 did not run`);
+    assert.equal(inv.solverVerdict, 'SPEC_GENERATED');
+    assert.equal(inv.solverSatisfiability, 'NOT_SOLVED');
+  }
+
+  // 2. Framework noise elimination: 'field-_r_d_' and 'select_3' must not appear in invariants
+  const invariantTitles = noZ3Summary.invariants.map((i) => i.title).join(' ');
+  const invariantMaths = noZ3Summary.invariants.map((i) => i.mathematicalStatement).join(' ');
+  assert.equal(invariantTitles.includes('field-_r_d_'), false, 'Framework noise ID field-_r_d_ must be purged');
+  assert.equal(invariantTitles.includes('select_3'), false, 'Framework noise ID select_3 must be purged');
+  assert.equal(invariantMaths.includes('field-_r_d_'), false, 'Framework noise ID must not appear in mathematicalStatement');
+
+  // 3. Regex predicate has balanced parentheses
+  const passwordInv = noZ3Summary.invariants.find((i) => i.title.includes('password'));
+  assert.ok(passwordInv, 'Invariant for password should exist');
+  const math = passwordInv.mathematicalStatement;
+  assert.ok(math.includes('text{Regex}('), `Mathematical statement must contain \\text{Regex}(: ${math}`);
+  assert.ok(math.includes('6,64'), `Mathematical statement must contain bounds 6,64: ${math}`);
+  const openParens = (math.match(/\(/g) || []).length;
+  const closeParens = (math.match(/\)/g) || []).length;
+  assert.equal(openParens, closeParens, 'Parentheses in mathematicalStatement must be strictly balanced');
+  const openBraces = (math.match(/\{/g) || []).length;
+  const closeBraces = (math.match(/\}/g) || []).length;
+  assert.equal(openBraces, closeBraces, 'Curly braces in mathematicalStatement must be strictly balanced');
+
+  // 4. Markdown specification displays '—' for NOT_SOLVED invariants
+  const md = noZ3Summary.formalSpecificationText;
+  assert.ok(md.includes('| — | — |'), 'Markdown table must render — for Satisfiability and Verdict when NOT_SOLVED');
+  assert.equal(md.includes('**`UNSAT`**'), false, 'Markdown must not claim UNSAT when Z3 did not run');
+  assert.equal(md.includes('`PROVEN_CORRECT`'), false, 'Markdown must not claim PROVEN_CORRECT when Z3 did not run');
+
+  // 5. Test with mock Z3 binary that returns 'unsat'
+  const tmpDir = os.tmpdir();
+  const mockZ3Path = path.join(tmpDir, `mock-z3-${Date.now()}.sh`);
+  fs.writeFileSync(mockZ3Path, '#!/bin/sh\necho "unsat"\n', { mode: 0o755 });
+
+  try {
+    const liveZ3Summary = smtFormalVerifierService.verifyInvariants({
+      appName: 'Pancaran Proved App',
+      targetUrl: 'https://test.pancaran-group.co.id',
+      apiEndpoints: [],
+      databaseTables: [{ id: 'tbl-01', tableName: 'Shipments', columns: [], primaryKeys: ['id'] }],
+      validationRules: [
+        {
+          ruleId: 'VR-01',
+          userStoryId: 'REQ-US-01',
+          fieldName: 'weight_kg',
+          dataType: 'number',
+          constraintExpression: 'weight_kg > 0',
+          errorCode: 'ERR_INVALID_WEIGHT',
+          httpStatus: 422,
+          exactUiErrorString: 'Berat harus lebih dari 0',
+        },
+      ],
+      businessRules: [],
+      customZ3Binary: mockZ3Path,
+    });
+
+    assert.equal(liveZ3Summary.z3Installed, true);
+    assert.ok(liveZ3Summary.provenCount > 0, 'Proven count should be > 0 when Z3 returns unsat');
+    assert.equal(liveZ3Summary.formalTrustScore, Math.round((liveZ3Summary.provenCount / liveZ3Summary.totalInvariants) * 100));
+    const provenInv = liveZ3Summary.invariants.find((i) => i.solverVerdict === 'PROVEN_CORRECT');
+    assert.ok(provenInv, 'At least one invariant must have PROVEN_CORRECT');
+    assert.equal(provenInv.solverSatisfiability, 'UNSAT');
+  } finally {
+    try {
+      fs.unlinkSync(mockZ3Path);
+    } catch {
+      // ignore
+    }
+  }
 });

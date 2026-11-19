@@ -151,7 +151,7 @@ export function SmtFormalVerifierWorkbench({
             }`}
           >
             {summary.z3Installed
-              ? `VERIFIED_BY_Z3_SOLVER (${summary.formalTrustScore}% UNSAT)`
+              ? `VERIFIED_BY_Z3_SOLVER (${summary.formalTrustScore !== null ? summary.formalTrustScore : 0}% UNSAT)`
               : 'SMT_LIB2_SPEC_GENERATED (Z3 Binary Not Installed)'}
           </span>
           <span className="badge-tag px-1.5 py-0.2 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[9.5px] whitespace-nowrap">
@@ -216,7 +216,11 @@ export function SmtFormalVerifierWorkbench({
 
           <button
             onClick={handleDownloadSmt2}
-            className="px-2.5 py-1 bg-[#1E293B] hover:bg-[#334155] border border-emerald-700/60 text-emerald-300 font-mono text-[11px] rounded-[2px] transition-colors cursor-pointer flex items-center gap-1.5"
+            className={`px-2.5 py-1 text-emerald-300 font-mono text-[11px] rounded-[2px] transition-colors cursor-pointer flex items-center gap-1.5 ${
+              !summary.z3Installed
+                ? 'bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-500 font-bold shadow-sm shadow-emerald-900/50'
+                : 'bg-[#1E293B] hover:bg-[#334155] border border-emerald-700/60'
+            }`}
             title="Download pure SMT-LIB v2 (.smt2) file for external Z3 verification"
           >
             <Download className="h-3.5 w-3.5 text-emerald-400" />
@@ -256,22 +260,22 @@ export function SmtFormalVerifierWorkbench({
             </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
-            <span className="text-[10px] text-[#707070] uppercase font-bold">
-              {summary.z3Installed ? 'Violations (SAT)' : 'Host Solver'}
-            </span>
-            <span className="text-[18px] font-bold text-[#F59E0B] tabular-nums truncate">
-              {summary.z3Installed ? summary.violatedCount : 'Z3 Missing'}
+            <span className="text-[10px] text-[#707070] uppercase font-bold">Host Solver</span>
+            <span className={`text-[16px] font-bold tabular-nums truncate ${summary.z3Installed ? 'text-[#10B981]' : 'text-amber-400'}`}>
+              {summary.z3Installed ? 'Z3 Prover Active' : 'Tidak terpasang'}
             </span>
             <span className="text-[9.5px] text-[#A1A1A1]">
-              {summary.z3Installed ? 'Refuted Invariants' : 'Download .smt2'}
+              {summary.z3Installed ? `${summary.violatedCount} Violations (SAT)` : 'Download .smt2'}
             </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Formal Trust</span>
-            <span className="text-[18px] font-bold text-[#3B82F6] tabular-nums">
-              {summary.formalTrustScore}%
+            <span className={`text-[18px] font-bold tabular-nums ${summary.formalTrustScore !== null ? 'text-[#3B82F6]' : 'text-zinc-400'}`}>
+              {summary.formalTrustScore !== null ? `${summary.formalTrustScore}%` : 'N/A (tidak diselesaikan)'}
             </span>
-            <span className="text-[9.5px] text-[#3B82F6]">Soundness Level</span>
+            <span className="text-[9.5px] text-[#A1A1A1]">
+              {summary.formalTrustScore !== null ? 'Soundness Level' : 'Z3 Belum Dijalankan'}
+            </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Standard</span>
@@ -312,7 +316,11 @@ export function SmtFormalVerifierWorkbench({
                       .replace(/\\implies/g, '⇒')
                       .replace(/\\quad/g, ' ')
                       .replace(/\\;/g, ' ')
-                      .replace(/\\text\{([^}]+)\}/g, '$1');
+                      .replace(/\\texttt\{([^}]+)\}/g, '$1')
+                      .replace(/\\text\{([^}]+)\}/g, '$1')
+                      .replace(/\\\\\$/g, '$')
+                      .replace(/\\\$/g, '$')
+                      .replace(/\\\^{}/g, '^');
                     return (
                     <tr
                       key={inv.id}
@@ -327,26 +335,34 @@ export function SmtFormalVerifierWorkbench({
                         {formattedMath}
                       </td>
                       <td className="p-2.5 border-r border-[#22262E]">
-                        <span
-                          className={`badge-tag px-1.5 py-0.2 rounded font-bold text-[9px] ${
-                            inv.solverSatisfiability === 'UNSAT'
-                              ? 'bg-[#059669]/20 text-[#10B981]'
-                              : 'bg-[#DC2626]/20 text-[#EF4444]'
-                          }`}
-                        >
-                          {inv.solverSatisfiability}
-                        </span>
+                        {inv.solverSatisfiability === 'NOT_SOLVED' ? (
+                          <span className="text-zinc-500 font-mono text-[11px]">—</span>
+                        ) : (
+                          <span
+                            className={`badge-tag px-1.5 py-0.2 rounded font-bold text-[9px] ${
+                              inv.solverSatisfiability === 'UNSAT'
+                                ? 'bg-[#059669]/20 text-[#10B981]'
+                                : 'bg-[#DC2626]/20 text-[#EF4444]'
+                            }`}
+                          >
+                            {inv.solverSatisfiability}
+                          </span>
+                        )}
                       </td>
                       <td className="p-2.5 border-r border-[#22262E]">
-                        <span
-                          className={`badge-tag px-1.5 py-0.2 rounded font-bold text-[9px] ${
-                            inv.solverVerdict === 'PROVEN_CORRECT'
-                              ? 'bg-[#059669]/20 text-[#10B981]'
-                              : 'bg-[#DC2626]/20 text-[#EF4444]'
-                          }`}
-                        >
-                          {inv.solverVerdict}
-                        </span>
+                        {inv.solverVerdict === 'SPEC_GENERATED' ? (
+                          <span className="text-zinc-500 font-mono text-[11px]">—</span>
+                        ) : (
+                          <span
+                            className={`badge-tag px-1.5 py-0.2 rounded font-bold text-[9px] ${
+                              inv.solverVerdict === 'PROVEN_CORRECT'
+                                ? 'bg-[#059669]/20 text-[#10B981]'
+                                : 'bg-[#DC2626]/20 text-[#EF4444]'
+                            }`}
+                          >
+                            {inv.solverVerdict}
+                          </span>
+                        )}
                       </td>
                       <td className="p-2.5 text-[#A1A1A1] text-[10px] font-sans">
                         {inv.proofDescription}
@@ -368,9 +384,21 @@ export function SmtFormalVerifierWorkbench({
                       [{selectedInvariant.id}] {selectedInvariant.title}
                     </span>
                   </div>
-                  <span className="badge-tag px-2 py-0.5 bg-[#059669]/20 text-[#10B981] font-bold text-[9.5px]">
-                    SMT Satisfiability: {selectedInvariant.solverSatisfiability} (Proof Complete)
-                  </span>
+                  {selectedInvariant.solverSatisfiability === 'NOT_SOLVED' ? (
+                    <span className="badge-tag px-2 py-0.5 bg-zinc-800 text-zinc-400 font-bold text-[9.5px]">
+                      SMT Satisfiability: Spec Generated (Z3 not executed)
+                    </span>
+                  ) : (
+                    <span
+                      className={`badge-tag px-2 py-0.5 font-bold text-[9.5px] ${
+                        selectedInvariant.solverSatisfiability === 'UNSAT'
+                          ? 'bg-[#059669]/20 text-[#10B981]'
+                          : 'bg-[#DC2626]/20 text-[#EF4444]'
+                      }`}
+                    >
+                      SMT Satisfiability: {selectedInvariant.solverSatisfiability} ({selectedInvariant.solverVerdict === 'PROVEN_CORRECT' ? 'Proof Complete' : 'Invariant Refuted'})
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-1">

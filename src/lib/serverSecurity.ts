@@ -83,6 +83,14 @@ export function isPrivateOrLoopbackHost(hostname: string): boolean {
   return false;
 }
 
+function getEnvVar(name: string): string {
+  if (typeof globalThis !== 'undefined') {
+    const proc = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process;
+    return proc?.env?.[name] || '';
+  }
+  return '';
+}
+
 /**
  * Validates a target URL against SSRF attacks.
  * Allows private/loopback hosts ONLY if they are explicitly in allowedTargetHosts or ONESPEC_ALLOWED_TARGET_HOSTS.
@@ -122,7 +130,7 @@ export function validateUrlForSsrf(
   }
 
   // Build permitted host list from env and session
-  const envAllowed = (process.env.ONESPEC_ALLOWED_TARGET_HOSTS || '')
+  const envAllowed = getEnvVar('ONESPEC_ALLOWED_TARGET_HOSTS')
     .split(',')
     .map((h) => h.trim().toLowerCase())
     .filter(Boolean);
@@ -234,7 +242,7 @@ export function allowedOriginSet(): Set<string> {
     'http://localhost:8080',
     'http://127.0.0.1:8080',
   ];
-  const extra = (process.env.ONESPEC_ALLOWED_ORIGINS || '')
+  const extra = getEnvVar('ONESPEC_ALLOWED_ORIGINS')
     .split(',')
     .map((s) => normalizeOrigin(s.trim()))
     .filter(Boolean);
@@ -258,7 +266,7 @@ export function verifyInternalOriginOrToken(req: Request | NextRequest): {
   reason?: string;
 } {
   const h = req.headers;
-  const expected = process.env.ONESPEC_SESSION_TOKEN || '';
+  const expected = getEnvVar('ONESPEC_SESSION_TOKEN');
   const provided = h.get('x-onespec-session-token') || '';
 
   // 1. Session token validation (must be configured, >= 32 chars, and match constant-time)

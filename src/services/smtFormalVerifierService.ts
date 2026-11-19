@@ -16,6 +16,7 @@ import type {
   DiscoveredFeatureModule,
   GapAuditItem,
 } from '@/types/sdlc';
+import { isNoiseUiControlOrInternalId } from './sdlcCompiler';
 
 export type SmtLogicCategory =
   | 'BALANCE_NON_NEGATIVE'
@@ -45,7 +46,7 @@ export interface SmtFormalVerificationSummary {
   totalInvariants: number;
   provenCount: number;
   violatedCount: number;
-  formalTrustScore: number; // percentage
+  formalTrustScore: number | null; // percentage or null when z3 is not installed
   z3Installed: boolean;
   solverEngine: string;
   invariants: SmtFormalInvariant[];
@@ -62,6 +63,7 @@ export interface SmtVerifyParams {
   businessRules: BrdMatrixRow[];
   discoveredFeatureModules?: DiscoveredFeatureModule[] | FeatureModuleSurface[];
   gapAuditItems?: GapAuditItem[] | AuditDiscrepancyItem[];
+  customZ3Binary?: string | null;
 }
 
 export class SmtFormalVerifierService {
@@ -79,6 +81,9 @@ export class SmtFormalVerifierService {
   private detectZ3Binary(): string | null {
     if (typeof window !== 'undefined') return null;
     try {
+      const proc = typeof globalThis !== 'undefined' ? (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process : undefined;
+      if (proc?.env?.ONESPEC_FORCE_NO_Z3 === 'true') return null;
+      if (proc?.env?.ONESPEC_MOCK_Z3_BINARY) return proc.env.ONESPEC_MOCK_Z3_BINARY;
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const fs = require('fs');
       const candidates = ['/opt/homebrew/bin/z3', '/usr/local/bin/z3', '/usr/bin/z3'];
@@ -166,7 +171,7 @@ export class SmtFormalVerifierService {
       businessRules = [],
     } = params;
 
-    const z3Binary = this.detectZ3Binary();
+    const z3Binary = params.customZ3Binary !== undefined ? params.customZ3Binary : this.detectZ3Binary();
     const z3Installed = Boolean(z3Binary);
     const solverEngine = z3Installed
       ? 'VERIFIED_BY_Z3_SOLVER'
@@ -176,8 +181,11 @@ export class SmtFormalVerifierService {
     const invariants: SmtFormalInvariant[] = [];
     const nextId = () => `INV-SMT-${String(invariants.length + 1).padStart(3, '0')}`;
 
-    // 1. Dynamic SMT Invariants from Validation Rules (SyRS)
-    validationRules.forEach((vr) => {
+    // 1. Dynamic SMT Invariants from Validation Rules (SyRS) - purges framework noise IDs
+    const cleanValidationRules = validationRules.filter(
+      (vr) => !isNoiseUiControlOrInternalId(vr.fieldName) && !isNoiseUiControlOrInternalId(vr.ruleId)
+    );
+    cleanValidationRules.forEach((vr) => {
       const cleanVar = vr.fieldName.replace(/[^a-zA-Z0-9_]/g, '_') || 'input_field';
       const isNum = vr.dataType === 'number';
 
@@ -226,11 +234,19 @@ export class SmtFormalVerifierService {
           `SMT solver demonstrated that under schema guard ${vr.ruleId}, malformed string input is completely unsatisfiable.`
         );
 
+        // Escape regex special characters ($ and ^) and wrap in double quotes within text/texttt
+        // Ensures balanced parentheses and prevents $ from prematurely closing LaTeX math mode
+        const rawExpr = vr.constraintExpression || '^[A-Za-z0-9_.-]{3,30}$';
+        const safeExpr = rawExpr
+          .replace(/\\/g, '\\\\')
+          .replace(/\$/g, '\\$')
+          .replace(/\^/g, '\\^{}');
+
         invariants.push({
           id: nextId(),
           title: `String Length & Regex Invariant (${vr.fieldName})`,
           category: 'INPUT_BOUNDARY',
-          mathematicalStatement: `\\forall s \\in \\text{Inputs}(${vr.fieldName}), \\; 1 \\le |s| \\le 255 \\quad \\land \\quad s \\sim \\text{Regex}(${vr.constraintExpression})`,
+          mathematicalStatement: `\\forall s \\in \\text{Inputs}(${vr.fieldName}), \\; 1 \\le |s| \\le 255 \\quad \\land \\quad s \\sim \\text{Regex}(\\texttt{"${safeExpr}"})`,
           smtLibScript: smtScript,
           solverVerdict: sol.verdict,
           solverSatisfiability: sol.satisfiability,
@@ -374,16 +390,19 @@ export class SmtFormalVerifierService {
       evaluatedAt: assessedAt,
     });
 
-    // 6. Evidence-Driven SMT Verification from Live Gap Audit & Anomalies
+    // 6. Evidence-Driven SMT Verification from Live Gap Audit & Anomalies (excluding noise)
     const violatingGaps = (params.gapAuditItems || []).filter(
       (g) =>
-        g.gapCategory === 'MISSING_VALIDATION' ||
-        g.gapCategory === 'HTTP_ERROR' ||
-        g.verdict === 'SCHEMA_TYPE_MISMATCH' ||
-        g.verdict === 'MISSING_IN_BACKEND' ||
-        g.verdict === 'UNDOCUMENTED_SHADOW_API' ||
-        g.severity === 'CRITICAL' ||
-        g.severity === 'MAJOR'
+        !isNoiseUiControlOrInternalId(g.targetEntity) &&
+        !isNoiseUiControlOrInternalId(g.discrepancyTitle) &&
+        !isNoiseUiControlOrInternalId(g.ruleRef) &&
+        (g.gapCategory === 'MISSING_VALIDATION' ||
+          g.gapCategory === 'HTTP_ERROR' ||
+          g.verdict === 'SCHEMA_TYPE_MISMATCH' ||
+          g.verdict === 'MISSING_IN_BACKEND' ||
+          g.verdict === 'UNDOCUMENTED_SHADOW_API' ||
+          g.severity === 'CRITICAL' ||
+          g.severity === 'MAJOR')
     );
 
     violatingGaps.slice(0, 3).forEach((gap) => {
@@ -426,13 +445,20 @@ export class SmtFormalVerifierService {
       });
     });
 
-    // 7. Dynamic Invariant Check across Discovered Feature Modules
-    (params.discoveredFeatureModules || []).slice(0, 2).forEach((mod) => {
-      if (mod.formsAndModals && mod.formsAndModals.length > 0) {
-        const form = mod.formsAndModals[0];
-        const inputName = form.inputs?.[0]?.name || 'module_payload';
-        const cleanInput = inputName.replace(/[^a-zA-Z0-9_]/g, '_');
-        const smtScript = `; SMT-LIB v2 Form Input Completeness Invariant on ${mod.moduleName}
+    // 7. Dynamic Invariant Check across Discovered Feature Modules (excluding noise)
+    (params.discoveredFeatureModules || [])
+      .filter((mod) => !isNoiseUiControlOrInternalId(mod.moduleName))
+      .slice(0, 2)
+      .forEach((mod) => {
+        if (mod.formsAndModals && mod.formsAndModals.length > 0) {
+          const form = mod.formsAndModals[0];
+          const cleanInputs = (form.inputs || []).filter(
+            (inp) => inp.name && !isNoiseUiControlOrInternalId(inp.name)
+          );
+          if (cleanInputs.length === 0) return;
+          const inputName = cleanInputs[0]?.name || 'module_payload';
+          const cleanInput = inputName.replace(/[^a-zA-Z0-9_]/g, '_');
+          const smtScript = `; SMT-LIB v2 Form Input Completeness Invariant on ${mod.moduleName}
 (set-logic QF_S)
 (declare-const ${cleanInput} String)
 ; Required non-empty submission contract
@@ -441,33 +467,37 @@ export class SmtFormalVerifierService {
 (assert (= (str.len ${cleanInput}) 0))
 (check-sat)`;
 
-        const solMod = this.solveWithZ3(
-          smtScript,
-          z3Binary,
-          `SMT solver proved that mandatory form inputs for ${mod.moduleName} cannot be submitted with null or zero-length payloads.`
-        );
+          const solMod = this.solveWithZ3(
+            smtScript,
+            z3Binary,
+            `SMT solver proved that mandatory form inputs for ${mod.moduleName} cannot be submitted with null or zero-length payloads.`
+          );
 
-        invariants.push({
-          id: nextId(),
-          title: `UI Input Schema Non-Empty Invariant (${mod.moduleName})`,
-          category: 'INPUT_BOUNDARY',
-          mathematicalStatement: `\\forall p \\in \\text{Submissions}(${mod.moduleName}), \\; |p.${cleanInput}| > 0`,
-          smtLibScript: smtScript,
-          solverVerdict: solMod.verdict,
-          solverSatisfiability: solMod.satisfiability,
-          proofDescription: solMod.proof,
-          remediationGuidance: `Enforce client and server schema validation requiring ${inputName}.`,
-          evaluatedAt: assessedAt,
-        });
-      }
-    });
+          invariants.push({
+            id: nextId(),
+            title: `UI Input Schema Non-Empty Invariant (${mod.moduleName})`,
+            category: 'INPUT_BOUNDARY',
+            mathematicalStatement: `\\forall p \\in \\text{Submissions}(${mod.moduleName}), \\; |p.${cleanInput}| > 0`,
+            smtLibScript: smtScript,
+            solverVerdict: solMod.verdict,
+            solverSatisfiability: solMod.satisfiability,
+            proofDescription: solMod.proof,
+            remediationGuidance: `Enforce client and server schema validation requiring ${inputName}.`,
+            evaluatedAt: assessedAt,
+          });
+        }
+      });
 
     const totalInvariants = invariants.length;
-    const provenCount = invariants.filter((i) => i.solverVerdict === 'PROVEN_CORRECT').length;
-    const violatedCount = invariants.filter((i) => i.solverVerdict === 'INVARIANT_VIOLATED').length;
+    const provenCount = z3Installed
+      ? invariants.filter((i) => i.solverVerdict === 'PROVEN_CORRECT').length
+      : 0;
+    const violatedCount = z3Installed
+      ? invariants.filter((i) => i.solverVerdict === 'INVARIANT_VIOLATED').length
+      : 0;
     const formalTrustScore = z3Installed
       ? (totalInvariants > 0 ? Math.round((provenCount / totalInvariants) * 100) : 0)
-      : (totalInvariants > 0 ? 100 : 0);
+      : null;
 
     const formalSpecificationText = this.generateFormalSpecMarkdown(appName, invariants, z3Installed);
 
@@ -501,8 +531,11 @@ export class SmtFormalVerifierService {
 | :--- | :--- | :--- | :--- | :--- |
 ${invariants
   .map(
-    (i) =>
-      `| \`${i.id}\` | **${i.category}** | \`${i.mathematicalStatement}\` | **\`${i.solverSatisfiability}\`** | \`${i.solverVerdict}\` |`
+    (i) => {
+      const sat = i.solverSatisfiability === 'NOT_SOLVED' ? '—' : `**\`${i.solverSatisfiability}\`**`;
+      const verd = i.solverVerdict === 'SPEC_GENERATED' ? '—' : `\`${i.solverVerdict}\``;
+      return `| \`${i.id}\` | **${i.category}** | \`${i.mathematicalStatement}\` | ${sat} | ${verd} |`;
+    }
   )
   .join('\n')}
 
@@ -513,7 +546,7 @@ ${invariants
   .map(
     (i) => `### [${i.id}] ${i.title}
 - **Category:** \`${i.category}\`
-- **Verdict:** \`${i.solverVerdict}\` (Satisfiability: \`${i.solverSatisfiability}\`)
+- **Verdict:** ${i.solverVerdict === 'SPEC_GENERATED' ? '— (Specification Generated)' : `\`${i.solverVerdict}\``} (Satisfiability: ${i.solverSatisfiability === 'NOT_SOLVED' ? '— (Not Solved)' : `\`${i.solverSatisfiability}\``})
 - **Mathematical Specification:**
 $$${i.mathematicalStatement}$$
 - **Formal Proof Explanation:** ${i.proofDescription}
