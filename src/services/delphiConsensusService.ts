@@ -42,19 +42,30 @@ export interface DelphiRound {
   entries: DelphiDebateEntry[];
 }
 
+export type SignOffStatus = 'SIGNED_APPROVED' | 'SIGNED_WITH_CONDITIONS' | 'CHALLENGED_UNRESOLVED';
+
+export type DelphiClearanceVerdict =
+  | 'UNANIMOUS_APPROVE'
+  | 'UNANIMOUSLY_APPROVED'
+  | 'CONDITIONAL'
+  | 'APPROVED_WITH_CONDITIONS'
+  | 'NOT_CONSENSUS'
+  | 'VETOED';
+
 export interface PersonaSignOffSeal {
   persona: DelphiPersona;
   personaTitle: string;
   signerDesignation: string;
   signatureDigest: string; // SHA-256
-  status: 'SIGNED_APPROVED' | 'SIGNED_WITH_CONDITIONS';
+  status: SignOffStatus;
   stipulations: string[];
   signedAt: string;
 }
 
 export interface DelphiConsensusSummary {
-  consensusScorePercent: number; // e.g. 96%
-  clearanceVerdict: 'UNANIMOUSLY_APPROVED' | 'APPROVED_WITH_CONDITIONS' | 'VETOED';
+  consensusScorePercent: number; // calculated weighted stance score (APPROVE=100, CONDITIONAL=50, CHALLENGE=0)
+  convergenceScorePercent: number; // calculated majority agreement percentage (e.g. 5/6 = 83%)
+  clearanceVerdict: DelphiClearanceVerdict;
   totalRounds: number;
   totalDebates: number;
   rounds: DelphiRound[];
@@ -71,6 +82,24 @@ export interface DelphiSimulateParams {
   validationRules: ValidationRuleContract[];
   businessRules: BrdMatrixRow[];
   rtmRows?: SynthesizedRtmRow[];
+  executionTraces?: Array<{ overallVerdict?: string; status?: string; totalDurationMs?: number }>;
+  gateVerdict?: 'GO' | 'CONDITIONAL_GO' | 'NO_GO';
+  dastStatus?: string;
+  dastFindings?: Array<{ severity: string; ruleId?: string; id?: string; title?: string }>;
+  isAsBuiltOnly?: boolean;
+  hasStakeholderRequirements?: boolean;
+  dbSchemaInferred?: boolean;
+  complianceRate?: number;
+  docsStaleOrIncomplete?: boolean;
+  evidenceIds?: {
+    qaRunId?: string;
+    gapId?: string;
+    apiEndpointId?: string;
+    brdId?: string;
+    dbTableId?: string;
+    secFindingId?: string;
+    rtmId?: string;
+  };
 }
 
 export class DelphiConsensusService {
@@ -110,6 +139,133 @@ export class DelphiConsensusService {
     const primaryVr = validationRules[0]?.fieldName || 'amount';
     const isHttps = targetUrl.startsWith('https://') || targetUrl.includes('localhost');
 
+    // Artifact IDs for evidence reference (real IDs, zero static certificate claims)
+    const qaEvidenceId = params.evidenceIds?.qaRunId || (rtmRows[0]?.testId ? `${rtmRows[0].testId}` : 'RUN-007');
+    const secEvidenceId = params.evidenceIds?.secFindingId || (apiEndpoints[0]?.id ? `EP-${apiEndpoints[0].id}` : 'EP-001');
+    const brdEvidenceId = params.evidenceIds?.brdId || (businessRules[0]?.ruleId ? `${businessRules[0].ruleId}` : 'BRD-001');
+    const dbaEvidenceId = params.evidenceIds?.dbTableId || (databaseTables[0]?.id ? `TBL-${databaseTables[0].id}` : 'TBL-001');
+    const grcEvidenceId = params.evidenceIds?.gapId || 'GAP-001';
+    const docEvidenceId = 'DOC-001';
+
+    // 1. Determine Effective Gate Verdict
+    let effectiveGateVerdict = params.gateVerdict;
+    if (!effectiveGateVerdict) {
+      if (params.executionTraces && params.executionTraces.length > 0) {
+        const failed = params.executionTraces.filter((t) => t.overallVerdict === 'FAILED' || t.status === 'FAILED').length;
+        const warning = params.executionTraces.filter((t) => t.overallVerdict === 'BOTTLENECK_DETECTED' || t.status === 'WARNING').length;
+        const passed = params.executionTraces.filter((t) => t.overallVerdict === 'PASSED' || t.status === 'PASSED').length;
+        const total = params.executionTraces.length;
+        const passRate = total > 0 ? (passed / total) * 100 : 0;
+        if (failed > 0 || passRate < 70) {
+          effectiveGateVerdict = 'NO_GO';
+        } else if (warning > 0 || passRate < 95) {
+          effectiveGateVerdict = 'CONDITIONAL_GO';
+        } else {
+          effectiveGateVerdict = 'GO';
+        }
+      } else {
+        effectiveGateVerdict = 'NO_GO';
+      }
+    }
+
+    // 2. Derive Round 3 Persona Stances from System State (Rule-Based Review)
+    // QA_LEAD: gate === 'GO' -> APPROVE; 'CONDITIONAL_GO' -> CONDITIONAL_APPROVAL; 'NO_GO' -> CHALLENGE
+    let qaStance: DebateStance;
+    let qaStatement: string;
+    if (effectiveGateVerdict === 'GO') {
+      qaStance = 'APPROVE';
+      qaStatement = `Tinjauan kualitas menyetujui rilis: pengujian regresi otomatis memenuhi ambang batas rilis (Release Gate: GO). Seluruh jalur kritis terverifikasi.`;
+    } else if (effectiveGateVerdict === 'CONDITIONAL_GO') {
+      qaStance = 'CONDITIONAL_APPROVAL';
+      qaStatement = `Tinjauan kualitas disetujui bersyarat: Release Gate berstatus CONDITIONAL_GO. Terdapat peringatan uji yang memerlukan pemantauan regresi saat staging.`;
+    } else {
+      qaStance = 'CHALLENGE';
+      qaStatement = `Tinjauan kualitas menolak rilis: Release Gate berstatus NO_GO. Terdapat kegagalan pengujian atau ambang batas kelulusan belum terpenuhi.`;
+    }
+
+    // APPSEC: critical/high findings -> CHALLENGE; DAST NOT_RUN -> CONDITIONAL_APPROVAL; clean -> APPROVE
+    const hasCriticalHigh = (params.dastFindings || []).some(
+      (f) => f.severity === 'CRITICAL' || f.severity === 'HIGH'
+    );
+    const isDastNotRun = !params.dastStatus || params.dastStatus === 'NOT_RUN';
+    let appsecStance: DebateStance;
+    let appsecStatement: string;
+    let appsecEvidenceId: string;
+    if (hasCriticalHigh) {
+      appsecStance = 'CHALLENGE';
+      appsecStatement = `Tinjauan keamanan menolak rilis: terdeteksi temuan kerentanan berisiko kritis/tinggi yang belum termitigasi pada target sistem.`;
+      appsecEvidenceId = params.evidenceIds?.secFindingId || params.dastFindings?.[0]?.id || 'SEC-001';
+    } else if (isDastNotRun) {
+      appsecStance = 'CONDITIONAL_APPROVAL';
+      appsecStatement = `Tinjauan keamanan disetujui bersyarat: pemindaian aktif (DAST) belum dijalankan (status NOT_RUN). Diperlukan probe keamanan sebelum promosi ke produksi.`;
+      appsecEvidenceId = 'SEC-DAST-PENDING';
+    } else {
+      appsecStance = 'APPROVE';
+      appsecStatement = `Tinjauan keamanan menyetujui rilis: tidak ditemukan kerentanan terbuka kritis pada endpoint terdaftar.`;
+      appsecEvidenceId = secEvidenceId;
+    }
+
+    // BSA: baseline requirement berasal dari as-built discovery saja -> CONDITIONAL_APPROVAL; < 50% -> CHALLENGE
+    const isAsBuilt = params.isAsBuiltOnly !== undefined ? params.isAsBuiltOnly : !params.hasStakeholderRequirements;
+    const complianceRate = params.complianceRate !== undefined ? params.complianceRate : 88;
+    let bsaStance: DebateStance;
+    let bsaStatement: string;
+    if (complianceRate < 50) {
+      bsaStance = 'CHALLENGE';
+      bsaStatement = `Tinjauan kebutuhan bisnis menolak rilis: cakupan keselarasan kebutuhan bisnis di bawah ambang batas minimum.`;
+    } else if (isAsBuilt) {
+      bsaStance = 'CONDITIONAL_APPROVAL';
+      bsaStatement = `Tinjauan kebutuhan bisnis disetujui bersyarat: baseline persyaratan bersumber dari as-built discovery tanpa validasi pemangku kepentingan langsung.`;
+    } else {
+      bsaStance = 'APPROVE';
+      bsaStatement = `Tinjauan kebutuhan bisnis menyetujui rilis: seluruh aturan proses bisnis telah terverifikasi terhadap kebutuhan pemangku kepentingan.`;
+    }
+
+    // DBA_ARCHITECT: skema DB INFERRED saja -> CONDITIONAL_APPROVAL; tabel tanpa PK -> CHALLENGE
+    const isDbInferred = params.dbSchemaInferred ?? true;
+    const hasDbaIntegrityIssue = databaseTables.some((t) => !t.primaryKeys || t.primaryKeys.length === 0);
+    let dbaStance: DebateStance;
+    let dbaStatement: string;
+    if (hasDbaIntegrityIssue) {
+      dbaStance = 'CHALLENGE';
+      dbaStatement = `Tinjauan arsitektur data menolak rilis: terdeteksi tabel basis data tanpa primary key yang membahayakan integritas relasional.`;
+    } else if (isDbInferred) {
+      dbaStance = 'CONDITIONAL_APPROVAL';
+      dbaStatement = `Tinjauan arsitektur data disetujui bersyarat: skema database berbasis inferensi balik tanpa validasi DDL fisik langsung.`;
+    } else {
+      dbaStance = 'APPROVE';
+      dbaStatement = `Tinjauan arsitektur data menyetujui rilis: model relasional dan integritas kunci relasional terverifikasi.`;
+    }
+
+    // GRC_OFFICER: complianceRate < 100 -> CONDITIONAL_APPROVAL; < 50 -> CHALLENGE
+    let grcStance: DebateStance;
+    let grcStatement: string;
+    if (complianceRate < 50) {
+      grcStance = 'CHALLENGE';
+      grcStatement = `Tinjauan kepatuhan menolak rilis: kepatuhan regulasi kritis berada di bawah ambang batas keamanan minimum (${complianceRate}%).`;
+    } else if (complianceRate < 100) {
+      grcStance = 'CONDITIONAL_APPROVAL';
+      grcStatement = `Tinjauan kepatuhan disetujui bersyarat: skor kepatuhan regulasi sebesar ${complianceRate}% (< 100%). Tindakan perbaikan tata kelola disyaratkan.`;
+    } else {
+      grcStance = 'APPROVE';
+      grcStatement = `Tinjauan kepatuhan menyetujui rilis: kepatuhan regulasi dan perlindungan data pribadi (UU PDP) 100% terpenuhi.`;
+    }
+
+    // TECH_WRITER: ada bagian dokumen NOT_RUN/stale -> CONDITIONAL_APPROVAL; apiEndpoints kosong -> CHALLENGE
+    const isDocsIncomplete = params.docsStaleOrIncomplete ?? false;
+    let techWriterStance: DebateStance;
+    let techWriterStatement: string;
+    if (isDocsIncomplete && apiEndpoints.length === 0) {
+      techWriterStance = 'CHALLENGE';
+      techWriterStatement = `Tinjauan dokumentasi menolak rilis: ketiadaan kontrak antarmuka API menghalangi rilis produksi.`;
+    } else if (isDocsIncomplete) {
+      techWriterStance = 'CONDITIONAL_APPROVAL';
+      techWriterStatement = `Tinjauan dokumentasi disetujui bersyarat: terdapat spesifikasi kontrak atau dokumen teknis yang belum lengkap.`;
+    } else {
+      techWriterStance = 'APPROVE';
+      techWriterStatement = `Tinjauan dokumentasi menyetujui rilis: spesifikasi kontrak antarmuka dan dokumentasi sistem sinkron.`;
+    }
+
     // =========================================================================
     // ROUND 1: INITIAL SYSTEM ARCHITECTURE & THREAT PROPOSITIONS
     // =========================================================================
@@ -120,7 +276,7 @@ export class DelphiConsensusService {
         stance: 'APPROVE',
         topicDomain: 'Functional Requirements & Invariants',
         statement: `The business requirements baseline establishes clear boundaries with ${businessRules.length} primary rules ("${primaryBr}") and ${validationRules.length} input validation contracts (including ${primaryVr}). Ingress verified on ${primaryEp}.`,
-        evidenceReference: `BRD Spec: ${businessRules[0]?.ruleId || 'BR-01'}`,
+        evidenceReference: brdEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -129,7 +285,7 @@ export class DelphiConsensusService {
         stance: 'CHALLENGE',
         topicDomain: 'Testability & Boundary Vulnerability',
         statement: `While positive test paths are defined, we must challenge concurrency integrity. When 50 concurrent virtual users execute mutations on ${primaryTable}, how does the architecture guarantee ACID atomicity without deadlocks?`,
-        evidenceReference: `RTM Matrix: ${rtmRows.find((r) => r.scenarioType === 'CONCURRENCY_RACE')?.testId || 'TC-005'}`,
+        evidenceReference: qaEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -138,7 +294,7 @@ export class DelphiConsensusService {
         stance: 'CHALLENGE',
         topicDomain: 'Ingress Threat Modeling & Auth Boundaries',
         statement: `Ingress on ${targetUrl} exposes ${apiEndpoints.length} endpoints. We require proof that Object-Level Authorization (IDOR) cannot be exploited by tampering with identifier parameters in ${primaryEp}.`,
-        evidenceReference: 'OWASP API1:2023 (BOLA) Matrix',
+        evidenceReference: secEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -147,7 +303,7 @@ export class DelphiConsensusService {
         stance: 'CONDITIONAL_APPROVAL',
         topicDomain: 'Relational Topology & Latency Scalability',
         statement: `Database topology defines ${databaseTables.length} tables. However, sequential table scans on ${primaryTable} must be prevented by adding composite B-Tree indexes on foreign keys before production traffic scale.`,
-        evidenceReference: `Database Schema: ${primaryTable} (${databaseTables[0]?.columns.length || 4} columns)`,
+        evidenceReference: dbaEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -156,7 +312,7 @@ export class DelphiConsensusService {
         stance: 'CHALLENGE',
         topicDomain: 'Regulatory Privacy & Cryptographic Integrity',
         statement: `Customer attributes in ${primaryTable} contain personally identifiable information (PII). Under UU PDP No. 27/2022 Pasal 35, these fields must be encrypted at rest with AES-256 and transport encryption enforced (TLS status: ${isHttps ? 'Verified' : 'Unencrypted'}).`,
-        evidenceReference: 'UU PDP No. 27/2022 Pasal 35 & AICPA CC6.1',
+        evidenceReference: grcEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -165,7 +321,7 @@ export class DelphiConsensusService {
         stance: 'CONDITIONAL_APPROVAL',
         topicDomain: 'API Ergonomics & Contract Documentation',
         statement: `OpenAPI 3.1 schema and DTO contracts are structurally parsed. We require explicit HTTP error status codes (401, 403, 409, 422) documented for all edge cases to prevent developer integration friction.`,
-        evidenceReference: 'OpenAPI 3.1 Contract Specification',
+        evidenceReference: docEvidenceId,
         timestamp: assessedAt,
       },
     ];
@@ -180,7 +336,7 @@ export class DelphiConsensusService {
         stance: 'APPROVE',
         topicDomain: 'Resolution to QA Concurrency Challenge',
         statement: `Rebutting QA Lead: We have specified row-level locking (SELECT ... FOR UPDATE) and a UNIQUE idempotency key constraint on ${primaryTable}. This guarantees that duplicate requests within 10ms reject with HTTP 409 Conflict without corrupting state.`,
-        evidenceReference: 'ACID Transaction Mutex Model',
+        evidenceReference: dbaEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -189,34 +345,40 @@ export class DelphiConsensusService {
         stance: 'APPROVE',
         topicDomain: 'Resolution to AppSec IDOR Challenge',
         statement: `Rebutting AppSec Reviewer: Rule ${businessRules[0]?.ruleId || 'BR-01'} explicitly scopes entity resolution to the authenticated session tenant. The controller will reject any request where req.user.tenantId does not match the resource record.`,
-        evidenceReference: 'Tenant Invariant Rule Specification',
+        evidenceReference: brdEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'QA_LEAD',
         personaTitle: 'Principal QA Automation Engineer (ISO 29119)',
-        stance: 'APPROVE',
+        stance: effectiveGateVerdict === 'NO_GO' ? 'CHALLENGE' : 'APPROVE',
         topicDomain: 'Test Automation Verification Plan',
-        statement: `We accept the DBA Architect's row-locking mitigation. We will inject an automated k6 load probe executing 50 concurrent VUs and verify that 49 requests receive HTTP 409 while exactly 1 completes successfully.`,
-        evidenceReference: 'Playwright & k6 Concurrency Assertion Suite',
+        statement: effectiveGateVerdict === 'NO_GO'
+          ? `Hasil pengujian konkurensi belum tervalidasi sukses. Release gate berstatus NO_GO dan mitigasi belum membuktikan ketahanan di staging.`
+          : `We accept the DBA Architect's row-locking mitigation. Concurrency test suite proves that duplicate requests receive HTTP 409 while exactly 1 completes successfully.`,
+        evidenceReference: qaEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'APPSEC',
         personaTitle: 'Principal Application Security Reviewer (OWASP)',
-        stance: 'APPROVE',
+        stance: hasCriticalHigh ? 'CHALLENGE' : 'APPROVE',
         topicDomain: 'CORS & Security Header Hardening',
-        statement: `With tenant scoping locked in the ORM repository layer and HSTS encryption enforced on ${targetUrl}, the attack surface is reduced. We require Content-Security-Policy and X-Frame-Options headers applied to all responses.`,
-        evidenceReference: 'OWASP API8:2023 Security Configuration',
+        statement: hasCriticalHigh
+          ? `Terdapat kerentanan keamanan terbuka berisiko tinggi. Pembaruan konfigurasi gateway wajib menutup celah sebelum rilis disetujui.`
+          : `With tenant scoping locked in the ORM repository layer and HSTS encryption enforced on ${targetUrl}, the attack surface is reduced. We require Content-Security-Policy and X-Frame-Options headers applied to all responses.`,
+        evidenceReference: hasCriticalHigh ? appsecEvidenceId : secEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'GRC_OFFICER',
         personaTitle: 'IT Governance, Risk & Compliance Officer (UU PDP & SOC 2)',
-        stance: 'CONDITIONAL_APPROVAL',
+        stance: complianceRate < 100 ? 'CONDITIONAL_APPROVAL' : 'APPROVE',
         topicDomain: 'Audit Trail Sealing & Merkle Vault',
-        statement: `We approve the encryption mitigation on condition that all execution traces and risk mitigations are sealed into a binary Merkle Tree hash vault to satisfy SOC 2 Type II audit requirements.`,
-        evidenceReference: 'RFC 6962 Merkle Tree Audit Verification',
+        statement: complianceRate < 100
+          ? `Catatan audit dan mitigasi privasi masih menyisakan kesenjangan kepatuhan. Pengesahan rilis bergantung pada penyelesaian rencana tindakan.`
+          : `We approve the encryption mitigation on condition that all execution traces and risk mitigations are sealed into a binary Merkle Tree hash vault to satisfy SOC 2 Type II audit requirements.`,
+        evidenceReference: grcEvidenceId,
         timestamp: assessedAt,
       },
       {
@@ -224,68 +386,68 @@ export class DelphiConsensusService {
         personaTitle: 'Lead Technical Documentation Specialist (IEEE 1063)',
         stance: 'APPROVE',
         topicDomain: 'Living Documentation Alignment',
-        statement: `All mitigations, status codes, and DTO contracts have been incorporated into the IEEE Std 1016 Data Design and API specifications. The documentation is 100% synchronized with implementation facts.`,
-        evidenceReference: 'IEEE Std 1016 Architecture Blueprint',
+        statement: `All mitigations, status codes, and DTO contracts have been incorporated into the IEEE Std 1016 Data Design and API specifications. The documentation is synchronized with implementation facts.`,
+        evidenceReference: docEvidenceId,
         timestamp: assessedAt,
       },
     ];
 
     // =========================================================================
-    // ROUND 3: FINAL CONSENSUS CONVERGENCE & SIGN-OFF
+    // ROUND 3: FINAL CONSENSUS CONVERGENCE & SIGN-OFF (RULE-BASED)
     // =========================================================================
     const round3Entries: DelphiDebateEntry[] = [
       {
         persona: 'BSA',
         personaTitle: 'Lead Business Systems Analyst (ISO 29148)',
-        stance: 'APPROVE',
-        topicDomain: 'Final Functional Sign-Off',
-        statement: `Unanimously approved. System requirements reflect stakeholder intent with zero unverified ambiguities.`,
-        evidenceReference: 'ISO 29148 Section 8 Sign-off',
+        stance: bsaStance,
+        topicDomain: 'Final Functional Review',
+        statement: bsaStatement,
+        evidenceReference: brdEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'QA_LEAD',
         personaTitle: 'Principal QA Automation Engineer (ISO 29119)',
-        stance: 'APPROVE',
-        topicDomain: 'Final Quality Sign-Off',
-        statement: `Unanimously approved. Automated regression harness covers 100% of critical paths across 8 ISO 29119 test design techniques.`,
-        evidenceReference: 'ISO 29119 Test Completion Certificate',
+        stance: qaStance,
+        topicDomain: 'Final Quality Review',
+        statement: qaStatement,
+        evidenceReference: qaEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'APPSEC',
         personaTitle: 'Principal Application Security Reviewer (OWASP)',
-        stance: 'APPROVE',
-        topicDomain: 'Final Security Clearance',
-        statement: `Security clearance granted. OWASP API Top 10 vulnerabilities remediated with automated DAST regression gates.`,
-        evidenceReference: 'OWASP Clearance Seal #SEC-984',
+        stance: appsecStance,
+        topicDomain: 'Final Security Review',
+        statement: appsecStatement,
+        evidenceReference: appsecEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'DBA_ARCHITECT',
         personaTitle: 'Principal Cloud & Data Architect (IEEE 1016)',
-        stance: 'APPROVE',
-        topicDomain: 'Final Architecture Clearance',
-        statement: `Architecture cleared for production staging. Latency SLAs protected with composite indexes and ACID row-level locks.`,
-        evidenceReference: 'Architectural Clearance Seal #ARCH-102',
+        stance: dbaStance,
+        topicDomain: 'Final Architecture Review',
+        statement: dbaStatement,
+        evidenceReference: dbaEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'GRC_OFFICER',
         personaTitle: 'IT Governance, Risk & Compliance Officer (UU PDP & SOC 2)',
-        stance: 'APPROVE',
-        topicDomain: 'Final Compliance Clearance',
-        statement: `Governance clearance granted. Cryptographic audit trail sealed under binary Merkle tree with complete UU PDP and SOC 2 alignment.`,
-        evidenceReference: 'GRC Audit Seal #SOC2-881',
+        stance: grcStance,
+        topicDomain: 'Final Compliance Review',
+        statement: grcStatement,
+        evidenceReference: grcEvidenceId,
         timestamp: assessedAt,
       },
       {
         persona: 'TECH_WRITER',
         personaTitle: 'Lead Technical Documentation Specialist (IEEE 1063)',
-        stance: 'APPROVE',
-        topicDomain: 'Final Documentation Sign-Off',
-        statement: `Documentation cleared. Technical runbooks, API contracts, and IEEE 1016 diagrams are production-ready.`,
-        evidenceReference: 'Doc Clearance Seal #DOC-204',
+        stance: techWriterStance,
+        topicDomain: 'Final Documentation Review',
+        statement: techWriterStatement,
+        evidenceReference: docEvidenceId,
         timestamp: assessedAt,
       },
     ];
@@ -306,71 +468,119 @@ export class DelphiConsensusService {
       {
         roundNumber: 3,
         roundTitle: 'Round 3: Final Consensus Convergence & Mitigation Sign-Off',
-        roundDescription: 'Unanimous convergence on technical mitigations, operational controls, and signed clearance for production staging.',
+        roundDescription: 'Final multi-persona review convergence on technical mitigations, operational controls, and release recommendations.',
         entries: round3Entries,
       },
     ];
 
-    // Generate cryptographic sign-off seals for all 6 personas
+    // Compute consensus convergence and verdict based on actual stances
+    const finalStances = [bsaStance, qaStance, appsecStance, dbaStance, grcStance, techWriterStance];
+    const approveCount = finalStances.filter((s) => s === 'APPROVE').length;
+    const conditionalCount = finalStances.filter((s) => s === 'CONDITIONAL_APPROVAL').length;
+    const challengeCount = finalStances.filter((s) => s === 'CHALLENGE').length;
+
+    // Convergence score: percentage of personas agreeing on the majority stance (e.g. 5/6 = 83%, 4/6 = 67%)
+    const majorityCount = Math.max(approveCount, conditionalCount, challengeCount);
+    const convergenceScorePercent = Math.round((majorityCount / 6) * 100);
+
+    // Consensus score weighted: APPROVE = 100, CONDITIONAL = 50, CHALLENGE = 0
+    const consensusScorePercent = Math.round(
+      finalStances.reduce(
+        (acc, s) => acc + (s === 'APPROVE' ? 100 : s === 'CONDITIONAL_APPROVAL' ? 50 : 0),
+        0
+      ) / 6
+    );
+
+    let clearanceVerdict: DelphiClearanceVerdict;
+    if (approveCount === 6) {
+      clearanceVerdict = 'UNANIMOUS_APPROVE';
+    } else if (challengeCount > 0) {
+      clearanceVerdict = 'NOT_CONSENSUS';
+    } else {
+      clearanceVerdict = 'CONDITIONAL';
+    }
+
+    // Generate cryptographic sign-off seals based on actual stances
     const signOffSeals: PersonaSignOffSeal[] = [
       {
         persona: 'BSA',
         personaTitle: 'Lead Business Systems Analyst',
         signerDesignation: 'ISO/IEC/IEEE 29148 Lead Verifier',
-        signatureDigest: `SIG-BSA-${this.sha256(appName + 'BSA' + assessedAt).slice(0, 50)}`,
-        status: 'SIGNED_APPROVED',
-        stipulations: ['All normative requirements verified against stakeholder intent', 'Business rules locked to ISO 29148 standards'],
+        signatureDigest: bsaStance === 'CHALLENGE' ? 'TANDA TANGAN DITANGGUHKAN' : `SIG-BSA-${this.sha256(appName + 'BSA' + assessedAt).slice(0, 50)}`,
+        status: bsaStance === 'APPROVE' ? 'SIGNED_APPROVED' : bsaStance === 'CONDITIONAL_APPROVAL' ? 'SIGNED_WITH_CONDITIONS' : 'CHALLENGED_UNRESOLVED',
+        stipulations: bsaStance === 'APPROVE'
+          ? ['All normative requirements verified against stakeholder intent', 'Business rules locked to ISO 29148 standards']
+          : bsaStance === 'CONDITIONAL_APPROVAL'
+          ? ['Baseline bersumber dari as-built discovery; konfirmasi pemangku kepentingan disyaratkan']
+          : ['Kebutuhan bisnis ditolak karena inkonsistensi arsitektur'],
         signedAt: assessedAt,
       },
       {
         persona: 'QA_LEAD',
         personaTitle: 'Principal QA Automation Engineer',
         signerDesignation: 'ISO/IEC/IEEE 29119 Test Authority',
-        signatureDigest: `SIG-QA-${this.sha256(appName + 'QA' + assessedAt).slice(0, 50)}`,
-        status: 'SIGNED_APPROVED',
-        stipulations: ['Concurrency race conditions verified under k6 load probes', 'Boundary input sanitizers tested with negative fixtures'],
+        signatureDigest: qaStance === 'CHALLENGE' ? 'TANDA TANGAN DITANGGUHKAN' : `SIG-QA-${this.sha256(appName + 'QA' + assessedAt).slice(0, 50)}`,
+        status: qaStance === 'APPROVE' ? 'SIGNED_APPROVED' : qaStance === 'CONDITIONAL_APPROVAL' ? 'SIGNED_WITH_CONDITIONS' : 'CHALLENGED_UNRESOLVED',
+        stipulations: qaStance === 'APPROVE'
+          ? ['Pengujian regresi lulus ambang batas GO', 'Boundary input sanitizers tested with negative fixtures']
+          : qaStance === 'CONDITIONAL_APPROVAL'
+          ? ['Peringatan uji perlu dipantau saat deployment staging']
+          : ['Release gate NO_GO memblokir penandatanganan rilis'],
         signedAt: assessedAt,
       },
       {
         persona: 'APPSEC',
         personaTitle: 'Principal Application Security Reviewer',
-        signerDesignation: 'OWASP API Top 10 Security Assessor',
-        signatureDigest: `SIG-SEC-${this.sha256(appName + 'SEC' + assessedAt).slice(0, 50)}`,
-        status: 'SIGNED_APPROVED',
-        stipulations: ['Object-level authorization enforced at repository layer', 'TLS 1.3 encryption and HSTS headers enforced'],
+        signerDesignation: 'OWASP Security Assessor',
+        signatureDigest: appsecStance === 'CHALLENGE' ? 'TANDA TANGAN DITANGGUHKAN' : `SIG-SEC-${this.sha256(appName + 'SEC' + assessedAt).slice(0, 50)}`,
+        status: appsecStance === 'APPROVE' ? 'SIGNED_APPROVED' : appsecStance === 'CONDITIONAL_APPROVAL' ? 'SIGNED_WITH_CONDITIONS' : 'CHALLENGED_UNRESOLVED',
+        stipulations: appsecStance === 'APPROVE'
+          ? ['Object-level authorization enforced at repository layer', 'TLS 1.3 encryption and HSTS headers enforced']
+          : appsecStance === 'CONDITIONAL_APPROVAL'
+          ? ['Probe DAST aktif wajib dijalankan sebelum promosi produksi']
+          : ['Temuan kerentanan kritis memblokir penandatanganan rilis'],
         signedAt: assessedAt,
       },
       {
         persona: 'DBA_ARCHITECT',
         personaTitle: 'Principal Cloud & Data Architect',
         signerDesignation: 'IEEE Std 1016 Architecture Reviewer',
-        signatureDigest: `SIG-ARCH-${this.sha256(appName + 'ARCH' + assessedAt).slice(0, 50)}`,
-        status: 'SIGNED_APPROVED',
-        stipulations: ['Composite B-Tree indexes created on foreign key columns', 'Statement timeout set to 500ms to safeguard connection pools'],
+        signatureDigest: dbaStance === 'CHALLENGE' ? 'TANDA TANGAN DITANGGUHKAN' : `SIG-ARCH-${this.sha256(appName + 'ARCH' + assessedAt).slice(0, 50)}`,
+        status: dbaStance === 'APPROVE' ? 'SIGNED_APPROVED' : dbaStance === 'CONDITIONAL_APPROVAL' ? 'SIGNED_WITH_CONDITIONS' : 'CHALLENGED_UNRESOLVED',
+        stipulations: dbaStance === 'APPROVE'
+          ? ['Model relasional dan indeks performa terverifikasi', 'Statement timeout set to 500ms to safeguard connection pools']
+          : dbaStance === 'CONDITIONAL_APPROVAL'
+          ? ['Skema basis data inferensi memerlukan validasi DDL fisik']
+          : ['Struktur basis data tidak memenuhi syarat stabilitas'],
         signedAt: assessedAt,
       },
       {
         persona: 'GRC_OFFICER',
         personaTitle: 'IT Governance, Risk & Compliance Officer',
         signerDesignation: 'UU PDP & AICPA SOC 2 Compliance Officer',
-        signatureDigest: `SIG-GRC-${this.sha256(appName + 'GRC' + assessedAt).slice(0, 50)}`,
-        status: 'SIGNED_APPROVED',
-        stipulations: ['PII columns encrypted with AES-256 before disk storage', 'Merkle Tree audit vault sealed and tamper-evident'],
+        signatureDigest: grcStance === 'CHALLENGE' ? 'TANDA TANGAN DITANGGUHKAN' : `SIG-GRC-${this.sha256(appName + 'GRC' + assessedAt).slice(0, 50)}`,
+        status: grcStance === 'APPROVE' ? 'SIGNED_APPROVED' : grcStance === 'CONDITIONAL_APPROVAL' ? 'SIGNED_WITH_CONDITIONS' : 'CHALLENGED_UNRESOLVED',
+        stipulations: grcStance === 'APPROVE'
+          ? ['100% kepatuhan regulasi dan audit trail terverifikasi', 'Merkle Tree audit vault sealed and tamper-evident']
+          : grcStance === 'CONDITIONAL_APPROVAL'
+          ? [`Kepatuhan ${complianceRate}% mensyaratkan rencana tindak lanjut mitigasi`]
+          : ['Pelanggaran kepatuhan regulasi memblokir penandatanganan'],
         signedAt: assessedAt,
       },
       {
         persona: 'TECH_WRITER',
         personaTitle: 'Lead Technical Documentation Specialist',
         signerDesignation: 'IEEE Std 1063 Documentation Authority',
-        signatureDigest: `SIG-DOC-${this.sha256(appName + 'DOC' + assessedAt).slice(0, 50)}`,
-        status: 'SIGNED_APPROVED',
-        stipulations: ['OpenAPI 3.1 contracts verified against controller implementation', 'Incident mitigation runbooks published for operations'],
+        signatureDigest: techWriterStance === 'CHALLENGE' ? 'TANDA TANGAN DITANGGUHKAN' : `SIG-DOC-${this.sha256(appName + 'DOC' + assessedAt).slice(0, 50)}`,
+        status: techWriterStance === 'APPROVE' ? 'SIGNED_APPROVED' : techWriterStance === 'CONDITIONAL_APPROVAL' ? 'SIGNED_WITH_CONDITIONS' : 'CHALLENGED_UNRESOLVED',
+        stipulations: techWriterStance === 'APPROVE'
+          ? ['OpenAPI 3.1 contracts verified against controller implementation', 'Incident mitigation runbooks published for operations']
+          : techWriterStance === 'CONDITIONAL_APPROVAL'
+          ? ['Pembaruan dokumen teknis disyaratkan pasca-rilis']
+          : ['Dokumentasi tidak memadai untuk operasional'],
         signedAt: assessedAt,
       },
     ];
-
-    const consensusScorePercent = 98; // 98% convergence
-    const clearanceVerdict = 'UNANIMOUSLY_APPROVED';
 
     const clearancePacketMarkdown = this.generateClearancePacketMarkdown(
       appName,
@@ -384,6 +594,7 @@ export class DelphiConsensusService {
 
     return {
       consensusScorePercent,
+      convergenceScorePercent,
       clearanceVerdict,
       totalRounds: rounds.length,
       totalDebates: round1Entries.length + round2Entries.length + round3Entries.length,
@@ -406,27 +617,27 @@ export class DelphiConsensusService {
     seals: PersonaSignOffSeal[],
     timestamp: string
   ): string {
-    return `# ${appName} — Architecture Review Board (ARB) Signed Clearance Packet
+    return `# ${appName} — Simulasi Tinjauan Berbasis Aturan (Rule-Based Review)
 **System Host:** \`${targetUrl}\`
-**Clearance Verdict:** **${verdict.replace(/_/g, ' ')}** (Consensus Score: **${score}%**)
-**Standard:** ISO/IEC/IEEE 29148:2018 (Clause 9) & NASA SP-6105 Architecture Review Board
+**Rekomendasi Tinjauan:** **${verdict.replace(/_/g, ' ')}** (Skor Konsensus: **${score}%**)
+**Standar:** ISO/IEC/IEEE 29148:2018 (Clause 9) & ISO/IEC/IEEE 42010
 **Convened At:** ${timestamp}
 
 ---
 
-## 1. Executive Boardroom Sign-Off Seals (6 Personas)
-| Persona Role | Signer Authority | Signature Digest (SHA-256) | Verdict | Approved Stipulations |
-| :--- | :--- | :--- | :--- | :--- |
+## 1. Lembar Rekomendasi 6 Persona
+| Persona Role | Signer Authority | Status Tinjauan | Approved Stipulations |
+| :--- | :--- | :--- | :--- |
 ${seals
   .map(
     (s) =>
-      `| **${s.personaTitle}** | ${s.signerDesignation} | \`${s.signatureDigest}\` | \`${s.status}\` | ${s.stipulations.join('; ')} |`
+      `| **${s.personaTitle}** | ${s.signerDesignation} | \`${s.status.replace(/_/g, ' ')}\` | ${s.stipulations.join('; ')} |`
   )
   .join('\n')}
 
 ---
 
-## 2. Delphi Consensus 3-Round Adversarial Debate Proceedings
+## 2. Risalah Tinjauan 3 Putaran Delphi
 
 ${rounds
   .map(
@@ -446,7 +657,7 @@ ${r.entries
   .join('\n')}
 
 ---
-*Signed and sealed autonomously by OneSpec Architecture Review Board Delphi Consensus Engine.*
+*Dihasilkan oleh OneSpec Rule-Based Review Engine selaras dengan ISO/IEC/IEEE 29148:2018.*
 `;
   }
 }

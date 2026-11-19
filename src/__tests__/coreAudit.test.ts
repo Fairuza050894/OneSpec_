@@ -853,3 +853,127 @@ test('Test 16: SMT Formal Verifier truthfulness and noise elimination (T-09: F-1
     }
   }
 });
+
+test('Test 17: Delphi ARB rule-based consensus derivation and zero static claims (T-10)', async () => {
+  const { delphiConsensusService } = await import('../services/delphiConsensusService');
+
+  const baseParams = {
+    appName: 'Test Cargo Port',
+    targetUrl: 'https://cargo.pancaran-group.co.id',
+    apiEndpoints: [
+      {
+        id: '1',
+        path: '/api/v1/shipments',
+        method: 'GET' as const,
+        controllerPath: 'src/controllers/shipmentController.ts',
+        lineNumber: 42,
+        summary: 'List shipments',
+        linkedTestCaseIds: ['TC-001'],
+        linkedRequirementId: 'REQ-US-01',
+      },
+    ],
+    databaseTables: [{ id: '1', tableName: 'Shipments', columns: [], primaryKeys: ['id'] }],
+    validationRules: [
+      {
+        ruleId: 'VR-01',
+        userStoryId: 'REQ-US-01',
+        fieldName: 'container_no',
+        dataType: 'string',
+        constraintExpression: 'container_no != null',
+        errorCode: 'ERR_CONTAINER_REQ',
+        httpStatus: 400,
+        exactUiErrorString: 'Container ID is required',
+      },
+    ],
+    businessRules: [
+      {
+        ruleId: 'BRD-001',
+        userStoryId: 'REQ-US-01',
+        actor: 'Dispatcher',
+        action: 'Dispatch Container',
+        targetEntity: 'Container',
+        precondition: 'Shipment created',
+        postcondition: 'Shipment dispatched',
+        statement: 'Only authenticated dispatchers can dispatch containers',
+        category: 'SECURITY',
+        targetKpi: 'Zero unauthorized dispatches',
+        sourceMoMLine: 'Line 10',
+        ruleCategory: 'SECURITY' as const,
+        priority: 'HIGH' as const,
+        impactScore: 5,
+        testId: 'TC-DISP-01',
+        traceabilityHash: 'hash-01',
+      },
+    ],
+    rtmRows: [],
+  };
+
+  // 1. Gate NO_GO results in QA_LEAD CHALLENGE and verdict !== UNANIMOUS_APPROVE
+  const noGoSummary = delphiConsensusService.simulateConsensus({
+    ...baseParams,
+    gateVerdict: 'NO_GO',
+  });
+  const qaEntry = noGoSummary.rounds[2]?.entries.find((e) => e.persona === 'QA_LEAD');
+  assert.ok(qaEntry, 'QA_LEAD must have an entry in Round 3');
+  assert.equal(qaEntry.stance, 'CHALLENGE', 'QA_LEAD must CHALLENGE when gate is NO_GO');
+  assert.notEqual(noGoSummary.clearanceVerdict, 'UNANIMOUS_APPROVE');
+  assert.equal(noGoSummary.clearanceVerdict, 'NOT_CONSENSUS');
+
+  const qaSeal = noGoSummary.signOffSeals.find((s) => s.persona === 'QA_LEAD');
+  assert.ok(qaSeal, 'QA_LEAD seal must exist');
+  assert.equal(qaSeal.status, 'CHALLENGED_UNRESOLVED');
+  assert.equal(qaSeal.signatureDigest, 'TANDA TANGAN DITANGGUHKAN');
+
+  // 2. Critical DAST finding results in APPSEC CHALLENGE and NOT_CONSENSUS
+  const dastChallengeSummary = delphiConsensusService.simulateConsensus({
+    ...baseParams,
+    gateVerdict: 'GO',
+    dastStatus: 'COMPLETED',
+    dastFindings: [{ id: 'SEC-01', severity: 'CRITICAL', title: 'SQL Injection in Shipment Query' }],
+  });
+  const secEntry = dastChallengeSummary.rounds[2]?.entries.find((e) => e.persona === 'APPSEC');
+  assert.ok(secEntry, 'APPSEC must have an entry in Round 3');
+  assert.equal(secEntry.stance, 'CHALLENGE', 'APPSEC must CHALLENGE on CRITICAL vulnerability');
+  assert.equal(dastChallengeSummary.clearanceVerdict, 'NOT_CONSENSUS');
+  const secSeal = dastChallengeSummary.signOffSeals.find((s) => s.persona === 'APPSEC');
+  assert.equal(secSeal?.status, 'CHALLENGED_UNRESOLVED');
+  assert.equal(secSeal?.signatureDigest, 'TANDA TANGAN DITANGGUHKAN');
+
+  // 3. Clean environment produces UNANIMOUS_APPROVE
+  const cleanSummary = delphiConsensusService.simulateConsensus({
+    ...baseParams,
+    gateVerdict: 'GO',
+    dastStatus: 'COMPLETED',
+    dastFindings: [],
+    complianceRate: 100,
+    hasStakeholderRequirements: true,
+    isAsBuiltOnly: false,
+    dbSchemaInferred: false,
+    docsStaleOrIncomplete: false,
+  });
+  assert.equal(cleanSummary.clearanceVerdict, 'UNANIMOUS_APPROVE');
+  assert.equal(cleanSummary.consensusScorePercent, 100);
+  assert.equal(cleanSummary.convergenceScorePercent, 100);
+  for (const seal of cleanSummary.signOffSeals) {
+    assert.equal(seal.status, 'SIGNED_APPROVED', `Seal for ${seal.persona} must be SIGNED_APPROVED`);
+    assert.notEqual(seal.signatureDigest, 'TANDA TANGAN DITANGGUHKAN');
+  }
+
+  // 4. Zero mentions of 'Completion Certificate' and all evidence references are valid artifact IDs
+  const allEntries = noGoSummary.rounds.flatMap((r) => r.entries);
+  for (const entry of allEntries) {
+    assert.equal(
+      entry.statement.includes('Completion Certificate'),
+      false,
+      `Statement must not mention Completion Certificate: ${entry.statement}`
+    );
+    assert.match(
+      entry.evidenceReference,
+      /^[A-Za-z0-9_-]+$/,
+      `Evidence reference must be a valid ID string: ${entry.evidenceReference}`
+    );
+  }
+
+  assert.equal(noGoSummary.clearancePacketMarkdown.includes('Completion Certificate'), false);
+  assert.equal(cleanSummary.clearancePacketMarkdown.includes('Completion Certificate'), false);
+});

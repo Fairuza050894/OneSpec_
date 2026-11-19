@@ -102,7 +102,7 @@ export function DelphiConsensusWorkbench({
     setTimeout(() => {
       if (onAppendLog) {
         onAppendLog(`[DELPHI ARB] Round 2: Cross-persona adversarial challenges resolved (concurrency, IDOR, encryption)...`);
-        onAppendLog(`[DELPHI ARB] Round 3: Unanimous consensus reached (Convergence Score: ${summary.consensusScorePercent}%). Clearance packet signed.`);
+        onAppendLog(`[DELPHI ARB] Round 3: Rule-based review evaluated (${summary.clearanceVerdict.replace(/_/g, ' ')}, Convergence: ${summary.convergenceScorePercent ?? summary.consensusScorePercent}%). Clearance packet signed.`);
       }
       setIsConvening(false);
     }, 700);
@@ -161,10 +161,10 @@ export function DelphiConsensusWorkbench({
           </span>
           <span className="text-[#707070] hidden 2xl:inline whitespace-nowrap">{copy.step11.subtitleSuffix}</span>
           <span className="badge-tag px-1.5 py-0.2 bg-[#059669]/20 text-[#10B981] font-bold text-[9.5px] whitespace-nowrap">
-            CONVERGENCE: {summary.consensusScorePercent}%
+            CONVERGENCE: {summary.convergenceScorePercent ?? summary.consensusScorePercent}%
           </span>
           <span className="badge-tag px-1.5 py-0.2 bg-blue-950/70 border border-blue-700/60 text-blue-300 font-bold text-[9px] whitespace-nowrap">
-            RULE_BASED_HEURISTIC
+            RULE_BASED_SIMULATION
           </span>
           <span className="badge-tag px-1.5 py-0.2 bg-[#2563EB]/20 text-[#3B82F6] font-bold text-[9.5px] whitespace-nowrap">
             {summary.clearanceVerdict.replace(/_/g, ' ')}
@@ -245,7 +245,7 @@ export function DelphiConsensusWorkbench({
             <span className="text-[18px] font-bold text-[#10B981] tabular-nums">
               {summary.consensusScorePercent}%
             </span>
-            <span className="text-[9.5px] text-[#10B981]">Convergence Score</span>
+            <span className="text-[9.5px] text-[#A1A1A1]">Convergence: {summary.convergenceScorePercent ?? summary.consensusScorePercent}%</span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Verdict</span>
@@ -271,9 +271,21 @@ export function DelphiConsensusWorkbench({
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Seals Signed</span>
             <span className="text-[18px] font-bold text-[#10B981] tabular-nums">
-              {summary.signOffSeals.length} / 6
+              {summary.signOffSeals.filter((s) => s.status === 'SIGNED_APPROVED' || s.status === 'SIGNED_WITH_CONDITIONS').length} / 6
             </span>
-            <span className="text-[9.5px] text-[#10B981]">Unanimous Clearance</span>
+            <span className={`text-[9.5px] ${
+              summary.signOffSeals.every((s) => s.status === 'SIGNED_APPROVED')
+                ? 'text-[#10B981]'
+                : summary.signOffSeals.some((s) => s.status === 'CHALLENGED_UNRESOLVED')
+                ? 'text-[#EF4444]'
+                : 'text-[#F59E0B]'
+            }`}>
+              {summary.signOffSeals.every((s) => s.status === 'SIGNED_APPROVED')
+                ? 'All Approved'
+                : summary.signOffSeals.some((s) => s.status === 'CHALLENGED_UNRESOLVED')
+                ? 'Challenges Pending'
+                : 'Conditional Sign-Off'}
+            </span>
           </div>
           <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
             <span className="text-[10px] text-[#707070] uppercase font-bold">Reference</span>
@@ -385,8 +397,18 @@ export function DelphiConsensusWorkbench({
                     Autonomous Architecture Clearance Sign-Off Seals
                   </span>
                 </div>
-                <span className="badge-tag px-2 py-0.5 bg-[#059669]/20 text-[#10B981] font-bold text-[10px]">
-                  ALL 6 SEALS VERIFIED
+                <span className={`badge-tag px-2 py-0.5 font-bold text-[10px] ${
+                  summary.signOffSeals.every((s) => s.status === 'SIGNED_APPROVED')
+                    ? 'bg-[#059669]/20 text-[#10B981]'
+                    : summary.signOffSeals.some((s) => s.status === 'CHALLENGED_UNRESOLVED')
+                    ? 'bg-[#DC2626]/20 text-[#EF4444]'
+                    : 'bg-[#D97706]/20 text-[#F59E0B]'
+                }`}>
+                  {summary.signOffSeals.every((s) => s.status === 'SIGNED_APPROVED')
+                    ? 'ALL 6 PERSONAS APPROVED'
+                    : summary.signOffSeals.filter((s) => s.status === 'CHALLENGED_UNRESOLVED').length > 0
+                    ? `${summary.signOffSeals.filter((s) => s.status === 'CHALLENGED_UNRESOLVED').length} PERSONA CHALLENGES`
+                    : 'CONDITIONAL SIGN-OFFS'}
                 </span>
               </div>
               <p className="text-[11px] text-[#A1A1A1] font-sans">
@@ -398,13 +420,25 @@ export function DelphiConsensusWorkbench({
               {summary.signOffSeals.map((seal) => (
                 <div
                   key={seal.persona}
-                  className="p-3.5 bg-[#111317] border border-[#22262E] hover:border-[#10B981] rounded-[3px] space-y-2.5 transition-colors"
+                  className={`p-3.5 bg-[#111317] border rounded-[3px] space-y-2.5 transition-colors ${
+                    seal.status === 'CHALLENGED_UNRESOLVED'
+                      ? 'border-[#DC2626]/40 hover:border-[#EF4444]'
+                      : seal.status === 'SIGNED_WITH_CONDITIONS'
+                      ? 'border-[#D97706]/40 hover:border-[#F59E0B]'
+                      : 'border-[#22262E] hover:border-[#10B981]'
+                  }`}
                 >
                   <div className="flex items-center justify-between pb-1.5 border-b border-[#22262E]">
                     <span className={`px-2 py-0.5 border rounded-[2px] font-bold text-[10px] ${getPersonaColor(seal.persona)}`}>
                       {seal.persona}
                     </span>
-                    <span className="badge-tag px-1.5 py-0.2 bg-[#059669]/20 text-[#10B981] font-bold text-[9px]">
+                    <span className={`badge-tag px-1.5 py-0.2 font-bold text-[9px] ${
+                      seal.status === 'CHALLENGED_UNRESOLVED'
+                        ? 'bg-[#DC2626]/20 text-[#EF4444] border border-[#DC2626]/50'
+                        : seal.status === 'SIGNED_WITH_CONDITIONS'
+                        ? 'bg-[#D97706]/20 text-[#F59E0B] border border-[#D97706]/50'
+                        : 'bg-[#059669]/20 text-[#10B981] border border-[#059669]/50'
+                    }`}>
                       {seal.status.replace(/_/g, ' ')}
                     </span>
                   </div>
@@ -416,7 +450,9 @@ export function DelphiConsensusWorkbench({
 
                   <div className="p-2 bg-[#0B0C0E] border border-[#22262E] rounded-[2px] space-y-1">
                     <span className="text-[9px] text-[#707070] uppercase font-bold block">Digital Seal Signature:</span>
-                    <span className="text-[#10B981] font-mono text-[9.5px] break-all block">
+                    <span className={`font-mono text-[9.5px] break-all block ${
+                      seal.status === 'CHALLENGED_UNRESOLVED' ? 'text-[#EF4444]' : 'text-[#10B981]'
+                    }`}>
                       {seal.signatureDigest}
                     </span>
                   </div>

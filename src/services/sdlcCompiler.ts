@@ -1010,6 +1010,22 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
   });
 
   // 18. Delphi Multi-Persona Consensus Simulation (Step 11)
+  let compilerGateVerdict: 'GO' | 'CONDITIONAL_GO' | 'NO_GO' = 'GO';
+  if (executionTraces && executionTraces.length > 0) {
+    const failed = executionTraces.filter((t) => t.overallVerdict === 'FAILED').length;
+    const warning = executionTraces.filter((t) => t.overallVerdict === 'BOTTLENECK_DETECTED').length;
+    const passed = executionTraces.filter((t) => t.overallVerdict === 'PASSED').length;
+    const total = executionTraces.length;
+    const passRate = total > 0 ? (passed / total) * 100 : 0;
+    if (failed > 0 || passRate < 70) {
+      compilerGateVerdict = 'NO_GO';
+    } else if (warning > 0 || passRate < 95) {
+      compilerGateVerdict = 'CONDITIONAL_GO';
+    } else {
+      compilerGateVerdict = 'GO';
+    }
+  }
+
   const delphiConsensusSummary = delphiConsensusService.simulateConsensus({
     appName,
     targetUrl,
@@ -1018,6 +1034,20 @@ export function synthesizeFullSdlcFromCrawl(crawlResult: BlindCrawlResult, exist
     validationRules,
     businessRules: brdMatrixRows,
     rtmRows,
+    executionTraces,
+    gateVerdict: compilerGateVerdict,
+    dastStatus: (owaspDastSummary?.totalEndpointsScanned ?? 0) > 0 ? 'COMPLETED' : 'NOT_RUN',
+    dastFindings: owaspDastSummary?.findings,
+    complianceRate: complianceAssessment?.scorecard?.overallComplianceRate,
+    isAsBuiltOnly: true,
+    evidenceIds: {
+      qaRunId: rtmRows[0]?.testId ? `${rtmRows[0].testId}` : 'RUN-007',
+      secFindingId: owaspDastSummary?.findings?.[0]?.id || (discoveryResult.apiEndpoints[0]?.id ? `EP-${discoveryResult.apiEndpoints[0].id}` : 'EP-001'),
+      brdId: brdMatrixRows[0]?.ruleId ? `${brdMatrixRows[0].ruleId}` : 'BRD-001',
+      dbTableId: discoveryResult.databaseTables[0]?.id ? `TBL-${discoveryResult.databaseTables[0].id}` : 'TBL-001',
+      gapId: auditResult.items?.[0]?.id || 'GAP-001',
+      rtmId: rtmRows[0]?.testId || 'RTM-001',
+    },
   });
 
   // 19. Universal SDLC Knowledge Graph, Ontology & Layperson Executive Digest (Step 12)

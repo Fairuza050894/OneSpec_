@@ -448,14 +448,16 @@ export class SdlcKnowledgeGraphService {
 
     // 9. ARB CLEARANCE SEAL NODE
     const arbNodeId = 'NODE-ARB-SEAL-01';
+    const arbVerdictNode = params.delphiConsensusSummary?.clearanceVerdict || 'NOT_CONSENSUS';
+    const arbScoreNode = params.delphiConsensusSummary?.consensusScorePercent ?? 0;
     nodes.push({
       id: arbNodeId,
       label: 'ARB Delphi Consensus Seal',
       type: 'ARB_CLEARANCE',
       title: 'Architecture Review Board Clearance',
-      description: 'Unanimously cleared across 6 personas (Consensus: 98%)',
-      badge: 'UNANIMOUS_CLEARANCE',
-      properties: { consensusScore: 98, verdict: 'APPROVED' },
+      description: `Rule-based review across 6 personas (Verdict: ${arbVerdictNode}, Score: ${arbScoreNode}%)`,
+      badge: arbVerdictNode,
+      properties: { consensusScore: arbScoreNode, verdict: arbVerdictNode },
     });
 
     edges.push({
@@ -772,8 +774,8 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
     const smtTrust = smtVerificationSummary?.formalTrustScore ?? null;
     const smtTotal = smtVerificationSummary?.totalInvariants ?? validationRules.length;
     const smtProven = smtVerificationSummary?.provenCount ?? 0;
-    const arbScore = delphiConsensusSummary?.consensusScorePercent ?? 98;
-    const arbVerdict = delphiConsensusSummary?.clearanceVerdict || 'UNANIMOUSLY_APPROVED';
+    const arbScore = delphiConsensusSummary?.consensusScorePercent ?? 0;
+    const arbVerdict = delphiConsensusSummary?.clearanceVerdict || 'NOT_CONSENSUS';
     const componentCount =
       deconstructedArchitecture?.hla?.tiers?.reduce((acc, t) => acc + t.components.length, 0) || Math.max(4, modulesCount);
 
@@ -899,10 +901,10 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
           {
             stepNumber: 'Step 11',
             stepTitlePlain: '11. Persetujuan Dewan Ahli (ARB)',
-            statusBadge: badgeLabel(arbVerdict === 'VETOED' ? 'FAIL' : arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS'),
-            statusTone: arbVerdict === 'VETOED' ? 'FAIL' : arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS',
+            statusBadge: badgeLabel(arbVerdict === 'VETOED' || arbVerdict === 'NOT_CONSENSUS' ? 'FAIL' : arbVerdict === 'CONDITIONAL' || arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS'),
+            statusTone: arbVerdict === 'VETOED' || arbVerdict === 'NOT_CONSENSUS' ? 'FAIL' : arbVerdict === 'CONDITIONAL' || arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS',
             whatWasChecked: 'Menghimpun tinjauan akhir dari 6 peran ahli (Bisnis, QA, Keamanan, Database, GRC, Dokumentasi).',
-            plainResult: `Konsensus kelayakan ${arbScore}% (${arbVerdict === 'UNANIMOUSLY_APPROVED' ? 'Disetujui Penuh 6/6 Peran' : arbVerdict.replace(/_/g, ' ')}).`,
+            plainResult: `Konsensus kelayakan ${arbScore}% (${arbVerdict === 'UNANIMOUS_APPROVE' || arbVerdict === 'UNANIMOUSLY_APPROVED' ? 'Disetujui 6/6 Peran' : arbVerdict.replace(/_/g, ' ')}).`,
             businessImpact: 'Menjadi dasar keputusan rilis yang disepakati seluruh aspek bisnis dan teknis.',
             targetStepId: 11,
           },
@@ -1015,10 +1017,10 @@ RETURN b.ruleId, inv.verdict, t.tableName, c.framework`,
           {
             stepNumber: 'Step 11',
             stepTitlePlain: '11. Architecture Review Board Sign-Off',
-            statusBadge: badgeLabel(arbVerdict === 'VETOED' ? 'FAIL' : arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS'),
-            statusTone: arbVerdict === 'VETOED' ? 'FAIL' : arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS',
+            statusBadge: badgeLabel(arbVerdict === 'VETOED' || arbVerdict === 'NOT_CONSENSUS' ? 'FAIL' : arbVerdict === 'CONDITIONAL' || arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS'),
+            statusTone: arbVerdict === 'VETOED' || arbVerdict === 'NOT_CONSENSUS' ? 'FAIL' : arbVerdict === 'CONDITIONAL' || arbVerdict === 'APPROVED_WITH_CONDITIONS' ? 'WARN' : 'PASS',
             whatWasChecked: 'Consolidated final reviews across 6 specialist roles (BA, QA, Security, DBA, GRC, Docs).',
-            plainResult: `${arbScore}% consensus score (${arbVerdict === 'UNANIMOUSLY_APPROVED' ? 'Unanimous 6/6 Approval' : arbVerdict.replace(/_/g, ' ')}).`,
+            plainResult: `${arbScore}% consensus score (${arbVerdict === 'UNANIMOUS_APPROVE' || arbVerdict === 'UNANIMOUSLY_APPROVED' ? 'Approved by 6/6 Roles' : arbVerdict.replace(/_/g, ' ')}).`,
             businessImpact: 'Provides cross-functional sign-off across business, quality, and security.',
             targetStepId: 11,
           },
@@ -1660,7 +1662,7 @@ The system architecture has been synthesized into a unified, mathematically veri
 | **Test Cases (ISO 29119-4)** | ${nodes.filter((n) => n.type === 'TEST_CASE').length} | Automated E2E, boundary & concurrency tests |
 | **Regulatory & Security Controls** | 2 | UU PDP, POJK, and SOC 2 Type II compliance |
 | **Formal SMT Invariants** | 1 | First-order logic proofs (Z3 Solver UNSAT) |
-| **ARB Clearance Seal** | 1 | Unanimous 6-persona Architecture Board clearance |
+| **ARB Clearance Seal** | 1 | Rule-based 6-persona Architecture Board review |
 
 ---
 

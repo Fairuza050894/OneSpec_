@@ -2442,9 +2442,11 @@ export function UniversalKnowledgeGraphWorkbench({
               <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
                 <span className="text-[10px] text-[#707070] uppercase font-bold">ARB Sign-Off</span>
                 <span className="text-[18px] font-bold text-[#F97316] tabular-nums">
-                  {delphiConsensusSummary?.consensusScorePercent ?? 98}%
+                  {delphiConsensusSummary?.consensusScorePercent ?? 0}%
                 </span>
-                <span className="text-[9.5px] text-[#F97316]">Clearance</span>
+                <span className="text-[9.5px] text-[#F97316]">
+                  {delphiConsensusSummary?.clearanceVerdict?.replace(/_/g, ' ') || 'Review'}
+                </span>
               </div>
               <div className="p-3 bg-[#111317] border border-[#22262E] rounded-[3px] flex flex-col justify-between">
                 <span className="text-[10px] text-[#707070] uppercase font-bold">Ontology Standard</span>
