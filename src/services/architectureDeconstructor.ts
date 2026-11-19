@@ -14,7 +14,6 @@ import type {
   BrdMatrixRow,
   CrawledModuleSummary,
 } from '@/types/sdlc';
-import { guardedFetch } from '@/lib/guardedFetch';
 
 export interface ArchitectureDeconstructionInput {
   appName: string;
@@ -1868,7 +1867,7 @@ export class ${clientClassName} {
     try {
       const headers: Record<string, string> = {
         'Accept': 'application/json',
-        'X-Request-ID': \`req-\${Date.now()}-\${Math.random().toString(36).substring(2, 7)}\`,
+        'X-Request-ID': \`req-\${Date.now()}-\${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now().toString(36)}\`,
         ...customHeaders,
       };
 
@@ -1893,12 +1892,11 @@ export class ${clientClassName} {
         if (qs) url += \`?\${qs}\`;
       }
 
-      const res = await guardedFetch(url, {
+      const res = await fetch(url, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
-        allowedHosts: [this.baseUrl, url],
       });
 
       const json = await res.json().catch(() => ({}));

@@ -8,6 +8,7 @@
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { reaBridge, type DiscoveredUiSurface, type ReaRouteDeclaration, type ReaTableDefinition } from './reaBridge';
 import { synthesizeFullSdlcFromCrawl, type CompiledSdlcState } from './sdlcCompiler';
@@ -99,7 +100,7 @@ export class TriModalDiscoveryService {
     let isCloned = false;
 
     // 1. Create a clean temp folder for real git clone
-    const cloneDir = path.join(os.tmpdir(), `onespec-git-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    const cloneDir = path.join(os.tmpdir(), `onespec-git-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`);
 
     // Check if the input is already a valid local folder path
     if (fs.existsSync(rawRepoUrl) && fs.statSync(rawRepoUrl).isDirectory()) {

@@ -1,3 +1,4 @@
+import * as crypto from 'node:crypto';
 import { CompiledSdlcState } from './sdlcCompiler';
 import { owaspDastService } from './owaspDastService';
 
@@ -66,7 +67,7 @@ export class SelfHealingPatchService {
     patchLines.push(
       `diff --git a/docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md b/docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md`,
       `new file mode 100644`,
-      `index 0000000..${Math.random().toString(16).slice(2, 9)}`,
+      `index 0000000..${crypto.randomBytes(4).toString('hex')}`,
       `--- /dev/null`,
       `+++ b/docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md`,
       `@@ -0,0 +1,${runbookContent.split('\n').length} @@`,

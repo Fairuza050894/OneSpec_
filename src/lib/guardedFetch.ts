@@ -3,8 +3,6 @@
  * SSRF Prevention with DNS Resolution & Redirect Validation (ISO/IEC 27001 & OWASP ASVS)
  */
 
-import dns from 'node:dns/promises';
-import net from 'node:net';
 import { validateUrlForSsrf, isMetadataHost, isPrivateOrLoopbackHost } from './serverSecurity';
 
 export interface GuardedFetchInit extends RequestInit {
@@ -14,6 +12,28 @@ export interface GuardedFetchInit extends RequestInit {
   fetchFn?: typeof fetch;
 }
 
+async function resolveDns(host: string): Promise<Array<{ address: string; family: number }>> {
+  if (typeof window !== 'undefined') return [];
+  try {
+    const dnsModule = 'node:dns/promises';
+    const dns = await import(/* webpackIgnore: true */ dnsModule);
+    return await (dns.default || dns).lookup(host, { all: true });
+  } catch {
+    return [];
+  }
+}
+
+async function isIpAddress(host: string): Promise<number> {
+  if (typeof window !== 'undefined') return 0;
+  try {
+    const netModule = 'node:net';
+    const net = await import(/* webpackIgnore: true */ netModule);
+    return (net.default || net).isIP(host);
+  } catch {
+    return 0;
+  }
+}
+
 export async function guardedFetch(
   url: string,
   init: GuardedFetchInit = {}
@@ -21,7 +41,7 @@ export async function guardedFetch(
   const {
     allowedHosts = [],
     maxRedirects = 3,
-    lookupFn = dns.lookup,
+    lookupFn,
     fetchFn = fetch,
     ...rest
   } = init;
@@ -39,8 +59,9 @@ export async function guardedFetch(
     );
     const explicitlyAllowed = cleanAllowed.includes(host.toLowerCase());
 
-    if (!net.isIP(host)) {
-      const addrs = await lookupFn(host, { all: true });
+    const isIp = await isIpAddress(host);
+    if (!isIp) {
+      const addrs = lookupFn ? await lookupFn(host, { all: true }) : await resolveDns(host);
       for (const a of addrs) {
         if (isMetadataHost(a.address)) {
           throw new Error('SSRF: hostname meresolusi ke endpoint metadata');

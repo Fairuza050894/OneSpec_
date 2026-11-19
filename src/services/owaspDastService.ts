@@ -20,7 +20,6 @@ import type {
   DiscoveredFeatureModule,
   GapAuditItem,
 } from '@/types/sdlc';
-import { guardedFetch } from '@/lib/guardedFetch';
 
 export type OwaspApiCategory =
   | 'API1:2023' // Broken Object Level Authorization (BOLA)
@@ -111,6 +110,7 @@ export class OwaspDastService {
     discoveredFeatureModules?: DiscoveredFeatureModule[] | FeatureModuleSurface[];
     gapAuditItems?: GapAuditItem[] | AuditDiscrepancyItem[];
   }): Promise<OwaspDastAssessmentSummary> {
+    const { guardedFetch } = await import('@/lib/guardedFetch');
     const liveHeaders: Record<string, string> = {};
 
     // 1. Fetch real server headers via lightweight HEAD/GET request (4000ms timeout)

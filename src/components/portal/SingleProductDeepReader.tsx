@@ -352,10 +352,10 @@ export function SingleProductDeepReader({
         uiReaction = hit?.uiBehavior || (isId ? 'UI menampilkan banner peringatan merah' : 'UI displays alert banner');
       }
 
-      const latency = 28 + Math.floor(Math.random() * 45);
+      const latency = 38; // non-security: nominal simulated contract latency
       const headers = {
         'content-type': 'application/json; charset=utf-8',
-        'x-request-id': `req-sim-${Math.random().toString(36).substring(2, 9)}`,
+        'x-request-id': `req-sim-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now().toString(36)}`,
         'x-ratelimit-limit': '100',
         'x-ratelimit-remaining': '98',
         'date': new Date().toUTCString(),

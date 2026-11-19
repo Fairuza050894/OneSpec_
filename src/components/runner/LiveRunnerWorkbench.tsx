@@ -639,7 +639,7 @@ export function LiveRunnerWorkbench({
 
       await delay(220);
 
-      const lat = Math.floor(Math.random() * 20) + 20;
+      const lat = 24; // non-security: deterministic nominal step latency
       setPillarStatuses((prev) => ({
         ...prev,
         [pillarId]: {
@@ -797,7 +797,7 @@ export function LiveRunnerWorkbench({
         });
         await delay(110);
 
-        const lat = Math.floor(Math.random() * 20) + 20;
+        const lat = 24; // non-security: deterministic nominal step latency
         setPillarStatuses((prev) => ({
           ...prev,
           [id]: { ...prev[id], status: 'VERIFIED', latencyMs: lat },

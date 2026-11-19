@@ -451,3 +451,28 @@ test('Test 11: k6 script generation injection defense & effective load parameter
   assert.ok(data.k6Metrics.effective.vus <= 25, 'Effective VUs must be clamped according to environment bounds');
   assert.ok(data.k6Metrics.provenance === 'EMPIRICAL_K6' || data.k6Metrics.provenance === 'HTTP_CONCURRENCY_PROBE');
 });
+
+test('Test 12: Zero Math.random across services/lib/api and crypto-backed IDs (T-05: F-07)', async () => {
+  const { workspaceVaultService } = await import('../services/workspaceVaultService');
+  const dummyState = {
+    projectName: 'Test App',
+    discoveredFeatureModules: [],
+    discoveredApiEndpoints: [],
+    synthesizedTestCases: [],
+    bugReportTickets: [],
+    uatApprovals: [],
+  } as unknown as CompiledSdlcState;
+
+  const savedRecord = workspaceVaultService.saveProjectState({
+    compiledState: dummyState,
+    projectName: 'Crypto Test App',
+    createSnapshot: true,
+  });
+  const snapshot = savedRecord.snapshots[0];
+  assert.ok(snapshot);
+  assert.match(snapshot.snapshotId, /^SNAP-\d+-[0-9A-F]{6}$/, 'Snapshot ID must be cryptographically hex-generated');
+
+  const { selfHealingPatchService } = await import('../services/selfHealingPatchService');
+  const patch = selfHealingPatchService.generateUnifiedGitPatch(dummyState);
+  assert.match(patch, /index 0000000\.\.[0-9a-f]{8}/, 'Patch index must use crypto hex random');
+});

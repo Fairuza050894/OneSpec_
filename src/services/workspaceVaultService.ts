@@ -7,6 +7,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import type { CompiledSdlcState } from './sdlcCompiler';
 import type { ReleaseAuditSignatureRecord } from '@/types/sdlc';
 
@@ -354,7 +355,7 @@ export class WorkspaceVaultService {
     const m = this.extractMetricsFromState(state);
 
     return {
-      snapshotId: `SNAP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+      snapshotId: `SNAP-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
       versionLabel: customLabel || `${semanticVersion} (${formattedDate}) — ${autoChangeRequestId}`,
       timestamp,
       semanticVersion,

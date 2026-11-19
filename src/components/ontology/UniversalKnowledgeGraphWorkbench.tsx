@@ -199,7 +199,12 @@ export function UniversalKnowledgeGraphWorkbench({
   const [draftPinsByRoute, setDraftPinsByRoute] = useState<Record<string, VisualCalloutPinItem[]>>({});
   const [newPinLabel, setNewPinLabel] = useState<string>('');
   const [newPinKind, setNewPinKind] = useState<'BUTTON' | 'FILTER' | 'SUB_TAB'>('BUTTON');
-  const [operatorSessionId] = useState<string>(() => `OP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
+  const [operatorSessionId] = useState<string>(() => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `OP-${crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+    }
+    return `OP-${Date.now().toString(36).toUpperCase()}`;
+  });
   const [signOffApprover, setSignOffApprover] = useState<string>(compiledState?.releaseSignOff?.approvedBy || 'Principal Lead Architect');
   const [signOffRole, setSignOffRole] = useState<string>(
     compiledState?.releaseSignOff?.approverRole || compiledState?.releaseSignOff?.roleTitle || 'Lead Systems Architect'
@@ -989,7 +994,7 @@ export function UniversalKnowledgeGraphWorkbench({
                       if (chkZeroCriticalSec) prereqs.push('ZERO_CRITICAL_SECURITY_FINDINGS');
 
                       const newSig: ReleaseAuditSignatureRecord = {
-                        signatureId: `SIG-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+                        signatureId: `SIG-${Date.now()}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 6).toUpperCase() : Date.now().toString(36).toUpperCase()}`,
                         approverName: signOffApprover.trim(),
                         approverRole: signOffRole,
                         signedAt: nowIso,
