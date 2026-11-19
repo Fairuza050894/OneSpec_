@@ -724,7 +724,7 @@ export function LiveRunnerWorkbench({
       ['github-actions', 'GitHub Actions'],
       ['gitlab', 'GitLab CI'],
       ['promptfoo', 'Promptfoo RAG'],
-      ['git-patch', 'Self-Healing Patch'],
+      ['git-patch', 'Contoh Patch (ilustratif)'],
     ];
 
     for (const [key, name] of toolKeys) {
@@ -2961,7 +2961,7 @@ COMMIT;
                   },
                   {
                     key: 'git-patch',
-                    name: 'Self-Healing Patch',
+                    name: 'Contoh Patch (ilustratif)',
                     ext: '.patch',
                     fmt: 'git-patch',
                     icon: <ShieldCheck className="h-3.5 w-3.5 text-emerald-300 shrink-0" />,

@@ -150,13 +150,24 @@ export async function GET(request: Request) {
       return NextResponse.json(matrix, { status: 200 });
     }
 
+    if (format === 'runbook' || format === 'remediation-runbook') {
+      const runbook = selfHealingPatchService.generateRemediationRunbook(state);
+      return new NextResponse(runbook, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${slug}-remediation-runbook.md"`,
+        },
+      });
+    }
+
     if (format === 'git-patch' || format === 'patch') {
       const patch = selfHealingPatchService.generateUnifiedGitPatch(state);
       return new NextResponse(patch, {
         status: 200,
         headers: {
           'Content-Type': 'text/x-diff; charset=utf-8',
-          'Content-Disposition': `attachment; filename="${slug}-self-healing-remediation.patch"`,
+          'Content-Disposition': `attachment; filename="${slug}-contoh-patch-ilustratif.patch"`,
         },
       });
     }

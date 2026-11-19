@@ -1,5 +1,6 @@
 import * as crypto from 'node:crypto';
-import { CompiledSdlcState } from './sdlcCompiler';
+import * as child_process from 'node:child_process';
+import type { CompiledSdlcState } from './sdlcCompiler';
 import { owaspDastService } from './owaspDastService';
 
 export interface AutonomousRemediationItem {
@@ -11,6 +12,13 @@ export interface AutonomousRemediationItem {
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM';
   remediationSummary: string;
   diffSnippet: string;
+  provenance: 'SIMULATED' | 'MEASURED_GIT_DIFF';
+  isIllustrativeOnly: boolean;
+}
+
+export interface PatchGenerationOptions {
+  isRealGitRepo?: boolean;
+  gitWorkingDir?: string;
 }
 
 export class SelfHealingPatchService {
@@ -26,32 +34,86 @@ export class SelfHealingPatchService {
   }
 
   /**
+   * Computes the authentic Git object blob SHA-1 (first 7 hex chars), exactly matching Git's object model.
+   * Format: "blob <byteLength>\0<content>" hashed with SHA-1.
+   */
+  public static gitBlobSha7(content: string): string {
+    const header = `blob ${Buffer.byteLength(content, 'utf8')}\0`;
+    return crypto.createHash('sha1').update(header + content, 'utf8').digest('hex').slice(0, 7);
+  }
+
+  /**
+   * Creates a 100% syntactically valid unified git diff for a new file that cleanly passes `git apply --check`.
+   */
+  public static createUnifiedNewFileDiff(filePath: string, fileContent: string): string {
+    const normalized = fileContent.endsWith('\n') ? fileContent : fileContent + '\n';
+    const lines = normalized.split('\n');
+    lines.pop(); // remove trailing empty string resulting from the terminal newline
+    const blobSha = SelfHealingPatchService.gitBlobSha7(normalized);
+
+    return [
+      `diff --git a/${filePath} b/${filePath}`,
+      `new file mode 100644`,
+      `index 0000000..${blobSha}`,
+      `--- /dev/null`,
+      `+++ b/${filePath}`,
+      `@@ -0,0 +1,${lines.length} @@`,
+      ...lines.map((l) => `+${l}`),
+    ].join('\n');
+  }
+
+  /**
    * Generates a standard Unified Git Patch (.patch) and accompanying
    * engineering runbook for automated merge in CI/CD or local developer checkout.
+   * If a real git working copy is supplied (Mode A), attempts to extract actual git diff.
+   * Otherwise (Mode B), emits an illustrative patch strictly marked as SIMULATED that
+   * conforms 100% to git unified diff standards and passes `git apply --check`.
    */
-  public generateUnifiedGitPatch(state: CompiledSdlcState): string {
-    const appName = state.appName || 'Target Application';
-    const slug = appName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const timestamp = new Date().toISOString();
+  public generateUnifiedGitPatch(
+    state: CompiledSdlcState,
+    options?: PatchGenerationOptions
+  ): string {
+    // Mode A: If real git repo is available and contains uncommitted remediation changes
+    if (options?.isRealGitRepo && options?.gitWorkingDir) {
+      try {
+        const gitDiff = child_process.execSync('git diff', {
+          cwd: options.gitWorkingDir,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        if (gitDiff.trim().length > 0) {
+          return gitDiff;
+        }
+      } catch {
+        // Fall back to illustrative patch
+      }
+    }
 
+    const appName = state.appName || 'Target Application';
+    const timestamp = new Date().toISOString();
     const items = this.extractRemediationItems(state);
 
     const patchLines: string[] = [];
     patchLines.push(
       `From: OneSpec Autonomous Remediation Engine <remediation-bot@onespec.internal>`,
       `Date: ${new Date().toUTCString()}`,
-      `Subject: [PATCH] fix(security-perf): autonomous remediation of OWASP API Top 10, SQL bottlenecks, and input validation gaps`,
+      `Subject: [PATCH] fix(security-perf): autonomous remediation (Contoh Ilustratif / SIMULATED)`,
       `MIME-Version: 1.0`,
       `Content-Type: text/plain; charset=UTF-8`,
       `Content-Transfer-Encoding: 8bit`,
+      `X-OneSpec-Provenance: SIMULATED`,
+      `X-OneSpec-Illustrative: true`,
       ``,
-      `==============================================================================`,
-      `ONESPEC SDLC STUDIO — AUTONOMOUS REMEDIATION RUNBOOK & AUDIT TRAIL`,
-      `Application: ${appName} (${state.targetUrl || 'http://localhost:3000/'})`,
-      `Generated At: ${timestamp}`,
-      `Compliance Standards: ISO/IEC 27001:2022 · OWASP API Security Top 10 (2023) · ISO 25010`,
-      `Remediated Items Count: ${items.length}`,
-      `==============================================================================`,
+      `# ==============================================================================`,
+      `# ONESPEC SDLC STUDIO — CONTOH PATCH REMEDIASI ILUSTRATIF (SIMULATED)`,
+      `# PERINGATAN: Berkas ini merupakan contoh arsitektural berbasis simulasi dan`,
+      `# TIDAK untuk diterapkan langsung pada repositori produksi tanpa tinjauan teknis.`,
+      `# Provenance: SIMULATED · Mode: AS_BUILT_RULE_BASED`,
+      `# Application: ${appName} (${state.targetUrl || 'http://localhost:3000/'})`,
+      `# Generated At: ${timestamp}`,
+      `# Compliance Standards: ISO/IEC 27001:2022 · OWASP API Security Top 10 (2023) · ISO 25010`,
+      `# Remediated Items Count: ${items.length}`,
+      `# ==============================================================================`,
       ``,
       `---`
     );
@@ -59,25 +121,15 @@ export class SelfHealingPatchService {
     // Append unified diff chunks for each remediated component
     for (const item of items) {
       patchLines.push(item.diffSnippet);
-      patchLines.push('');
     }
 
     // Append documentation runbook as a new markdown file in the git repository
     const runbookContent = this.generateRemediationRunbook(state, items);
     patchLines.push(
-      `diff --git a/docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md b/docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md`,
-      `new file mode 100644`,
-      `index 0000000..${crypto.randomBytes(4).toString('hex')}`,
-      `--- /dev/null`,
-      `+++ b/docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md`,
-      `@@ -0,0 +1,${runbookContent.split('\n').length} @@`,
-      runbookContent
-        .split('\n')
-        .map((l) => `+${l}`)
-        .join('\n'),
-      `--`,
-      `2.44.0`
+      SelfHealingPatchService.createUnifiedNewFileDiff('docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md', runbookContent)
     );
+
+    patchLines.push('--', '2.44.0', '');
 
     return patchLines.join('\n');
   }
@@ -98,17 +150,20 @@ export class SelfHealingPatchService {
 **Audit Standard:** ISO/IEC 27001:2022 / OWASP ASVS v4.0 / ISO/IEC 25010:2023  
 **Generated by:** OneSpec Autonomous Remediation Engine (Next-Gen AI SDLC)
 
+> [!IMPORTANT]
+> **Contoh Patch (Ilustratif / Simulated)**: Patch dan cuplikan perbaikan berikut ini dihasilkan secara terprogram oleh mesin aturan (rule-based simulation) sebagai panduan referensi arsitektur, bukan patch yang siap diterapkan secara buta pada repositori produksi tanpa penyesuaian oleh tim pengembang.
+
 ---
 
 ## 1. Executive Summary & Remediated Flaws
 This patch automatically resolves **${resolvedItems.length} structural vulnerabilities and performance bottlenecks** detected across the application surface:
 
-| Item ID | Category | Target Component | CWE / Standard | Severity |
-| :--- | :--- | :--- | :--- | :--- |
+| Item ID | Category | Target Component | CWE / Standard | Severity | Provenance |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 ${resolvedItems
   .map(
     (it) =>
-      `| **${it.id}** | \`${it.sourceCategory}\` | \`${it.targetFile}\` | ${it.cweMapping} | **${it.severity}** |`
+      `| **${it.id}** | \`${it.sourceCategory}\` | \`${it.targetFile}\` | ${it.cweMapping} | **${it.severity}** | \`${it.provenance}\` |`
   )
   .join('\n')}
 
@@ -117,20 +172,21 @@ ${resolvedItems
 ## 2. One-Click Merge & Application Instructions
 
 ### Step 2.1 — Apply Patch to Working Copy
-In the root directory of your repository, apply the unified patch cleanly:
+In the root directory of your repository, verify the illustrative patch cleanly:
 \`\`\`bash
 # 1. Verify git working directory status
 git status
 
-# 2. Check diff applicability dry-run
-git apply --check onespec-remediation.patch
+# 2. Check diff applicability dry-run (verifikasi sintaks patch)
+git apply --check onespec-contoh-patch-ilustratif.patch
 
-# 3. Apply the autonomous patch
-git apply onespec-remediation.patch
+# 3. Apply the autonomous patch to a review branch
+git checkout -b review/onespec-remediation
+git apply onespec-contoh-patch-ilustratif.patch
 
 # 4. Stage and commit the remediated components
 git add .
-git commit -m "fix(security-perf): autonomous remediation of OWASP API flaws & SQL bottlenecks"
+git commit -m "fix(security-perf): autonomous remediation of OWASP API flaws & SQL bottlenecks (SIMULATED)"
 \`\`\`
 
 ### Step 2.2 — Run Database Index Migration
@@ -184,17 +240,30 @@ git clean -fd
     const primaryTable = state.databaseTables?.[0]?.tableName || 'EnterpriseRecord';
 
     // 1. OWASP DAST Findings Remediation
-    const dastSummary =
-      state.owaspDastSummary ||
-      owaspDastService.generateDastAudit({
-        targetUrl: state.targetUrl || 'http://localhost:3000/',
-        appName,
-        apiEndpoints: state.discoveryResult?.apiEndpoints || [],
-        databaseTables: state.databaseTables || state.discoveryResult?.databaseTables || [],
-        validationRules: state.validationRules || [],
-      });
-
     // 1.1 API1: BOLA Tenant Isolation
+    const f1Content = [
+      `import type { Request, Response, NextFunction } from 'express';`,
+      ``,
+      `/**`,
+      ` * OneSpec Autonomous Remediation: OWASP API1:2023 (BOLA)`,
+      ` * Enforces mandatory tenant isolation and object ownership boundary.`,
+      ` */`,
+      `export function enforceTenantIsolation(req: Request, res: Response, next: NextFunction) {`,
+      `  const user = (req as any).user;`,
+      `  const requestedTenantId = req.headers['x-tenant-id'] || req.params.tenantId;`,
+      `  `,
+      `  if (requestedTenantId && user?.tenantId && String(requestedTenantId) !== String(user.tenantId)) {`,
+      `    return res.status(403).json({`,
+      `      statusCode: 403,`,
+      `      error: 'Forbidden',`,
+      `      message: 'Cross-tenant resource access violation detected (BOLA Guard)',`,
+      `    });`,
+      `  }`,
+      `  next();`,
+      `}`,
+      ``,
+    ].join('\n');
+
     items.push({
       id: 'REM-OWASP-API1',
       sourceCategory: 'OWASP_DAST',
@@ -203,36 +272,34 @@ git clean -fd
       cweMapping: 'CWE-284: Improper Access Control',
       severity: 'HIGH',
       remediationSummary: 'Enforces tenant isolation and ownership validation across entities.',
-      diffSnippet: [
-        `diff --git a/src/middleware/tenantIsolation.ts b/src/middleware/tenantIsolation.ts`,
-        `new file mode 100644`,
-        `index 0000000..7a8b9c1`,
-        `--- /dev/null`,
-        `+++ b/src/middleware/tenantIsolation.ts`,
-        `@@ -0,0 +1,38 @@`,
-        `+import type { Request, Response, NextFunction } from 'express';`,
-        `+`,
-        `+/**`,
-        `+ * OneSpec Autonomous Remediation: OWASP API1:2023 (BOLA)`,
-        `+ * Enforces mandatory tenant isolation and object ownership boundary.`,
-        `+ */`,
-        `+export function enforceTenantIsolation(req: Request, res: Response, next: NextFunction) {`,
-        `+  const user = (req as any).user;`,
-        `+  const requestedTenantId = req.headers['x-tenant-id'] || req.params.tenantId;`,
-        `+  `,
-        `+  if (requestedTenantId && user?.tenantId && String(requestedTenantId) !== String(user.tenantId)) {`,
-        `+    return res.status(403).json({`,
-        `+      statusCode: 403,`,
-        `+      error: 'Forbidden',`,
-        `+      message: 'Cross-tenant resource access violation detected (BOLA Guard)',`,
-        `+    });`,
-        `+  }`,
-        `+  next();`,
-        `+}`,
-      ].join('\n'),
+      diffSnippet: SelfHealingPatchService.createUnifiedNewFileDiff(
+        'src/middleware/tenantIsolation.ts',
+        f1Content
+      ),
+      provenance: 'SIMULATED',
+      isIllustrativeOnly: true,
     });
 
     // 1.2 API3: Mass Assignment Zod Strict DTO
+    const f2Content = [
+      `import { z } from 'zod';`,
+      ``,
+      `/**`,
+      ` * OneSpec Autonomous Remediation: OWASP API3:2023 (Mass Assignment)`,
+      ` * Strict schema strips unexpected fields and rejects unwhitelisted properties.`,
+      ` */`,
+      `export const StrictPayloadContract = z`,
+      `  .object({`,
+      `    username: z.string().min(3).max(50),`,
+      `    email: z.string().email().optional(),`,
+      `    notes: z.string().max(255).optional(),`,
+      `  })`,
+      `  .strict(); // Throws 422 if client submits role, isAdmin, or internal flags!`,
+      ``,
+      `export type ValidatedStrictPayload = z.infer<typeof StrictPayloadContract>;`,
+      ``,
+    ].join('\n');
+
     items.push({
       id: 'REM-OWASP-API3',
       sourceCategory: 'OWASP_DAST',
@@ -241,32 +308,36 @@ git clean -fd
       cweMapping: 'CWE-915: Improper Modification of Dynamically-Determined Attributes',
       severity: 'HIGH',
       remediationSummary: 'Rejects extraneous or privileged attributes (e.g. isAdmin, role, balance).',
-      diffSnippet: [
-        `diff --git a/src/schemas/strictValidationDto.ts b/src/schemas/strictValidationDto.ts`,
-        `new file mode 100644`,
-        `index 0000000..8b9c0d2`,
-        `--- /dev/null`,
-        `+++ b/src/schemas/strictValidationDto.ts`,
-        `@@ -0,0 +1,36 @@`,
-        `+import { z } from 'zod';`,
-        `+`,
-        `+/**`,
-        `+ * OneSpec Autonomous Remediation: OWASP API3:2023 (Mass Assignment)`,
-        `+ * Strict schema strips unexpected fields and rejects unwhitelisted properties.`,
-        `+ */`,
-        `+export const StrictPayloadContract = z`,
-        `+  .object({`,
-        `+    username: z.string().min(3).max(50),`,
-        `+    email: z.string().email().optional(),`,
-        `+    notes: z.string().max(255).optional(),`,
-        `+  })`,
-        `+  .strict(); // Throws 422 if client submits role, isAdmin, or internal flags!`,
-        `+`,
-        `+export type ValidatedStrictPayload = z.infer<typeof StrictPayloadContract>;`,
-      ].join('\n'),
+      diffSnippet: SelfHealingPatchService.createUnifiedNewFileDiff(
+        'src/schemas/strictValidationDto.ts',
+        f2Content
+      ),
+      provenance: 'SIMULATED',
+      isIllustrativeOnly: true,
     });
 
     // 1.3 API4: Rate Limiting & DoS Clamp
+    const f3Content = [
+      `import rateLimit from 'express-rate-limit';`,
+      ``,
+      `/**`,
+      ` * OneSpec Autonomous Remediation: OWASP API4:2023 (Resource Consumption)`,
+      ` * Throttles aggressive sequential requests to enforce SLA performance.`,
+      ` */`,
+      `export const standardApiRateLimiter = rateLimit({`,
+      `  windowMs: 60 * 1000, // 1 minute`,
+      `  max: 120, // 120 requests per IP`,
+      `  standardHeaders: true,`,
+      `  legacyHeaders: false,`,
+      `  message: {`,
+      `    statusCode: 429,`,
+      `    error: 'Too Many Requests',`,
+      `    message: 'Rate limit threshold exceeded. Please retry after window reset.',`,
+      `  },`,
+      `});`,
+      ``,
+    ].join('\n');
+
     items.push({
       id: 'REM-OWASP-API4',
       sourceCategory: 'OWASP_DAST',
@@ -275,34 +346,34 @@ git clean -fd
       cweMapping: 'CWE-770: Allocation of Resources Without Limits or Throttling',
       severity: 'MEDIUM',
       remediationSummary: 'Clamps burst requests to 120 req/min per IP to eliminate DoS vector.',
-      diffSnippet: [
-        `diff --git a/src/middleware/rateLimiter.ts b/src/middleware/rateLimiter.ts`,
-        `new file mode 100644`,
-        `index 0000000..9c0d1e3`,
-        `--- /dev/null`,
-        `+++ b/src/middleware/rateLimiter.ts`,
-        `@@ -0,0 +1,30 @@`,
-        `+import rateLimit from 'express-rate-limit';`,
-        `+`,
-        `+/**`,
-        `+ * OneSpec Autonomous Remediation: OWASP API4:2023 (Resource Consumption)`,
-        `+ * Throttles aggressive sequential requests to enforce SLA performance.`,
-        `+ */`,
-        `+export const standardApiRateLimiter = rateLimit({`,
-        `+  windowMs: 60 * 1000, // 1 minute`,
-        `+  max: 120, // 120 requests per IP`,
-        `+  standardHeaders: true,`,
-        `+  legacyHeaders: false,`,
-        `+  message: {`,
-        `+    statusCode: 429,`,
-        `+    error: 'Too Many Requests',`,
-        `+    message: 'Rate limit threshold exceeded. Please retry after window reset.',`,
-        `+  },`,
-        `+});`,
-      ].join('\n'),
+      diffSnippet: SelfHealingPatchService.createUnifiedNewFileDiff(
+        'src/middleware/rateLimiter.ts',
+        f3Content
+      ),
+      provenance: 'SIMULATED',
+      isIllustrativeOnly: true,
     });
 
     // 1.4 API8: Security Headers & CORS Misconfiguration
+    const f4Content = [
+      `import type { Request, Response, NextFunction } from 'express';`,
+      ``,
+      `/**`,
+      ` * OneSpec Autonomous Remediation: OWASP API8:2023 (Security Misconfiguration)`,
+      ` * Hardens ingress with HSTS, CSP, and clickjacking prevention.`,
+      ` */`,
+      `export function applyEnterpriseSecurityHeaders(req: Request, res: Response, next: NextFunction) {`,
+      `  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');`,
+      `  res.setHeader('X-Content-Type-Options', 'nosniff');`,
+      `  res.setHeader('X-Frame-Options', 'DENY');`,
+      `  res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none';");`,
+      `  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');`,
+      `  res.removeHeader('X-Powered-By');`,
+      `  next();`,
+      `}`,
+      ``,
+    ].join('\n');
+
     items.push({
       id: 'REM-OWASP-API8',
       sourceCategory: 'OWASP_DAST',
@@ -311,29 +382,12 @@ git clean -fd
       cweMapping: 'CWE-16: Configuration Vulnerability',
       severity: 'MEDIUM',
       remediationSummary: 'Injects HSTS, CSP, X-Frame-Options, X-Content-Type-Options headers.',
-      diffSnippet: [
-        `diff --git a/src/middleware/securityHeaders.ts b/src/middleware/securityHeaders.ts`,
-        `new file mode 100644`,
-        `index 0000000..ad1e2f4`,
-        `--- /dev/null`,
-        `+++ b/src/middleware/securityHeaders.ts`,
-        `@@ -0,0 +1,32 @@`,
-        `+import type { Request, Response, NextFunction } from 'express';`,
-        `+`,
-        `+/**`,
-        `+ * OneSpec Autonomous Remediation: OWASP API8:2023 (Security Misconfiguration)`,
-        `+ * Hardens ingress with HSTS, CSP, and clickjacking prevention.`,
-        `+ */`,
-        `+export function applyEnterpriseSecurityHeaders(req: Request, res: Response, next: NextFunction) {`,
-        `+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');`,
-        `+  res.setHeader('X-Content-Type-Options', 'nosniff');`,
-        `+  res.setHeader('X-Frame-Options', 'DENY');`,
-        `+  res.setHeader('Content-Security-Policy', "default-src 'self'; frame-ancestors 'none';");`,
-        `+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');`,
-        `+  res.removeHeader('X-Powered-By');`,
-        `+  next();`,
-        `+}`,
-      ].join('\n'),
+      diffSnippet: SelfHealingPatchService.createUnifiedNewFileDiff(
+        'src/middleware/securityHeaders.ts',
+        f4Content
+      ),
+      provenance: 'SIMULATED',
+      isIllustrativeOnly: true,
     });
 
     // 2. Stage 4 SQL Bottleneck Remediation DDL
@@ -349,6 +403,14 @@ git clean -fd
           `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_${primaryTable.toLowerCase()}_status_created ON "${primaryTable}" ("status", "createdAt" DESC);`,
         ].join('\n');
 
+    const f5Content = [
+      `-- OneSpec Autonomous Remediation: Stage 4 Database Index DDL`,
+      `-- Target Table: ${primaryTable}`,
+      ``,
+      sqlQueries,
+      ``,
+    ].join('\n');
+
     items.push({
       id: 'REM-SQL-STAGE4',
       sourceCategory: 'SQL_BOTTLENECK',
@@ -357,18 +419,12 @@ git clean -fd
       cweMapping: 'CWE-400: Uncontrolled Resource Consumption (Database Sequential Scan)',
       severity: 'HIGH',
       remediationSummary: 'Resolves sequential table scans and reduces database latency from > 500ms to < 25ms.',
-      diffSnippet: [
-        `diff --git a/prisma/migrations/add_autonomous_remediation_indexes.sql b/prisma/migrations/add_autonomous_remediation_indexes.sql`,
-        `new file mode 100644`,
-        `index 0000000..be2f3a5`,
-        `--- /dev/null`,
-        `+++ b/prisma/migrations/add_autonomous_remediation_indexes.sql`,
-        `@@ -0,0 +1,18 @@`,
-        `+-- OneSpec Autonomous Remediation: Stage 4 Database Index DDL`,
-        `+-- Target Table: ${primaryTable}`,
-        `+`,
-        ...sqlQueries.split('\n').map((l) => `+${l}`),
-      ].join('\n'),
+      diffSnippet: SelfHealingPatchService.createUnifiedNewFileDiff(
+        'prisma/migrations/add_autonomous_remediation_indexes.sql',
+        f5Content
+      ),
+      provenance: 'SIMULATED',
+      isIllustrativeOnly: true,
     });
 
     // 3. Gap Audit & Missing DTO Validation Contracts
@@ -376,6 +432,17 @@ git clean -fd
     const validationCode = vrs.slice(0, 8).map((vr) => `
 /** [${vr.ruleId}] ${vr.constraintExpression} -> HTTP ${vr.httpStatus} */
 export const ${vr.fieldName.replace(/[^a-zA-Z0-9]/g, '')}Validator = z.${vr.dataType === 'number' ? 'number()' : 'string()'}.${vr.constraintExpression.includes('min') ? 'min(1)' : 'nonempty()'};`).join('\n');
+
+    const f6Content = [
+      `import { z } from 'zod';`,
+      ``,
+      `/**`,
+      ` * OneSpec Autonomous Remediation: Gap Audit DTO Contracts`,
+      ` * Enforces input constraints discovered during DOM and AST scanning.`,
+      ` */`,
+      validationCode.trim(),
+      ``,
+    ].join('\n');
 
     items.push({
       id: 'REM-GAP-VALIDATION',
@@ -385,21 +452,12 @@ export const ${vr.fieldName.replace(/[^a-zA-Z0-9]/g, '')}Validator = z.${vr.data
       cweMapping: 'CWE-20: Improper Input Validation',
       severity: 'MEDIUM',
       remediationSummary: 'Prevents empty or malformed inputs before reaching database transaction layer.',
-      diffSnippet: [
-        `diff --git a/src/validators/inputContracts.ts b/src/validators/inputContracts.ts`,
-        `new file mode 100644`,
-        `index 0000000..cf3a4b6`,
-        `--- /dev/null`,
-        `+++ b/src/validators/inputContracts.ts`,
-        `@@ -0,0 +1,35 @@`,
-        `+import { z } from 'zod';`,
-        `+`,
-        `+/**`,
-        `+ * OneSpec Autonomous Remediation: Gap Audit DTO Contracts`,
-        `+ * Enforces input constraints discovered during DOM and AST scanning.`,
-        `+ */`,
-        ...validationCode.split('\n').map((l) => `+${l}`),
-      ].join('\n'),
+      diffSnippet: SelfHealingPatchService.createUnifiedNewFileDiff(
+        'src/validators/inputContracts.ts',
+        f6Content
+      ),
+      provenance: 'SIMULATED',
+      isIllustrativeOnly: true,
     });
 
     return items;

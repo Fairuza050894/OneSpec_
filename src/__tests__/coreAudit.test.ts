@@ -478,7 +478,7 @@ test('Test 12: Zero Math.random across services/lib/api and crypto-backed IDs (T
 
   const { selfHealingPatchService } = await import('../services/selfHealingPatchService');
   const patch = selfHealingPatchService.generateUnifiedGitPatch(dummyState);
-  assert.match(patch, /index 0000000\.\.[0-9a-f]{8}/, 'Patch index must use crypto hex random');
+  assert.match(patch, /index 0000000\.\.[0-9a-f]{7}/, 'Patch index must use authentic git blob sha');
 });
 
 test('Test 13: Provenance model, Measured<T> metrics and NOT_RUN value null enforcement (T-06)', async () => {
@@ -976,4 +976,81 @@ test('Test 17: Delphi ARB rule-based consensus derivation and zero static claims
 
   assert.equal(noGoSummary.clearancePacketMarkdown.includes('Completion Certificate'), false);
   assert.equal(cleanSummary.clearancePacketMarkdown.includes('Completion Certificate'), false);
+});
+
+test('Test 18: SelfHealingPatchService honest git apply verification and illustrative simulation labeling (T-11)', async () => {
+  const { selfHealingPatchService, SelfHealingPatchService } = await import('../services/selfHealingPatchService');
+  const cp = await import('node:child_process');
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+
+  // 1. Verify authentic git blob hash computation
+  const testContent = 'import express from "express";\nexport const x = 1;\n';
+  const expectedSha = 'c0f1576';
+  assert.equal(
+    SelfHealingPatchService.gitBlobSha7(testContent),
+    expectedSha,
+    'gitBlobSha7 must produce the mathematically authentic Git object blob SHA-1 prefix'
+  );
+
+  const dummyState: any = {
+    appName: 'Pancaran Test App',
+    targetUrl: 'https://test.pancaran-group.co.id',
+    databaseTables: [{ tableName: 'Shipments' }],
+    validationRules: [
+      {
+        ruleId: 'VR-01',
+        fieldName: 'containerNumber',
+        dataType: 'string',
+        constraintExpression: 'nonempty',
+        httpStatus: 400,
+      },
+    ],
+    pipelineStages: [{ status: 'BOTTLENECK', rootCause: { sqlRemediationQuery: 'CREATE INDEX idx_test ON "Shipments" ("id");' } }],
+  };
+
+  // 2. Generate unified patch
+  const patch = selfHealingPatchService.generateUnifiedGitPatch(dummyState);
+
+  // 3. Verify illustrative metadata and absence of random index
+  assert.match(patch, /X-OneSpec-Provenance: SIMULATED/, 'Patch must include SIMULATED provenance header');
+  assert.match(patch, /X-OneSpec-Illustrative: true/, 'Patch must mark itself illustrative');
+  assert.match(patch, /CONTOH PATCH REMEDIASI ILUSTRATIF/, 'Patch must contain illustrative title');
+  assert.match(patch, /TIDAK untuk diterapkan langsung/, 'Patch must contain direct application warning');
+  assert.match(patch, /index 0000000\.\.[0-9a-f]{7}/, 'Patch index must use authentic 7-char git blob sha');
+  assert.equal(patch.includes('Math.random'), false);
+
+  // 4. Verify git apply --check in temporary git repository (Mode A criteria)
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onespec-t11-test-'));
+  try {
+    cp.execSync('git init', { cwd: tmpDir, stdio: 'ignore' });
+    const patchPath = path.join(tmpDir, 'test.patch');
+    fs.writeFileSync(patchPath, patch, 'utf8');
+
+    // Dry-run applicability check must pass cleanly with 0 errors
+    cp.execSync('git apply --check test.patch', { cwd: tmpDir, stdio: 'pipe' });
+
+    // Actual git apply must succeed and create all files
+    cp.execSync('git apply test.patch', { cwd: tmpDir, stdio: 'pipe' });
+
+    assert.ok(fs.existsSync(path.join(tmpDir, 'src/middleware/tenantIsolation.ts')));
+    assert.ok(fs.existsSync(path.join(tmpDir, 'src/schemas/strictValidationDto.ts')));
+    assert.ok(fs.existsSync(path.join(tmpDir, 'src/middleware/rateLimiter.ts')));
+    assert.ok(fs.existsSync(path.join(tmpDir, 'src/middleware/securityHeaders.ts')));
+    assert.ok(fs.existsSync(path.join(tmpDir, 'prisma/migrations/add_autonomous_remediation_indexes.sql')));
+    assert.ok(fs.existsSync(path.join(tmpDir, 'src/validators/inputContracts.ts')));
+    assert.ok(fs.existsSync(path.join(tmpDir, 'docs/AUTONOMOUS_REMEDIATION_RUNBOOK.md')));
+  } finally {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup error
+    }
+  }
+
+  // 5. Verify Remediation Runbook contents and provenance
+  const runbook = selfHealingPatchService.generateRemediationRunbook(dummyState);
+  assert.match(runbook, /Contoh Patch \(Ilustratif \/ Simulated\)/, 'Runbook must include illustrative warning');
+  assert.match(runbook, /SIMULATED/, 'Runbook must document SIMULATED provenance in table');
 });

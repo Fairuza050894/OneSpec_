@@ -194,15 +194,15 @@ export function QuickExportToolbar({
         <span>RBAC Matrix (JSON)</span>
       </a>
 
-      {/* 6. Self-Healing Git Patch (.patch) */}
+      {/* 6. Contoh Patch Ilustratif (.patch) */}
       <a
         href={`/api/sdlc/automation-bundle?format=git-patch${projectParam}`}
-        download={`${slug}-self-healing-remediation.patch`}
+        download={`${slug}-contoh-patch-ilustratif.patch`}
         className="px-2.5 py-1 rounded text-[11px] font-mono font-semibold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/80 transition flex items-center gap-1"
-        title="Download Autonomous Self-Healing Unified Git Patch (.patch)"
+        title="Contoh Patch (ilustratif, tidak untuk diterapkan)"
       >
         <span>🩹</span>
-        <span>Git Patch (.patch)</span>
+        <span>Contoh Patch (ilustratif)</span>
       </a>
 
       {/* 7. Master ISO Handover Bundle (.zip) */}

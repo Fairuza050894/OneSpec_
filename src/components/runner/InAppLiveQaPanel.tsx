@@ -557,12 +557,12 @@ export function InAppLiveQaPanel({
 
               <a
                 href={`/api/sdlc/automation-bundle?format=git-patch${projectParam}`}
-                download={`${slug}-self-healing-remediation.patch`}
+                download={`${slug}-contoh-patch-ilustratif.patch`}
                 className="h-6 px-2 rounded bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-700/60 text-emerald-300 text-[9.5px] font-semibold flex items-center gap-1 transition-colors"
-                title="Download Autonomous Self-Healing Unified Git Patch"
+                title="Contoh Patch (ilustratif, tidak untuk diterapkan)"
               >
                 <span>🩹</span>
-                <span>Git Patch (.patch)</span>
+                <span>Contoh Patch (ilustratif)</span>
               </a>
             </div>
           </div>

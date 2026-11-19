@@ -309,11 +309,11 @@ export class ToolProbeService {
       default:
         return {
           toolId: 'git-patch',
-          name: 'Self-Healing Patch',
+          name: 'Contoh Patch (ilustratif)',
           status: 'NOT_RUN',
           latencyMs: 0,
           liveEvidence: 'Ekspor berkas (tidak terhubung)',
-          provenance: 'STATIC_ANALYSIS',
+          provenance: 'SIMULATED',
           connectionMode: 'FILE_EXPORT',
         };
     }

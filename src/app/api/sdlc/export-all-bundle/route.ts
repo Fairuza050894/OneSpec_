@@ -186,6 +186,7 @@ async function handleExportBundle(req: NextRequest) {
     }
 
     const remediationPatch = selfHealingPatchService.generateUnifiedGitPatch(exportState);
+    const remediationRunbook = selfHealingPatchService.generateRemediationRunbook(exportState);
 
     // Build Master ZIP Archive
     const zipFiles: Array<{ name: string; content: string | Uint8Array }> = [
@@ -195,7 +196,8 @@ async function handleExportBundle(req: NextRequest) {
       { name: `04_OneSpec_Postman_${slug}.postman_collection.json`, content: postmanJson },
       { name: `05_OneSpec_RBAC_Matrix_${slug}.json`, content: JSON.stringify(rbacMatrix, null, 2) },
       { name: `06_OneSpec_OpenAPI_3.1_${slug}.json`, content: JSON.stringify(openApiSpec, null, 2) },
-      { name: `07_OneSpec_Remediation_Patch_${slug}.patch`, content: remediationPatch },
+      { name: `07_OneSpec_Contoh_Patch_Ilustratif_${slug}.patch`, content: remediationPatch },
+      { name: `08_OneSpec_Remediation_Runbook_${slug}.md`, content: remediationRunbook },
       { name: `00_ISO_Audit_Handover_Manifest_${slug}.json`, content: JSON.stringify(manifest, null, 2) },
     ];
 

@@ -229,13 +229,14 @@ export function ExportBundleDropdown({
 
           <a
             href={`/api/sdlc/automation-bundle?format=git-patch${projectParam}`}
-            download={`${slug}-self-healing.patch`}
+            download={`${slug}-contoh-patch-ilustratif.patch`}
             onClick={() => setIsOpen(false)}
             className="flex items-center justify-between px-2.5 py-1.5 rounded-[4px] hover:bg-white/[0.06] text-zinc-200 transition-colors cursor-pointer group"
+            title="Contoh Patch (ilustratif, tidak untuk diterapkan)"
           >
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-200" strokeWidth={1.5} />
-              <span>Self-Healing Patch</span>
+              <span>Contoh Patch (ilustratif, tidak untuk diterapkan)</span>
             </div>
             <span className="text-[10px] text-zinc-400 font-mono">.patch</span>
           </a>
