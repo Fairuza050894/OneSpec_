@@ -440,6 +440,8 @@ export interface BlindCrawlDiscoveredForm {
   }[];
   submitSelector: string;
 }
+export type { ControlKind } from '@/lib/controlClassifier';
+
 export interface FeatureSurfaceInput {
   name: string;
   id?: string;
@@ -453,6 +455,13 @@ export interface FeatureSurfaceInput {
   selector: string;
   pagePath?: string;
   moduleName?: string;
+  role?: string;
+  ariaLabel?: string;
+  min?: number;
+  max?: number;
+  optionsCount?: number;
+  options?: string[];
+  controlKind?: import('@/lib/controlClassifier').ControlKind;
 }
 
 export interface FeatureSurfaceAnomaly {

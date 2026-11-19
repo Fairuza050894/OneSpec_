@@ -481,6 +481,10 @@ export class BlindCrawlerService {
           selector: string;
           xPercent: number;
           yPercent: number;
+          role?: string;
+          ariaLabel?: string;
+          min?: number;
+          max?: number;
         }> = [];
         document.querySelectorAll('input:not([type="hidden"])').forEach((el) => {
           if (!isVisible(el)) return;
@@ -495,6 +499,10 @@ export class BlindCrawlerService {
             placeholder: inp.getAttribute('placeholder') || '',
             label,
             required: inp.hasAttribute('required') || inp.getAttribute('aria-required') === 'true',
+            role: inp.getAttribute('role') || undefined,
+            ariaLabel: inp.getAttribute('aria-label') || undefined,
+            min: inp.hasAttribute('min') ? Number(inp.getAttribute('min')) : undefined,
+            max: inp.hasAttribute('max') ? Number(inp.getAttribute('max')) : undefined,
             selector: makeSelector(inp, 'input'),
             ...coord(inp),
           });
@@ -1937,6 +1945,15 @@ export class BlindCrawlerService {
             const id = inp.getAttribute('id') || '';
             const minLen = inp.getAttribute('minlength');
             const maxLen = inp.getAttribute('maxlength');
+            const role = inp.getAttribute('role') || undefined;
+            const ariaLabel = inp.getAttribute('aria-label') || undefined;
+            const minAttr = inp.getAttribute('min');
+            const maxAttr = inp.getAttribute('max');
+            const min = minAttr ? parseFloat(minAttr) : undefined;
+            const max = maxAttr ? parseFloat(maxAttr) : undefined;
+            const options = inp.tagName.toLowerCase() === 'select'
+              ? Array.from(inp.querySelectorAll('option')).map((o) => o.textContent?.trim() || '').filter(Boolean)
+              : undefined;
             inputs.push({
               name,
               id,
@@ -1946,6 +1963,12 @@ export class BlindCrawlerService {
               minLength: minLen ? parseInt(minLen, 10) : undefined,
               maxLength: maxLen ? parseInt(maxLen, 10) : undefined,
               pattern: inp.getAttribute('pattern') || undefined,
+              role,
+              ariaLabel,
+              min,
+              max,
+              optionsCount: options ? options.length : undefined,
+              options,
               selector: makeSel(inp),
             });
           });

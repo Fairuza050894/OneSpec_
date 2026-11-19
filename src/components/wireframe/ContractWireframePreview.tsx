@@ -5,6 +5,7 @@ import { CheckCircle2, AlertCircle, Loader2, Zap, Server, ShieldCheck } from 'lu
 import type { ValidationRuleContract } from '@/types/sdlc';
 import { useStudioLocale } from '@/lib/i18n';
 import { isNoiseUiControlOrInternalId } from '@/services/sdlcCompiler';
+import { getSampleValueForControl } from '@/lib/controlClassifier';
 export type WireframeState = 'IDLE' | 'VALIDATION_ERROR' | 'SUBMITTING' | 'SUCCESS';
 
 interface ContractWireframeProps {
@@ -63,19 +64,25 @@ export function ContractWireframePreview({
         ];
   }, [validationRules]);
 
-  // Realistic Domain Sample Value Generator (No Dummy "valid_input_payload")
+  // Realistic Domain Sample Value Generator (T-17 / F-26: uses controlKind classifier)
   const getDomainSampleValue = (fieldName: string, dataType?: string): string => {
+    const sample = getSampleValueForControl({ name: fieldName, type: dataType });
+    if (sample.valid !== undefined && sample.valid !== 'Sample Text') {
+      return String(sample.valid);
+    }
     const lower = fieldName.toLowerCase();
+    if (/rows?-?per-?page|page-?size|limit|pagination/i.test(lower)) return '25';
     if (lower.includes('pass') || lower.includes('sandi')) return 'ValidPass123!';
-    if (lower.includes('origin') || lower.includes('asal')) return 'JKT (Jakarta)';
-    if (lower.includes('destination') || lower.includes('tujuan')) return 'SUB (Surabaya)';
-    if (lower.includes('quotation') || lower.includes('penawaran') || lower.includes('code') || lower.includes('no')) return 'SQ-2026-JKT-001';
-    if (lower.includes('customer') || lower.includes('pelanggan') || lower.includes('client') || lower.includes('pic')) return 'PT Pancaran Logistik';
-    if (lower.includes('type') || lower.includes('tipe')) return 'Full Container Load (FCL)';
-    if (lower.includes('unit') || lower.includes('bu') || lower.includes('business')) return 'Logistics & Marine';
-    if (lower.includes('user') || lower.includes('email') || lower.includes('login') || lower.includes('username')) return 'operator_pancaran';
+    if (/date|tanggal|dd\/mm\/yyyy/i.test(lower)) return '2026-11-20';
+    if (lower.includes('origin') || lower.includes('asal')) return 'Origin Location';
+    if (lower.includes('destination') || lower.includes('tujuan')) return 'Destination Location';
+    if (lower.includes('quotation') || lower.includes('penawaran') || lower.includes('code') || lower.includes('no')) return 'DOC-2026-001';
+    if (lower.includes('customer') || lower.includes('pelanggan') || lower.includes('client') || lower.includes('pic')) return 'Enterprise Partner';
+    if (lower.includes('type') || lower.includes('tipe')) return 'Standard Type';
+    if (lower.includes('unit') || lower.includes('bu') || lower.includes('business')) return 'Operational Unit';
+    if (lower.includes('user') || lower.includes('email') || lower.includes('login') || lower.includes('username')) return 'operator_enterprise';
     if (dataType === 'number' || lower.includes('amount') || lower.includes('qty') || lower.includes('nominal') || lower.includes('harga')) return '100';
-    return 'JKT-SUB-001';
+    return '10';
   };
 
   // Dynamic Form Field State mapping
