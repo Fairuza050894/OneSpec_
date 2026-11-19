@@ -16,6 +16,7 @@ import type {
   TestSuiteExecutionTrace,
 } from '@/types/sdlc';
 import type { SynthesizedRtmRow } from './rtmSynthesizer';
+import { createCryptographicSeal, verifySeal } from '@/lib/safeCrypto';
 
 export type RegulatoryFramework = 'UU_PDP' | 'POJK_BI' | 'ISO_27001' | 'PCI_DSS';
 
@@ -69,6 +70,9 @@ export interface ComplianceScorecard {
     algorithm: string;
     timestamp: string;
     digestSha256: string;
+    signature?: string;
+    publicKeyFingerprint?: string;
+    publicKeyPem?: string;
   };
 }
 
@@ -362,14 +366,25 @@ export class ComplianceBinderService {
       };
     });
 
-    // Generate cryptographic verification digest
-    const rawPayloadToSign = `${appName}|${targetUrl}|${assessedAt}|${overallComplianceRate}|${compliantCount}/${totalControlsAudited}`;
-    let hashNum = 0;
-    for (let i = 0; i < rawPayloadToSign.length; i++) {
-      hashNum = (hashNum << 5) - hashNum + rawPayloadToSign.charCodeAt(i);
-      hashNum |= 0;
-    }
-    const digestSha256 = 'SHA256:' + Math.abs(hashNum).toString(16).padStart(16, '0') + Date.now().toString(16).padStart(16, '0');
+    // Canonical payload for cryptographic integrity seal (T-08 / F-10)
+    // No Date.now() in digest — 100% deterministic
+    const sealPayload = {
+      appName,
+      targetUrl,
+      overallComplianceRate,
+      totalControlsAudited,
+      compliantCount,
+      partiallySatisfiedCount,
+      nonCompliantCount,
+      frameworkSummary,
+      piiExposureAudit: {
+        piiFieldsDetected,
+        unprotectedPiiEndpoints: piiProtected ? [] : [primaryEp],
+        piiStorageTables,
+      },
+    };
+
+    const seal = createCryptographicSeal(sealPayload);
 
     const scorecard: ComplianceScorecard = {
       overallComplianceRate,
@@ -384,9 +399,12 @@ export class ComplianceBinderService {
         piiStorageTables,
       },
       auditCryptographicSignature: {
-        algorithm: 'ECDSA-P256-SHA256 (Tamper-Evident Evidence Seal)',
+        algorithm: seal.algorithm,
         timestamp: assessedAt,
-        digestSha256,
+        digestSha256: seal.digestSha256,
+        signature: seal.signature,
+        publicKeyFingerprint: seal.publicKeyFingerprint,
+        publicKeyPem: seal.publicKeyPem,
       },
     };
 
@@ -421,6 +439,7 @@ export class ComplianceBinderService {
 **Target Identifier:** \`${targetUrl}\`
 **Audited At:** ${scorecard.auditCryptographicSignature.timestamp}
 **Cryptographic Integrity Seal:** \`${scorecard.auditCryptographicSignature.digestSha256}\`
+**ECDSA Public Key Fingerprint:** \`${scorecard.auditCryptographicSignature.publicKeyFingerprint || 'N/A'}\`
 **Overall Audit Compliance Score:** **${scorecard.overallComplianceRate}%** (${scorecard.compliantCount}/${scorecard.totalControlsAudited} Controls Fully Satisfied)
 
 ---
@@ -478,8 +497,41 @@ ${c.technicalProof}
   .join('\n')}
 
 ---
-*Signed and sealed deterministically by OneSpec SDLC Studio. Tamper-evident cryptographic signature: ${scorecard.auditCryptographicSignature.digestSha256}*
+*Signed and sealed deterministically by OneSpec SDLC Studio via ECDSA P-256. Tamper-evident cryptographic signature: ${scorecard.auditCryptographicSignature.digestSha256}*
 `;
+  }
+
+  /**
+   * Verifies the cryptographic integrity seal of an audit scorecard (T-08 / F-10)
+   * Returns true if the payload has not been tampered with and matches the signature.
+   */
+  public verifyScorecardSeal(
+    scorecard: ComplianceScorecard,
+    appName: string,
+    targetUrl: string,
+    publicKeyPem?: string
+  ): boolean {
+    const sealPayload = {
+      appName,
+      targetUrl,
+      overallComplianceRate: scorecard.overallComplianceRate,
+      totalControlsAudited: scorecard.totalControlsAudited,
+      compliantCount: scorecard.compliantCount,
+      partiallySatisfiedCount: scorecard.partiallySatisfiedCount,
+      nonCompliantCount: scorecard.nonCompliantCount,
+      frameworkSummary: scorecard.frameworkSummary,
+      piiExposureAudit: scorecard.piiExposureAudit,
+    };
+
+    if (!scorecard.auditCryptographicSignature?.signature) {
+      return false;
+    }
+
+    return verifySeal(
+      sealPayload,
+      scorecard.auditCryptographicSignature.signature,
+      publicKeyPem || scorecard.auditCryptographicSignature.publicKeyPem
+    );
   }
 }
 

@@ -65,6 +65,7 @@ import { VerifiedArchitectureMapCanvas } from '@/components/architecture/Verifie
 import type { RegressionDiffSummary } from '@/services/workspaceVaultService';
 import { changeImpactService, type ChangeImpactAnalysisReport } from '@/services/changeImpactService';
 import { useStudioLocale } from '@/lib/i18n';
+import { sha256Hex, canonicalJson } from '@/lib/safeCrypto';
 import {
   buildFeatureModuleBlueprintSvgDataUrl,
   isBlankOrMissingScreenshot,
@@ -970,23 +971,14 @@ export function UniversalKnowledgeGraphWorkbench({
                   onClick={async () => {
                     setIsSigning(true);
                     try {
-                      let snapshotHash = '';
-                      try {
-                        const hashPayload = JSON.stringify({
-                          appName: compiledState?.appName,
-                          targetUrl: compiledState?.targetUrl,
-                          totalCases: compiledState?.rtmRows?.length,
-                          modules: compiledState?.discoveredModules?.length,
-                          apis: compiledState?.discoveryResult?.apiEndpoints?.length,
-                          timestamp: new Date().toISOString(),
-                        });
-                        const msgUint8 = new TextEncoder().encode(hashPayload);
-                        const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-                        const hashArray = Array.from(new Uint8Array(hashBuffer));
-                        snapshotHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-                      } catch {
-                        snapshotHash = `SHA256-${Date.now().toString(16)}`;
-                      }
+                      const hashPayload = canonicalJson({
+                        appName: compiledState?.appName,
+                        targetUrl: compiledState?.targetUrl,
+                        totalCases: compiledState?.rtmRows?.length,
+                        modules: compiledState?.discoveredModules?.length,
+                        apis: compiledState?.discoveryResult?.apiEndpoints?.length,
+                      });
+                      const snapshotHash = sha256Hex(hashPayload);
 
                       const nowIso = new Date().toISOString();
                       const prereqs: string[] = [];

@@ -646,3 +646,82 @@ test('Test 14: EvidenceChip, honest toolProbeService and ungrounded badge elimin
   assert.equal(workbenchSrc.includes('Connected & Live-Probed'), false, 'LiveRunnerWorkbench must not contain Connected & Live-Probed');
   assert.equal(workbenchSrc.includes('>EMPIRICAL<'), false, 'LiveRunnerWorkbench must not contain literal >EMPIRICAL<');
 });
+
+test('Test 15: Real SHA-256 canonical hashing, ECDSA P-256 seal and non-repudiation verification (T-08 / F-10)', async () => {
+  const {
+    canonicalJson,
+    sha256Digest,
+    createCryptographicSeal,
+    verifySeal,
+  } = await import('../lib/safeCrypto');
+  const { complianceBinderService } = await import('../services/complianceBinderService');
+
+  // 1. canonicalJson sorts keys deterministically
+  const objA = { b: 2, a: 1, nested: { y: 20, x: 10 } };
+  const objB = { nested: { x: 10, y: 20 }, a: 1, b: 2 };
+  assert.equal(canonicalJson(objA), canonicalJson(objB));
+  assert.equal(canonicalJson(objA), '{"a":1,"b":2,"nested":{"x":10,"y":20}}');
+
+  // 2. digest is exactly 71 characters: 'sha256:' + 64 hex characters
+  const digestA = sha256Digest(objA);
+  const digestB = sha256Digest(objB);
+  assert.equal(digestA.length, 71);
+  assert.match(digestA, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(digestA, digestB, 'Same payload in different key order must yield identical digest');
+
+  // 3. Modifying 1 field yields a different digest
+  const objModified = { ...objA, a: 99 };
+  const digestModified = sha256Digest(objModified);
+  assert.notEqual(digestA, digestModified, 'Modifying 1 field must produce a different digest');
+
+  // 4. Zero Date.now() in digest: multiple invocations on same payload yield exact same digest
+  const digestA2 = sha256Digest(objA);
+  assert.equal(digestA, digestA2, 'Digest must be 100% deterministic with zero Date.now() timestamp variance');
+
+  // 5. Option (a): Real ECDSA P-256 seal generation and verification
+  const seal = createCryptographicSeal(objA);
+  assert.equal(seal.algorithm, 'ECDSA-P256-SHA256');
+  assert.equal(seal.digestSha256, digestA);
+  assert.ok(seal.signature && seal.signature.length > 32);
+  assert.match(seal.publicKeyFingerprint, /^sha256:[0-9a-f]{64}$/);
+
+  // verifySeal passes on original payload
+  const valid = verifySeal(objA, seal.signature, seal.publicKeyPem);
+  assert.equal(valid, true, 'verifySeal must pass on unmodified payload');
+
+  // verifySeal fails after payload is modified
+  const tampered = verifySeal(objModified, seal.signature, seal.publicKeyPem);
+  assert.equal(tampered, false, 'verifySeal must fail after payload is modified');
+
+  // 6. complianceBinderService integration test
+  const compliance = complianceBinderService.assessCompliance({
+    appName: 'Pancaran Mobility Test',
+    targetUrl: 'https://test.pancaran-group.co.id',
+    apiEndpoints: [],
+    databaseTables: [],
+    validationRules: [],
+    businessRules: [],
+  });
+  assert.equal(compliance.scorecard.auditCryptographicSignature.digestSha256.length, 71);
+  assert.match(compliance.scorecard.auditCryptographicSignature.digestSha256, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(compliance.scorecard.auditCryptographicSignature.algorithm, 'ECDSA-P256-SHA256');
+
+  const scorecardValid = complianceBinderService.verifyScorecardSeal(
+    compliance.scorecard,
+    'Pancaran Mobility Test',
+    'https://test.pancaran-group.co.id'
+  );
+  assert.equal(scorecardValid, true, 'Scorecard seal must verify successfully');
+
+  // Tamper with scorecard compliantCount
+  const tamperedScorecard = {
+    ...compliance.scorecard,
+    compliantCount: compliance.scorecard.compliantCount + 1,
+  };
+  const scorecardTampered = complianceBinderService.verifyScorecardSeal(
+    tamperedScorecard,
+    'Pancaran Mobility Test',
+    'https://test.pancaran-group.co.id'
+  );
+  assert.equal(scorecardTampered, false, 'Tampered scorecard must fail seal verification');
+});
