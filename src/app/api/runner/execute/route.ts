@@ -492,7 +492,7 @@ export async function POST(req: NextRequest) {
           totalRequests,
           throughputRps,
           errorRatePercent,
-          provenance: 'EMPIRICAL_K6',
+          provenance: 'MEASURED_K6',
           latency: {
             min: latMin,
             avg: latAvg,
@@ -569,7 +569,7 @@ export async function POST(req: NextRequest) {
       totalRequests,
       throughputRps,
       errorRatePercent,
-      provenance: 'HTTP_CONCURRENCY_PROBE',
+      provenance: 'MEASURED_HTTP_PROBE',
       latency: {
         min: latMin,
         avg: latAvg,

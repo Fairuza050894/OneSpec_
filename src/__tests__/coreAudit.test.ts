@@ -449,7 +449,7 @@ test('Test 11: k6 script generation injection defense & effective load parameter
   assert.ok(data.k6Metrics.effective, 'k6Metrics must report effective parameters');
   assert.ok(typeof data.k6Metrics.effective.vus === 'number');
   assert.ok(data.k6Metrics.effective.vus <= 25, 'Effective VUs must be clamped according to environment bounds');
-  assert.ok(data.k6Metrics.provenance === 'EMPIRICAL_K6' || data.k6Metrics.provenance === 'HTTP_CONCURRENCY_PROBE');
+  assert.ok(data.k6Metrics.provenance === 'MEASURED_K6' || data.k6Metrics.provenance === 'MEASURED_HTTP_PROBE');
 });
 
 test('Test 12: Zero Math.random across services/lib/api and crypto-backed IDs (T-05: F-07)', async () => {
@@ -475,4 +475,80 @@ test('Test 12: Zero Math.random across services/lib/api and crypto-backed IDs (T
   const { selfHealingPatchService } = await import('../services/selfHealingPatchService');
   const patch = selfHealingPatchService.generateUnifiedGitPatch(dummyState);
   assert.match(patch, /index 0000000\.\.[0-9a-f]{8}/, 'Patch index must use crypto hex random');
+});
+
+test('Test 13: Provenance model, Measured<T> metrics and NOT_RUN value null enforcement (T-06)', async () => {
+  const { migrateLegacyProvenance, isMeasured } = await import('../types/provenance');
+
+  // 1. Migration from legacy values
+  assert.equal(migrateLegacyProvenance('EMPIRICAL', true), 'MEASURED_PLAYWRIGHT');
+  assert.equal(migrateLegacyProvenance('EMPIRICAL', false), 'INFERRED');
+  assert.equal(migrateLegacyProvenance('EMPIRICAL_K6'), 'MEASURED_K6');
+  assert.equal(migrateLegacyProvenance('HTTP_CONCURRENCY_PROBE'), 'MEASURED_HTTP_PROBE');
+  assert.equal(migrateLegacyProvenance('NOT_RUN'), 'NOT_RUN');
+  assert.equal(migrateLegacyProvenance(null), 'NOT_RUN');
+
+  // 2. isMeasured helper
+  assert.equal(isMeasured('MEASURED_K6'), true);
+  assert.equal(isMeasured('MEASURED_PLAYWRIGHT'), true);
+  assert.equal(isMeasured('MEASURED_HTTP_PROBE'), true);
+  assert.equal(isMeasured('INFERRED'), false);
+  assert.equal(isMeasured('STATIC_ANALYSIS'), false);
+  assert.equal(isMeasured('ESTIMATED'), false);
+  assert.equal(isMeasured('NOT_RUN'), false);
+
+  // 3. computeUnifiedQualityMetrics with empty state (NOT_RUN) yields value: null
+  const emptyMetrics = computeUnifiedQualityMetrics(null);
+  assert.equal(emptyMetrics.assertions.value, null);
+  assert.equal(emptyMetrics.assertions.provenance, 'NOT_RUN');
+  assert.equal(emptyMetrics.passRate.value, null);
+  assert.equal(emptyMetrics.passRate.provenance, 'NOT_RUN');
+  assert.equal(emptyMetrics.throughput.value, null);
+  assert.equal(emptyMetrics.throughput.provenance, 'NOT_RUN');
+  assert.equal(emptyMetrics.p95Latency.value, null);
+  assert.equal(emptyMetrics.p95Latency.provenance, 'NOT_RUN');
+  assert.equal(emptyMetrics.errorRate.value, null);
+  assert.equal(emptyMetrics.errorRate.provenance, 'NOT_RUN');
+  assert.equal(emptyMetrics.releaseGateStatus, 'NOT_EXECUTED');
+
+  // 4. State with Playwright traces yields MEASURED_PLAYWRIGHT
+  const executedMetrics = computeUnifiedQualityMetrics({
+    rtmRows: [
+      { executionVerdict: 'PASSED' },
+      { executionVerdict: 'PASSED' },
+      { executionVerdict: 'FAILED' },
+    ],
+    executionTraces: [
+      { totalDurationMs: 42, stageId: 'STAGE-1' },
+      { totalDurationMs: 88, stageId: 'STAGE-2' },
+    ],
+  } as unknown as CompiledSdlcState);
+
+  assert.equal(executedMetrics.assertions.value, 3);
+  assert.equal(executedMetrics.assertions.provenance, 'MEASURED_PLAYWRIGHT');
+  assert.equal(executedMetrics.passRate.value, 67);
+  assert.equal(executedMetrics.passRate.provenance, 'MEASURED_PLAYWRIGHT');
+  assert.equal(executedMetrics.releaseGateStatus, 'NO_GO');
+  assert.equal(executedMetrics.p95Latency.provenance, 'MEASURED_PLAYWRIGHT');
+  assert.equal(executedMetrics.p95Latency.value, 88);
+
+  // 5. State with k6Summary yields MEASURED_K6 or MEASURED_HTTP_PROBE
+  const k6MetricsState = computeUnifiedQualityMetrics({
+    rtmRows: [{ executionVerdict: 'PASSED' }],
+    k6Summary: {
+      vus: 20,
+      durationSeconds: 5,
+      totalRequests: 400,
+      throughputRps: 80,
+      errorRatePercent: 0,
+      provenance: 'MEASURED_K6',
+      latency: { min: 10, avg: 25, med: 22, p90: 35, p95: 45, p99: 60, max: 80 },
+      thresholds: { httpReqFailedPass: true, httpReqDurationP95Pass: true, p95ThresholdMs: 500, p95ActualMs: 45 },
+    },
+  } as unknown as CompiledSdlcState);
+
+  assert.equal(k6MetricsState.throughput.value, 80);
+  assert.equal(k6MetricsState.throughput.provenance, 'MEASURED_K6');
+  assert.equal(k6MetricsState.p95Latency.value, 45);
+  assert.equal(k6MetricsState.p95Latency.provenance, 'MEASURED_K6');
 });

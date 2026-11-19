@@ -33,6 +33,15 @@ import { architectureDeconstructorService, type DeconstructedArchitecture } from
 import { deepBundleUnpackerService, type DeepUnpackResult } from './deepBundleUnpackerService';
 import { owaspDastService, type OwaspDastAssessmentSummary } from './owaspDastService';
 import { complianceBinderService, type ComplianceAssessmentResult } from './complianceBinderService';
+import {
+  type Provenance,
+  type Measured,
+  migrateLegacyProvenance,
+  isMeasured,
+} from '@/types/provenance';
+
+export { migrateLegacyProvenance, isMeasured };
+export type { Provenance, Measured };
 import { dfdReverseService, type ReverseDfdResult } from './dfdReverseService';
 import { iso31000RiskService, type IsoRiskAssessmentSummary } from './iso31000RiskService';
 import { smtFormalVerifierService, type SmtFormalVerificationSummary } from './smtFormalVerifierService';
@@ -215,7 +224,14 @@ export interface UnifiedQualityMetrics {
   passRatePercent: number;
   releaseGateStatus: 'NOT_EXECUTED' | 'NO_GO' | 'CONDITIONAL_GO' | 'PRODUCTION_GO';
   p95LatencyMs: number;
-  provenance: 'EMPIRICAL' | 'STATIC_AST' | 'INFERRED' | 'ESTIMATED';
+  provenance: Provenance;
+
+  // Strict Provenance Evidence Metrics (Measured<number>)
+  passRate: Measured<number>;
+  throughput: Measured<number>;
+  p95Latency: Measured<number>;
+  errorRate: Measured<number>;
+  assertions: Measured<number>;
 }
 
 /**
@@ -249,13 +265,75 @@ export function computeUnifiedQualityMetrics(state: CompiledSdlcState | null | u
   durations.sort((a, b) => a - b);
   const p95FromTraces = durations.length > 0 ? durations[Math.floor(durations.length * 0.95)] || durations[durations.length - 1] : 0;
 
-  const p95LatencyMs = state?.k6Summary?.latency?.p95 || p95FromTraces || (state as any)?.measuredP95LatencyMs || (totalCases > 0 ? 42 : 0);
+  // Determine evidence provenances
+  const hasPlaywright = traces.length > 0;
+  const assertionProvenance: Provenance = totalCases === 0
+    ? 'NOT_RUN'
+    : hasPlaywright
+    ? 'MEASURED_PLAYWRIGHT'
+    : 'STATIC_ANALYSIS';
 
-  const provenance = state?.k6Summary?.provenance === 'EMPIRICAL_K6' || traces.length > 0
-    ? 'EMPIRICAL'
+  const k6Summary = state?.k6Summary;
+  const k6RawProv = (k6Summary?.provenance as string) || '';
+  const k6Provenance: Provenance = k6Summary
+    ? k6RawProv === 'MEASURED_K6' || k6RawProv === 'EMPIRICAL_K6'
+      ? 'MEASURED_K6'
+      : k6RawProv === 'HTTP_CONCURRENCY_PROBE' || k6RawProv === 'PROBE' || k6RawProv === 'MEASURED_HTTP_PROBE'
+      ? 'MEASURED_HTTP_PROBE'
+      : 'ESTIMATED'
+    : 'NOT_RUN';
+
+  const overallProvenance: Provenance = totalCases === 0
+    ? 'NOT_RUN'
+    : hasPlaywright
+    ? 'MEASURED_PLAYWRIGHT'
+    : k6Provenance !== 'NOT_RUN' && k6Provenance !== 'ESTIMATED'
+    ? k6Provenance
+    : 'STATIC_ANALYSIS';
+
+  // Construct Measured<number> for pass rate, throughput, p95, error rate, assertions
+  const assertions: Measured<number> = {
+    value: totalCases > 0 ? totalCases : null,
+    unit: 'cases',
+    provenance: assertionProvenance,
+  };
+
+  const passRate: Measured<number> = {
+    value: totalCases > 0 ? passRatePercent : null,
+    unit: '%',
+    provenance: assertionProvenance,
+  };
+
+  const throughput: Measured<number> = {
+    value: k6Summary && typeof k6Summary.throughputRps === 'number' ? k6Summary.throughputRps : null,
+    unit: 'req/s',
+    provenance: k6Summary ? k6Provenance : 'NOT_RUN',
+  };
+
+  const p95Val = k6Summary?.latency?.p95 ?? (durations.length > 0 ? p95FromTraces : null);
+  const p95Prov: Provenance = k6Summary
+    ? k6Provenance
+    : durations.length > 0
+    ? 'MEASURED_PLAYWRIGHT'
+    : 'NOT_RUN';
+  const p95Latency: Measured<number> = {
+    value: p95Val,
+    unit: 'ms',
+    provenance: p95Prov,
+  };
+
+  const errRateVal = k6Summary && typeof k6Summary.errorRatePercent === 'number'
+    ? k6Summary.errorRatePercent
     : totalCases > 0
-    ? 'STATIC_AST'
-    : 'ESTIMATED';
+    ? Math.round((failedCases / totalCases) * 10000) / 100
+    : null;
+  const errorRate: Measured<number> = {
+    value: errRateVal,
+    unit: '%',
+    provenance: k6Summary ? k6Provenance : assertionProvenance,
+  };
+
+  const p95LatencyMs = p95Latency.value ?? 0;
 
   return {
     totalCases,
@@ -265,7 +343,12 @@ export function computeUnifiedQualityMetrics(state: CompiledSdlcState | null | u
     passRatePercent,
     releaseGateStatus,
     p95LatencyMs,
-    provenance,
+    provenance: overallProvenance,
+    passRate,
+    throughput,
+    p95Latency,
+    errorRate,
+    assertions,
   };
 }
 

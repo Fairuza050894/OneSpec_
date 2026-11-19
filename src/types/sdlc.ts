@@ -8,6 +8,9 @@
 
 export type ProjectMode = 'GREENFIELD' | 'BROWNFIELD' | 'BLIND_URL' | 'LIVE_URL' | 'GIT_REPO' | 'LOCAL_ZIP' | 'GREENFIELD_MOM';
 
+export * from './provenance';
+import type { Provenance } from './provenance';
+
 export interface ProjectWorkspace {
   id: string;
   name: string;
@@ -960,7 +963,7 @@ export interface K6MetricSummary {
   totalRequests: number;
   throughputRps: number;
   errorRatePercent: number;
-  provenance?: 'EMPIRICAL_K6' | 'HTTP_CONCURRENCY_PROBE' | 'ESTIMATED';
+  provenance?: Provenance;
   latency: K6LatencyPercentiles;
   thresholds: {
     httpReqFailedPass: boolean;
