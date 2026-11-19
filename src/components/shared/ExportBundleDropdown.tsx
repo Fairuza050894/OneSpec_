@@ -20,6 +20,7 @@ export interface ExportBundleDropdownProps {
   activeVaultProjectId?: string;
   locale?: 'en' | 'id';
   className?: string;
+  isStale?: boolean;
 }
 
 export function ExportBundleDropdown({
@@ -27,6 +28,7 @@ export function ExportBundleDropdown({
   activeVaultProjectId,
   locale = 'id',
   className = '',
+  isStale = false,
 }: ExportBundleDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
@@ -138,18 +140,31 @@ export function ExportBundleDropdown({
           <div className="px-2 py-1 text-[10px] font-mono text-zinc-400 uppercase tracking-wider">
             {locale === 'id' ? 'Semua Artefak (1-Click)' : 'All Artifacts (1-Click)'}
           </div>
-          <a
-            href={`/api/sdlc/export-all-bundle?format=zip${projectParam}`}
-            download={`${slug}_enterprise_sdlc_bundle.zip`}
-            onClick={() => setIsOpen(false)}
-            className="flex items-center justify-between px-2.5 py-1.5 rounded-[4px] hover:bg-white/[0.06] text-zinc-200 transition-colors cursor-pointer group"
-          >
-            <div className="flex items-center gap-2">
-              <Archive className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-200" strokeWidth={1.5} />
-              <span>Unified Bundle (.zip)</span>
+          {isStale ? (
+            <div
+              className="flex items-center justify-between px-2.5 py-1.5 rounded-[4px] text-zinc-500 opacity-60 cursor-not-allowed select-none"
+              title={locale === 'id' ? 'Nonaktif: Data dikompilasi dengan engine lama (basi). Jalankan ulang pipeline.' : 'Disabled: Data compiled with older engine (stale). Re-run pipeline.'}
+            >
+              <div className="flex items-center gap-2">
+                <Archive className="w-3.5 h-3.5 text-zinc-500" strokeWidth={1.5} />
+                <span>Unified Bundle (.zip)</span>
+              </div>
+              <span className="text-[10px] text-amber-500 font-mono">Basi (Nonaktif)</span>
             </div>
-            <span className="text-[10px] text-zinc-400 font-mono">17 Files</span>
-          </a>
+          ) : (
+            <a
+              href={`/api/sdlc/export-all-bundle?format=zip${projectParam}`}
+              download={`${slug}_enterprise_sdlc_bundle.zip`}
+              onClick={() => setIsOpen(false)}
+              className="flex items-center justify-between px-2.5 py-1.5 rounded-[4px] hover:bg-white/[0.06] text-zinc-200 transition-colors cursor-pointer group"
+            >
+              <div className="flex items-center gap-2">
+                <Archive className="w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-200" strokeWidth={1.5} />
+                <span>Unified Bundle (.zip)</span>
+              </div>
+              <span className="text-[10px] text-zinc-400 font-mono">17 Files</span>
+            </a>
+          )}
 
           <div className="h-px bg-white/[0.06] my-1" />
 

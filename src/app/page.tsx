@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertCircle,
   AlertOctagon,
+  AlertTriangle,
   Database,
   Play,
   Search,
@@ -118,6 +119,12 @@ import { IsoLibraryPortal } from '@/components/IsoLibraryPortal';
 import { Step07ExecutionRunner } from '@/components/Step07ExecutionRunner';
 import { RunnerStageInspector } from '@/components/runner/RunnerStageInspector';
 import { ExportBundleDropdown } from '@/components/shared/ExportBundleDropdown';
+import {
+  validateWorkspaceCache,
+  wrapWorkspaceEnvelope,
+  WORKSPACE_CACHE_LOCAL_STORAGE_KEY,
+  type WorkspaceEnvelope,
+} from '@/lib/workspaceCache';
 
 // Dynamically import Camunda BPMN Canvas to prevent SSR hydration conflicts with bpmn-js
 const CamundaBpmnViewer = dynamic(
@@ -276,6 +283,9 @@ export default function OneSpecEngineeringWorkbench() {
 
   // Compiled Universal SDLC State (Steps 01–12)
   const [compiledSdlcState, setCompiledSdlcState] = useState<CompiledSdlcState | null>(null);
+  // Stale Cache & Engine Version Tracking (T-13 / F-13)
+  const [isCacheStale, setIsCacheStale] = useState<boolean>(false);
+  const [cacheStaleReason, setCacheStaleReason] = useState<string | null>(null);
   // Multi-Project Permanent Vault, Snapshots & Regression Diff State
   const [vaultProjects, setVaultProjects] = useState<ProjectIndexEntry[]>([]);
   const [activeVaultProjectId, setActiveVaultProjectId] = useState<string>('');
@@ -815,10 +825,15 @@ The system provides deterministic transaction processing, input validation, and 
     ) => {
       if (!isValidCompiledSdlcState(compiled)) return;
       setCompiledSdlcState(compiled);
+      if (!options?.skipVaultWrite) {
+        setIsCacheStale(false);
+        setCacheStaleReason(null);
+      }
 
-      // Persist to local storage for instant browser recovery
+      // Persist to local storage for instant browser recovery with versioned envelope (T-13 / F-13)
       try {
-        localStorage.setItem('onespec_active_workspace_v2', JSON.stringify(compiled));
+        const envelope = wrapWorkspaceEnvelope(compiled);
+        localStorage.setItem(WORKSPACE_CACHE_LOCAL_STORAGE_KEY, JSON.stringify(envelope));
       } catch {
         // Storage quota resilience: strip bulky screenshots to preserve lightweight state
         try {
@@ -841,7 +856,8 @@ The system provides deterministic transaction processing, input validation, and 
               })),
             } : undefined,
           };
-          localStorage.setItem('onespec_active_workspace_v2', JSON.stringify(stripped));
+          const strippedEnvelope = wrapWorkspaceEnvelope(stripped);
+          localStorage.setItem(WORKSPACE_CACHE_LOCAL_STORAGE_KEY, JSON.stringify(strippedEnvelope));
         } catch {
           // Fallback if local storage is completely disabled or full
         }
@@ -1296,13 +1312,20 @@ The system provides deterministic transaction processing, input validation, and 
           }
         }
 
-        const cached = localStorage.getItem('onespec_active_workspace_v2');
+        const cached = localStorage.getItem(WORKSPACE_CACHE_LOCAL_STORAGE_KEY);
         if (cached) {
-          const parsed: unknown = JSON.parse(cached);
-          if (isValidCompiledSdlcState(parsed)) {
-            applyCompiledSdlcState(parsed, { skipVaultWrite: true });
+          const cacheVal = validateWorkspaceCache<CompiledSdlcState>(cached);
+          if (cacheVal.data && isValidCompiledSdlcState(cacheVal.data)) {
+            applyCompiledSdlcState(cacheVal.data, { skipVaultWrite: true });
+            setIsCacheStale(cacheVal.isStale);
+            setCacheStaleReason(cacheVal.staleReason);
+            if (cacheVal.isStale) {
+              appendTerminalLog(`[CACHE] PERINGATAN DATA BASI: ${cacheVal.staleReason}`);
+            } else {
+              appendTerminalLog(`[CACHE] Restored active workspace "${cacheVal.data.appName}" from browser cache (build: ${cacheVal.envelope?.engineBuildId}).`);
+            }
             const matchedEntry = vaultList.find(
-              (v) => v.projectName.toLowerCase() === parsed.appName.toLowerCase() || v.targetUrl === parsed.targetUrl
+              (v) => v.projectName.toLowerCase() === cacheVal.data!.appName.toLowerCase() || v.targetUrl === cacheVal.data!.targetUrl
             );
             if (matchedEntry) {
               const fullRes = await fetchWithTimeout(`/api/workspace/vault?projectId=${encodeURIComponent(matchedEntry.projectId)}`, {}, 10000).catch(() => null);
@@ -1315,10 +1338,9 @@ The system provides deterministic transaction processing, input validation, and 
                 }
               }
             }
-            appendTerminalLog(`[CACHE] Restored active workspace "${parsed.appName}" from browser cache.`);
             return;
           }
-          localStorage.removeItem('onespec_active_workspace_v2');
+          localStorage.removeItem(WORKSPACE_CACHE_LOCAL_STORAGE_KEY);
         }
 
         if (vaultList.length > 0) {
@@ -1328,15 +1350,27 @@ The system provides deterministic transaction processing, input validation, and 
 
         const res = await fetchWithTimeout('/api/workspaces/cache', {}, 10000);
         if (res.ok) {
-          const json = (await res.json()) as { success?: boolean; data?: unknown };
+          const json = (await res.json()) as {
+            success?: boolean;
+            data?: unknown;
+            isStale?: boolean;
+            staleReason?: string | null;
+            envelope?: WorkspaceEnvelope<unknown>;
+          };
           if (json.success && isValidCompiledSdlcState(json.data)) {
-            applyCompiledSdlcState(json.data);
-            appendTerminalLog(`[CACHE] Restored workspace "${json.data.appName}" from server disk cache.`);
+            applyCompiledSdlcState(json.data as CompiledSdlcState);
+            setIsCacheStale(Boolean(json.isStale));
+            setCacheStaleReason(json.staleReason || null);
+            if (json.isStale) {
+              appendTerminalLog(`[CACHE] PERINGATAN DATA BASI: ${json.staleReason}`);
+            } else {
+              appendTerminalLog(`[CACHE] Restored workspace "${(json.data as any).appName}" from server disk cache.`);
+            }
           }
         }
       } catch {
         try {
-          localStorage.removeItem('onespec_active_workspace_v2');
+          localStorage.removeItem(WORKSPACE_CACHE_LOCAL_STORAGE_KEY);
         } catch {}
       }
     };
@@ -2113,6 +2147,7 @@ The system provides deterministic transaction processing, input validation, and 
             compiledState={compiledSdlcState}
             activeVaultProjectId={activeVaultProjectId}
             locale={locale}
+            isStale={isCacheStale}
           />
 
           {/* Mask PII Toggle */}
@@ -2194,6 +2229,36 @@ The system provides deterministic transaction processing, input validation, and 
           </button>
         </div>
       </header>
+
+      {/* Permanent Warning Banner for Stale Cache Data (F-13 / T-13) */}
+      {isCacheStale && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="w-full bg-amber-500/15 border-b border-amber-500/35 px-4 py-2.5 flex items-center justify-between text-[11.5px] font-mono text-amber-200 shrink-0 z-30 shadow-md"
+        >
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>PERINGATAN DATA BASI:</strong>{' '}
+              {cacheStaleReason || 'Data dikompilasi dengan engine lama. Jalankan ulang pipeline untuk memperbarui.'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveStep(1);
+                appendTerminalLog('[CACHE] Menavigasi ke Step 01 untuk menjalankan ulang pipeline kompilasi...');
+              }}
+              className="px-2.5 py-1 bg-amber-500/25 hover:bg-amber-500/35 text-amber-100 border border-amber-500/50 hover:border-amber-400 rounded-[3px] text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RotateCw className="h-3 w-3 text-amber-300" />
+              <span>Jalankan Ulang Pipeline</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* =========================================================================
        * 2. MAIN WORKBENCH BODY (Left Sidebar + Canvas + Optional Right Inspector)
@@ -3592,6 +3657,7 @@ The system provides deterministic transaction processing, input validation, and 
                 rtmRows={rtmRows}
                 initialConsensusSummary={compiledSdlcState?.delphiConsensusSummary}
                 onAppendLog={appendTerminalLog}
+                isStale={isCacheStale}
               />
             </div>
           )}
@@ -3635,6 +3701,7 @@ The system provides deterministic transaction processing, input validation, and 
               onApproveReleaseSignOff={handleApproveReleaseSignOff}
               onNavigateToStep={(stepId) => setActiveStep(stepId)}
               initialView={step12View}
+              isStale={isCacheStale}
             />
           )}
         </main>

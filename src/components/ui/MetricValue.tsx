@@ -14,6 +14,7 @@ export interface MetricValueProps {
   className?: string;
   valueClassName?: string;
   hasPlaywrightTrace?: boolean;
+  isStale?: boolean;
 }
 
 export function MetricValue({
@@ -26,6 +27,7 @@ export function MetricValue({
   className = '',
   valueClassName = '',
   hasPlaywrightTrace = false,
+  isStale = false,
 }: MetricValueProps) {
   const effValue = metric !== undefined ? metric?.value : value;
   const effUnit = metric?.unit || unit || '';
@@ -36,7 +38,7 @@ export function MetricValue({
       <div className={`inline-flex items-center gap-1.5 ${className}`}>
         {label && <span className="text-zinc-400 text-xs font-normal">{label}:</span>}
         <span className={`font-mono tabular-nums text-zinc-500 font-medium ${valueClassName}`}>—</span>
-        <EvidenceChip provenance="NOT_RUN" />
+        <EvidenceChip provenance="NOT_RUN" isStale={isStale} />
       </div>
     );
   }
@@ -51,7 +53,7 @@ export function MetricValue({
         {formattedValue}
         {effUnit ? <span className="text-xs text-zinc-400 font-normal ml-0.5">{effUnit}</span> : null}
       </span>
-      <EvidenceChip provenance={effProv} hasPlaywrightTrace={hasPlaywrightTrace} />
+      <EvidenceChip provenance={effProv} hasPlaywrightTrace={hasPlaywrightTrace} isStale={isStale} />
     </div>
   );
 }

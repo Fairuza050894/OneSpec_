@@ -135,6 +135,7 @@ export interface UniversalKnowledgeGraphWorkbenchProps {
   onUpdateModulePins?: (routePath: string, pins: VisualCalloutPinItem[]) => void;
   onApproveReleaseSignOff?: (signOff: ReleaseSignOffCertificate) => void;
   onNavigateToStep?: (step: number) => void;
+  isStale?: boolean;
 }
 
 export function UniversalKnowledgeGraphWorkbench({
@@ -170,6 +171,7 @@ export function UniversalKnowledgeGraphWorkbench({
   onUpdateModulePins,
   onApproveReleaseSignOff,
   onNavigateToStep,
+  isStale = false,
 }: UniversalKnowledgeGraphWorkbenchProps) {
   const { locale, copy } = useStudioLocale();
   const [activeTab, setActiveTab] = useState<
@@ -965,9 +967,27 @@ export function UniversalKnowledgeGraphWorkbench({
                   </label>
                 </div>
 
+                {isStale && (
+                  <div className="p-2 mb-2 bg-amber-500/10 border border-amber-500/30 rounded-[3px] text-amber-300 text-[11px] font-mono flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+                    <span>
+                      {locale === 'id'
+                        ? 'Persetujuan rilis nonaktif karena data dikompilasi dengan engine lama (basi). Jalankan ulang pipeline terlebih dahulu.'
+                        : 'Release sign-off is disabled because data was compiled with an older engine (stale). Please re-run the pipeline first.'}
+                    </span>
+                  </div>
+                )}
+
                 <button
                   type="button"
-                  disabled={!signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning}
+                  disabled={!signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning || isStale}
+                  title={
+                    isStale
+                      ? locale === 'id'
+                        ? 'Nonaktif: Data dikompilasi dengan engine lama (basi). Jalankan ulang pipeline.'
+                        : 'Disabled: Stale compiled data. Re-run pipeline.'
+                      : undefined
+                  }
                   onClick={async () => {
                     setIsSigning(true);
                     try {
@@ -1021,7 +1041,7 @@ export function UniversalKnowledgeGraphWorkbench({
                     }
                   }}
                   className={`h-8 px-4 rounded-[3px] font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors ${
-                    !signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning
+                    !signOffApprover.trim() || !chkQaGapReviewed || !chkZeroCriticalSec || isSigning || isStale
                       ? 'bg-[#1E293B] text-[#64748B] cursor-not-allowed border border-[#334155]'
                       : 'bg-[#059669] hover:bg-[#047857] text-white cursor-pointer'
                   }`}

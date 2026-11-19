@@ -6,6 +6,7 @@ import { type Provenance, migrateLegacyProvenance } from '@/types/provenance';
 export interface EvidenceChipProps {
   provenance?: Provenance | string | null;
   hasPlaywrightTrace?: boolean;
+  isStale?: boolean;
   className?: string;
 }
 
@@ -66,8 +67,22 @@ const PROVENANCE_MAP: Record<Provenance, ProvenanceConfig> = {
 export function EvidenceChip({
   provenance,
   hasPlaywrightTrace = false,
+  isStale = false,
   className = '',
 }: EvidenceChipProps) {
+  if (isStale) {
+    return (
+      <span
+        role="status"
+        aria-label="Data basi — dikompilasi dengan engine lama"
+        title="Data basi — dikompilasi dengan engine lama"
+        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono border uppercase tracking-wider font-semibold select-none text-amber-300 bg-amber-950/70 border-amber-800/80 ${className}`}
+      >
+        Basi
+      </span>
+    );
+  }
+
   const normProv: Provenance = migrateLegacyProvenance(provenance, hasPlaywrightTrace);
   const cfg = PROVENANCE_MAP[normProv] || PROVENANCE_MAP.NOT_RUN;
 

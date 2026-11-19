@@ -10,6 +10,7 @@ import {
   Play,
   RotateCw,
   Award,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   delphiConsensusService,
@@ -44,6 +45,7 @@ interface DelphiConsensusWorkbenchProps {
   rtmRows?: SynthesizedRtmRow[];
   initialConsensusSummary?: DelphiConsensusSummary;
   onAppendLog?: (msg: string) => void;
+  isStale?: boolean;
 }
 
 export function DelphiConsensusWorkbench({
@@ -56,6 +58,7 @@ export function DelphiConsensusWorkbench({
   rtmRows,
   initialConsensusSummary,
   onAppendLog,
+  isStale = false,
 }: DelphiConsensusWorkbenchProps) {
   const { copy } = useStudioLocale();
   const [selectedRoundNumber, setSelectedRoundNumber] = useState<1 | 2 | 3>(3);
@@ -415,6 +418,15 @@ export function DelphiConsensusWorkbench({
                 Formal cryptographic consensus seals certifying that functional, quality, security, architectural, compliance, and documentation criteria have been satisfied under ISO/IEC/IEEE 29148:2018.
               </p>
             </div>
+
+            {isStale && (
+              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-[3px] text-amber-300 text-[11px] font-mono flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+                <span>
+                  Segel kriptografi nonaktif karena data dikompilasi dengan engine lama (basi). Jalankan ulang pipeline untuk memperbarui segel.
+                </span>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {summary.signOffSeals.map((seal) => (
