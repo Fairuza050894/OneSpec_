@@ -195,65 +195,64 @@ export function filterSafeCookiesForTarget(
   });
 }
 
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function normalizeOrigin(o: string): string {
+  try {
+    return new URL(o).origin.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function allowedOriginSet(): Set<string> {
+  const base = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+  ];
+  const extra = (process.env.ONESPEC_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => normalizeOrigin(s.trim()))
+    .filter(Boolean);
+  return new Set([...base, ...extra]);
+}
+
 /**
  * Verifies that an incoming mutating request (/api/sdlc/* or /api/discovery/*)
- * originates from the local OneSpec Workbench or carries a valid internal session token.
+ * originates from an authorized local/whitelisted Origin or carries a valid internal session token.
  */
 export function verifyInternalOriginOrToken(req: Request | NextRequest): {
   authorized: boolean;
   reason?: string;
 } {
-  const headers = req.headers;
+  const h = req.headers;
+  const expected = process.env.ONESPEC_SESSION_TOKEN || '';
+  const provided = h.get('x-onespec-session-token') || '';
 
-  // 1. Check internal session token header
-  const sessionToken = headers.get('x-onespec-session-token');
-  const expectedToken = process.env.ONESPEC_SESSION_TOKEN;
-  if (expectedToken && sessionToken === expectedToken) {
-    return { authorized: true };
-  }
-  if (sessionToken && sessionToken.length >= 16) {
+  // 1. Session token validation (must be configured, >= 32 chars, and match constant-time)
+  if (expected.length >= 32 && provided && constantTimeEqual(provided, expected)) {
     return { authorized: true };
   }
 
-  // 2. Check Origin / Referer
-  const origin = headers.get('origin') || '';
-  const referer = headers.get('referer') || '';
-  const host = headers.get('host') || '';
-
-  const allowedOrigins = [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    ...(process.env.ONESPEC_ALLOWED_ORIGINS || '')
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  ];
-
-  if (origin && allowedOrigins.some((ao) => origin.toLowerCase().startsWith(ao))) {
-    return { authorized: true };
+  // 2. Origin validation (must be exact match against whitelist)
+  const origin = h.get('origin');
+  if (origin) {
+    if (h.get('sec-fetch-site') === 'cross-site') {
+      return { authorized: false, reason: 'Cross-site request ditolak' };
+    }
+    const normalized = normalizeOrigin(origin);
+    return allowedOriginSet().has(normalized)
+      ? { authorized: true }
+      : { authorized: false, reason: `Origin "${origin}" tidak diizinkan` };
   }
 
-  if (referer && allowedOrigins.some((ao) => referer.toLowerCase().startsWith(ao))) {
-    return { authorized: true };
-  }
-
-  // 3. Local server-to-server or test execution check (host is localhost/127.0.0.1)
-  const isLocalHost =
-    host.startsWith('localhost:') ||
-    host.startsWith('127.0.0.1:') ||
-    host === 'localhost' ||
-    host === '127.0.0.1';
-
-  const secFetchSite = headers.get('sec-fetch-site');
-  // In browser contexts, cross-site requests have sec-fetch-site === 'cross-site'
-  if (isLocalHost && (!secFetchSite || secFetchSite === 'same-origin' || secFetchSite === 'same-site' || secFetchSite === 'none')) {
-    return { authorized: true };
-  }
-
-  return {
-    authorized: false,
-    reason: `Forbidden: Request origin "${origin || referer || 'unspecified'}" is not authorized. Must originate from localhost:3000 or provide x-onespec-session-token.`,
-  };
+  // 3. Mutating requests without Origin are treated as non-browser: token is mandatory
+  return { authorized: false, reason: 'Origin tidak ada dan token sesi tidak valid' };
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateUrlForSsrf, isMetadataHost, isPrivateOrLoopbackHost } from '../lib/serverSecurity';
+import { validateUrlForSsrf, isMetadataHost, isPrivateOrLoopbackHost, verifyInternalOriginOrToken } from '../lib/serverSecurity';
 import { computeUnifiedQualityMetrics, isNoiseUiControlOrInternalId, cleanProjectDisplayName, type CompiledSdlcState } from '../services/sdlcCompiler';
 import { ReaBridgeService } from '../services/reaBridge';
 
@@ -133,4 +133,87 @@ test('Test 6: Score synchronization (49 passed, 8 warning out of 57 tests) yield
   assert.equal(qm.failedCases, 0);
   assert.equal(qm.passRatePercent, 86);
   assert.equal(qm.releaseGateStatus, 'CONDITIONAL_GO');
+});
+
+test('Test 7: T-01 verifyInternalOriginOrToken blocks origin spoofing, weak tokens, and cross-site requests', () => {
+  // Save initial env
+  const origToken = process.env.ONESPEC_SESSION_TOKEN;
+
+  try {
+    // 1. Origin: http://localhost:3000 -> authorized
+    const req1 = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+      },
+    });
+    assert.equal(verifyInternalOriginOrToken(req1).authorized, true);
+
+    // 2. Origin: http://localhost:3000.evil.com -> ditolak
+    const req2 = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000.evil.com',
+      },
+    });
+    const res2 = verifyInternalOriginOrToken(req2);
+    assert.equal(res2.authorized, false);
+    assert.match(res2.reason || '', /tidak diizinkan/i);
+
+    // 3. Tanpa Origin dan tanpa token -> ditolak
+    const req3 = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+    });
+    const res3 = verifyInternalOriginOrToken(req3);
+    assert.equal(res3.authorized, false);
+    assert.match(res3.reason || '', /Origin tidak ada/i);
+
+    // 4. Token "aaaaaaaaaaaaaaaa" (16 huruf) -> ditolak walau env kosong
+    delete process.env.ONESPEC_SESSION_TOKEN;
+    const req4 = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+      headers: {
+        'x-onespec-session-token': 'aaaaaaaaaaaaaaaa',
+      },
+    });
+    assert.equal(verifyInternalOriginOrToken(req4).authorized, false);
+
+    // 5. Token sama dengan env (>= 32 char) -> authorized
+    const validSecret = 'sec_token_0123456789abcdef0123456789abcdef';
+    process.env.ONESPEC_SESSION_TOKEN = validSecret;
+    const req5 = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+      headers: {
+        'x-onespec-session-token': validSecret,
+      },
+    });
+    assert.equal(verifyInternalOriginOrToken(req5).authorized, true);
+
+    // Mismatched token of >=32 chars must be rejected
+    const req5Mismatch = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+      headers: {
+        'x-onespec-session-token': 'sec_token_wrong_0123456789abcdef0123456789',
+      },
+    });
+    assert.equal(verifyInternalOriginOrToken(req5Mismatch).authorized, false);
+
+    // 6. sec-fetch-site: cross-site dengan origin cocok -> ditolak
+    const req6 = new Request('http://localhost:3000/api/sdlc/discover', {
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+        'sec-fetch-site': 'cross-site',
+      },
+    });
+    const res6 = verifyInternalOriginOrToken(req6);
+    assert.equal(res6.authorized, false);
+    assert.match(res6.reason || '', /Cross-site request ditolak/i);
+  } finally {
+    if (origToken !== undefined) {
+      process.env.ONESPEC_SESSION_TOKEN = origToken;
+    } else {
+      delete process.env.ONESPEC_SESSION_TOKEN;
+    }
+  }
 });
