@@ -1054,3 +1054,176 @@ test('Test 18: SelfHealingPatchService honest git apply verification and illustr
   assert.match(runbook, /Contoh Patch \(Ilustratif \/ Simulated\)/, 'Runbook must include illustrative warning');
   assert.match(runbook, /SIMULATED/, 'Runbook must document SIMULATED provenance in table');
 });
+
+test('Test 19: Gap Auditor as-built baseline match semantics and n/a compliance rate (T-12: F-17)', async () => {
+  const { gapAuditorService } = await import('../services/gapAuditorService');
+
+  // Case 1: As-Built Baseline Mode (Zero-Doc / No Stakeholder MoM/PRD uploaded)
+  // When no stakeholder requirements are provided, invariants reverse-engineered from implementation
+  // MUST NOT claim "COMPLIANT" or "100% Kepatuhan" against itself.
+  // Verdict MUST be BASELINE_MATCH with complianceRatePercent === null (N/A).
+  const asBuiltInput = {
+    businessRules: [
+      {
+        ruleId: 'BR-AST-01',
+        category: 'SECURITY',
+        statement: 'The system shall enforce strict container number checks',
+        targetKpi: '< 500ms response time',
+        sourceMoMLine: 'AST-Inferred-Line-1',
+        priority: 'HIGH' as const,
+        provenance: 'AS_BUILT_DISCOVERED' as const,
+      },
+    ],
+    validationRules: [
+      {
+        ruleId: 'VR-AST-01',
+        userStoryId: 'REQ-US-01',
+        fieldName: 'containerNumber',
+        dataType: 'string',
+        constraintExpression: 'nonempty',
+        errorCode: 'ERR_INVALID_CONTAINER',
+        httpStatus: 400,
+        exactUiErrorString: 'Container number cannot be empty',
+        provenance: 'AS_BUILT_DISCOVERED' as const,
+      },
+      {
+        ruleId: 'VR-AST-02',
+        userStoryId: 'REQ-US-01',
+        fieldName: 'status',
+        dataType: 'string',
+        constraintExpression: "status IN ('PENDING', 'APPROVED')",
+        errorCode: 'ERR_INVALID_STATUS',
+        httpStatus: 400,
+        exactUiErrorString: 'Status is not valid',
+        provenance: 'AS_BUILT_DISCOVERED' as const,
+      },
+    ],
+    apiEndpoints: [
+      {
+        id: 'EP-01',
+        method: 'POST' as const,
+        path: '/api/v1/shipments',
+        controllerPath: 'src/controllers/shipments.ts',
+        lineNumber: 10,
+        summary: 'Create Shipment',
+        requestBodySchema: { containerNumber: 'string', status: 'string' },
+        linkedTestCaseIds: ['TC-001'],
+        linkedRequirementId: 'REQ-US-01',
+      },
+    ],
+    databaseTables: [
+      {
+        id: 'tbl-shipments-1',
+        tableName: 'Shipments',
+        primaryKeys: ['id'],
+        columns: [
+          { name: 'id', type: 'UUID', isPrimaryKey: true, isForeignKey: false, isNullable: false },
+          { name: 'containerNumber', type: 'VARCHAR(255)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
+          { name: 'status', type: 'VARCHAR(50)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
+        ],
+        relations: [],
+      },
+    ],
+    hasSourceRequirements: false,
+  };
+
+  const asBuiltAudit = gapAuditorService.auditSpecificationsAgainstImplementation(asBuiltInput);
+
+  assert.equal(asBuiltAudit.summary.compliantCount, 0, 'As-built mode must NOT report any COMPLIANT items');
+  assert.equal(asBuiltAudit.summary.complianceRatePercent, null, 'Compliance rate must be null (N/A) in as-built mode');
+  assert.ok(asBuiltAudit.summary.baselineMatchCount && asBuiltAudit.summary.baselineMatchCount > 0, 'Must record baselineMatchCount');
+  assert.equal(asBuiltAudit.summary.baselineMatchCount, asBuiltAudit.summary.totalAudited);
+  assert.equal(asBuiltAudit.summary.missingInBackendCount, 0);
+  assert.equal(asBuiltAudit.summary.shadowApiCount, 0);
+
+  // All individual discrepancy items in as-built mode must have BASELINE_MATCH verdict
+  for (const item of asBuiltAudit.items) {
+    assert.equal(
+      item.verdict,
+      'BASELINE_MATCH',
+      `Item ${item.id} must be BASELINE_MATCH in as-built mode, got ${item.verdict}`
+    );
+    assert.notEqual(item.verdict, 'COMPLIANT');
+  }
+
+  // Unified Technical Documentation must state AS-BUILT BASELINE and Compliance Rate: N/A
+  const techDoc = gapAuditorService.generateUnifiedTechDoc(asBuiltAudit.items, asBuiltAudit.summary);
+  assert.match(techDoc, /Mode:\*\* AS-BUILT BASELINE/);
+  assert.match(techDoc, /Compliance Rate:\*\* N\/A/);
+
+  // Case 2: Dual-Track Mode (Stakeholder MoM / PRD source provided)
+  // When stakeholder requirements are present, regular compliance auditing is executed.
+  const dualTrackInput = {
+    businessRules: [
+      {
+        ruleId: 'BR-SRC-01',
+        category: 'SECURITY',
+        statement: 'The system shall enforce strict container number checks',
+        targetKpi: '< 500ms response time',
+        sourceMoMLine: 'MoM-Page-1',
+        priority: 'HIGH' as const,
+        provenance: 'SOURCE_REQUIREMENT' as const,
+      },
+      {
+        ruleId: 'BR-SRC-02',
+        category: 'INTEGRATION',
+        statement: 'The system shall send automatic WhatsApp notification to driver',
+        targetKpi: 'Immediate delivery',
+        sourceMoMLine: 'MoM-Page-2',
+        priority: 'MEDIUM' as const,
+        provenance: 'SOURCE_REQUIREMENT' as const,
+      },
+    ],
+    validationRules: [
+      {
+        ruleId: 'VR-SRC-01',
+        userStoryId: 'REQ-US-01',
+        fieldName: 'containerNumber',
+        dataType: 'string',
+        constraintExpression: 'nonempty',
+        errorCode: 'ERR_INVALID_CONTAINER',
+        httpStatus: 400,
+        exactUiErrorString: 'Container number cannot be empty',
+        provenance: 'SOURCE_REQUIREMENT' as const,
+      },
+    ],
+    apiEndpoints: [
+      {
+        id: 'EP-01',
+        method: 'POST' as const,
+        path: '/api/v1/shipments',
+        controllerPath: 'src/controllers/shipments.ts',
+        lineNumber: 10,
+        summary: 'Create Shipment',
+        requestBodySchema: { containerNumber: 'string' },
+        linkedTestCaseIds: ['TC-001'],
+        linkedRequirementId: 'REQ-US-01',
+      },
+    ],
+    databaseTables: [
+      {
+        id: 'tbl-shipments-2',
+        tableName: 'Shipments',
+        primaryKeys: ['id'],
+        columns: [
+          { name: 'id', type: 'UUID', isPrimaryKey: true, isForeignKey: false, isNullable: false },
+          { name: 'containerNumber', type: 'VARCHAR(255)', isPrimaryKey: false, isForeignKey: false, isNullable: false },
+        ],
+        relations: [],
+      },
+    ],
+    hasSourceRequirements: true,
+  };
+
+  const dualTrackAudit = gapAuditorService.auditSpecificationsAgainstImplementation(dualTrackInput);
+
+  assert.notEqual(dualTrackAudit.summary.complianceRatePercent, null, 'Dual-track mode must compute a numeric compliance rate');
+  assert.ok(typeof dualTrackAudit.summary.complianceRatePercent === 'number');
+  assert.ok(dualTrackAudit.summary.totalAudited > 0);
+  assert.ok(dualTrackAudit.items.some((i) => i.verdict === 'COMPLIANT' || i.verdict === 'VERIFIED_MATCH'));
+  assert.ok(dualTrackAudit.items.some((i) => i.verdict === 'MISSING_IMPLEMENTATION' || i.verdict === 'MISSING_IN_BACKEND'));
+
+  const dualTrackDoc = gapAuditorService.generateUnifiedTechDoc(dualTrackAudit.items, dualTrackAudit.summary);
+  assert.match(dualTrackDoc, /Mode:\*\* DUAL-TRACK/);
+  assert.match(dualTrackDoc, /Compliant Contracts:\*\*/);
+});

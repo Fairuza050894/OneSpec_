@@ -81,11 +81,14 @@ export class SmtFormalVerifierService {
   private detectZ3Binary(): string | null {
     if (typeof window !== 'undefined') return null;
     try {
-      const proc = typeof globalThis !== 'undefined' ? (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process : undefined;
+      const proc = typeof globalThis !== 'undefined' ? (globalThis as unknown as { process?: { env?: Record<string, string | undefined>; versions?: Record<string, string> } }).process : undefined;
+      if (!proc?.versions?.node) return null;
       if (proc?.env?.ONESPEC_FORCE_NO_Z3 === 'true') return null;
       if (proc?.env?.ONESPEC_MOCK_Z3_BINARY) return proc.env.ONESPEC_MOCK_Z3_BINARY;
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const fs = require('fs');
+      // Use eval require to prevent Webpack client-side module resolution warning
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      const nodeRequire = eval('require');
+      const fs = nodeRequire('fs');
       const candidates = ['/opt/homebrew/bin/z3', '/usr/local/bin/z3', '/usr/bin/z3'];
       for (const bin of candidates) {
         if (fs.existsSync(bin)) return bin;
@@ -115,8 +118,10 @@ export class SmtFormalVerifierService {
     }
 
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { execFileSync } = require('child_process');
+      // Use eval require to prevent Webpack client-side module resolution warning
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      const nodeRequire = eval('require');
+      const { execFileSync } = nodeRequire('child_process');
       const stdout = execFileSync(z3Binary, ['-in'], {
         input: smtScript,
         encoding: 'utf-8',

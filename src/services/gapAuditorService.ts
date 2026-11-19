@@ -51,10 +51,10 @@ export class GapAuditorService {
     } = params;
 
     const cleanValidationRules = (validationRules || []).filter(
-      (r) => !isNoiseUiControlOrInternalId(r.fieldName) && !isNoiseUiControlOrInternalId(r.ruleId)
+      (r) => (!r.fieldName || !isNoiseUiControlOrInternalId(r.fieldName)) && !isNoiseUiControlOrInternalId(r.ruleId)
     );
     const cleanBusinessRules = (businessRules || []).filter(
-      (r) => !isNoiseUiControlOrInternalId(r.moduleName) && !isNoiseUiControlOrInternalId(r.ruleId)
+      (r) => (!r.moduleName || !isNoiseUiControlOrInternalId(r.moduleName)) && !isNoiseUiControlOrInternalId(r.ruleId)
     );
 
     const items: AuditDiscrepancyItem[] = [];
@@ -303,6 +303,9 @@ export class GapAuditorService {
     } else {
       // -----------------------------------------------------------------------
       // AS-BUILT BASELINE MODE (Zero-Doc Reverse Engineering)
+      // When no stakeholder requirement source (MoM / PRD) is provided,
+      // all discovered items are recorded as BASELINE_MATCH (never COMPLIANT).
+      // Compliance rate is N/A because the spec is derived from the implementation.
       // -----------------------------------------------------------------------
       cleanValidationRules.forEach((rule) => {
         const matchingApi =
@@ -313,93 +316,31 @@ export class GapAuditorService {
               (e.requestBodySchema && JSON.stringify(e.requestBodySchema).includes(rule.fieldName))
           ) || apiEndpoints[0];
 
-        const isEnumConstraint = rule.constraintExpression.includes('IN') || rule.constraintExpression.includes('enum');
-
-        if (isEnumConstraint) {
-          const matchingTable = databaseTables.find((t) =>
-            t.columns.some((c) => c.name.toLowerCase() === rule.fieldName.toLowerCase())
-          );
-
-          if (matchingTable) {
-            items.push({
-              id: `GAP-${String(items.length + 1).padStart(3, '0')}`,
-              verdict: 'SCHEMA_TYPE_MISMATCH',
-              ruleRef: rule.ruleId,
-              userStoryRef: rule.userStoryId,
-              targetEntity: `Database Column: ${matchingTable.tableName}.${rule.fieldName}`,
-              discrepancyTitle: `Enum Constraint Not Enforced at Database Layer for ${rule.fieldName}`,
-              discrepancyDescription: `The inferred specification (${rule.ruleId}) defines ${rule.fieldName} with constraint ${rule.constraintExpression}, but the database column uses VARCHAR without CHECK constraint.`,
-              severity: 'MAJOR',
-              diffLanguage: 'sql',
-              expectedSpec: `-- Expected Invariant (${rule.ruleId})\nALTER TABLE "${matchingTable.tableName}" \n  ADD CONSTRAINT chk_${matchingTable.tableName.toLowerCase()}_${rule.fieldName.toLowerCase()} \n  CHECK (${rule.constraintExpression});`,
-              actualImplementation: `-- Discovered Database Column\nCREATE TABLE "${matchingTable.tableName}" (\n  "id" UUID PRIMARY KEY,\n  "${rule.fieldName}" VARCHAR(255) NOT NULL\n);`,
-              defectTicket: {
-                ticketId: `SDLC-DEFECT-${String(items.length + 1).padStart(3, '0')}`,
-                issueKey: `DEFECT-${rule.ruleId}`,
-                title: `Add CHECK constraint on ${matchingTable.tableName}.${rule.fieldName}`,
-                severity: 'MAJOR',
-                component: `Database Schema: ${matchingTable.tableName}.${rule.fieldName}`,
-                expectedBehavior: `Enforce ${rule.constraintExpression}`,
-                actualBehavior: 'Unrestricted VARCHAR permits arbitrary string insertion without DB check',
-                suggestedRemediation: `Apply migration: ALTER TABLE "${matchingTable.tableName}" ADD CONSTRAINT chk_${matchingTable.tableName.toLowerCase()}_${rule.fieldName.toLowerCase()} CHECK (${rule.constraintExpression});`,
-                markdownPayload: `### SDLC Defect: ${matchingTable.tableName}.${rule.fieldName} missing CHECK constraint`,
-              },
-              remediationAction: `Apply SQL migration adding CHECK constraint to ${matchingTable.tableName}.${rule.fieldName}.`,
-            });
-          } else {
-            items.push({
-              id: `GAP-${String(items.length + 1).padStart(3, '0')}`,
-              verdict: 'COMPLIANT',
-              ruleRef: rule.ruleId,
-              userStoryRef: rule.userStoryId,
-              targetEntity: matchingApi ? `${matchingApi.method} ${matchingApi.path}` : 'API Controller',
-              discrepancyTitle: `Field "${rule.fieldName}" Constraint Enforced in Baseline`,
-              discrepancyDescription: `Constraint ${rule.constraintExpression} verified in discovered baseline.`,
-              severity: 'LOW',
-              diffLanguage: 'typescript',
-              expectedSpec: `// As-Built Baseline Contract (${rule.ruleId})\nexport const ${rule.fieldName}Schema = z.string().regex(/${rule.constraintExpression}/);`,
-              actualImplementation: `// Discovered Implementation\nif (!payload.${rule.fieldName}) throw createError({ statusCode: ${rule.httpStatus}, message: "${rule.exactUiErrorString}" });`,
-              defectTicket: {
-                ticketId: `SDLC-DEFECT-${String(items.length + 1).padStart(3, '0')}`,
-                issueKey: `COMPLIANT-${rule.ruleId}`,
-                title: `${rule.fieldName} validation compliant`,
-                severity: 'LOW',
-                component: matchingApi?.path || 'controller',
-                expectedBehavior: `Enforce ${rule.constraintExpression}`,
-                actualBehavior: 'Enforced in application',
-                suggestedRemediation: 'None required.',
-                markdownPayload: `### Baseline Invariant: ${rule.ruleId} verified`,
-              },
-              remediationAction: 'None (Compliant)',
-            });
-          }
-        } else {
-          items.push({
-            id: `GAP-${String(items.length + 1).padStart(3, '0')}`,
-            verdict: 'COMPLIANT',
-            ruleRef: rule.ruleId,
-            userStoryRef: rule.userStoryId,
-            targetEntity: matchingApi ? `${matchingApi.method} ${matchingApi.path}` : 'API Controller',
-            discrepancyTitle: `Field "${rule.fieldName}" Validation Invariant Enforced`,
-            discrepancyDescription: `Frontend input and backend route handler enforce constraint expression "${rule.constraintExpression}" with status ${rule.httpStatus}.`,
+        items.push({
+          id: `GAP-${String(items.length + 1).padStart(3, '0')}`,
+          verdict: 'BASELINE_MATCH',
+          ruleRef: rule.ruleId,
+          userStoryRef: rule.userStoryId,
+          targetEntity: matchingApi ? `${matchingApi.method} ${matchingApi.path}` : 'API Controller',
+          discrepancyTitle: `Field "${rule.fieldName}" Invariant Recorded in Baseline`,
+          discrepancyDescription: `As-built baseline specification derived from runtime surface: ${rule.constraintExpression} (HTTP ${rule.httpStatus}).`,
+          severity: 'LOW',
+          diffLanguage: 'typescript',
+          expectedSpec: `// As-Built Baseline Contract (${rule.ruleId})\nexport const ${rule.fieldName}Schema = z.${rule.dataType === 'number' ? 'number()' : 'string()'};\n// Constraint: ${rule.constraintExpression}`,
+          actualImplementation: `// Discovered Implementation (${matchingApi?.path || '/api'})\nif (!payload.${rule.fieldName}) {\n  throw createError({ statusCode: ${rule.httpStatus}, message: "${rule.exactUiErrorString || 'Validation error'}" });\n}`,
+          defectTicket: {
+            ticketId: `SDLC-BASELINE-${String(items.length + 1).padStart(3, '0')}`,
+            issueKey: `BASELINE-${rule.ruleId}`,
+            title: `${rule.fieldName} baseline invariant recorded`,
             severity: 'LOW',
-            diffLanguage: 'typescript',
-            expectedSpec: `// As-Built Baseline Contract (${rule.ruleId})\nexport const ${rule.fieldName}Schema = z.${rule.dataType === 'number' ? 'number()' : 'string()'};\n// Constraint: ${rule.constraintExpression}`,
-            actualImplementation: `// Discovered Handler (${matchingApi?.path || '/api'})\nif (!body.${rule.fieldName}) {\n  throw createError({ statusCode: ${rule.httpStatus}, message: '${rule.exactUiErrorString}' });\n}`,
-            defectTicket: {
-              ticketId: `SDLC-DEFECT-${String(items.length + 1).padStart(3, '0')}`,
-              issueKey: `COMPLIANT-${rule.ruleId}`,
-              title: `${rule.fieldName} validation compliant`,
-              severity: 'LOW',
-              component: matchingApi?.path || 'controller',
-              expectedBehavior: `Enforce ${rule.constraintExpression}`,
-              actualBehavior: 'Enforced in application',
-              suggestedRemediation: 'None required.',
-              markdownPayload: `### Baseline Invariant: ${rule.ruleId} verified`,
-            },
-            remediationAction: 'None (Compliant)',
-          });
-        }
+            component: matchingApi?.path || 'controller',
+            expectedBehavior: `Enforce ${rule.constraintExpression}`,
+            actualBehavior: 'Recorded in as-built baseline',
+            suggestedRemediation: 'None required (As-built baseline reference).',
+            markdownPayload: `### Baseline Invariant: ${rule.ruleId} recorded`,
+          },
+          remediationAction: 'None (As-Built Baseline Reference)',
+        });
       });
     }
 
@@ -413,20 +354,36 @@ export class GapAuditorService {
 
     // Calculate Summary Metrics
     const totalAudited = cleanItems.length;
-    const compliantCount = cleanItems.filter((i) => i.verdict === 'COMPLIANT' || i.verdict === 'VERIFIED_MATCH').length;
-    const missingInBackendCount = cleanItems.filter((i) => i.verdict === 'MISSING_IN_BACKEND' || i.verdict === 'MISSING_IMPLEMENTATION').length;
-    const schemaMismatchCount = cleanItems.filter((i) => i.verdict === 'SCHEMA_TYPE_MISMATCH').length;
-    const shadowApiCount = cleanItems.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_API' || i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE').length;
-    const missingImplementationCount = cleanItems.filter((i) => i.verdict === 'MISSING_IMPLEMENTATION').length;
-    const undocumentedShadowCount = cleanItems.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE' || i.verdict === 'UNDOCUMENTED_SHADOW_API').length;
-    const verifiedMatchCount = cleanItems.filter((i) => i.verdict === 'VERIFIED_MATCH' || i.verdict === 'COMPLIANT').length;
-    const complianceRatePercent = totalAudited > 0 ? Math.round((compliantCount / totalAudited) * 1000) / 10 : 100;
+    let compliantCount = 0;
+    let baselineMatchCount = 0;
+    let missingInBackendCount = 0;
+    let schemaMismatchCount = 0;
+    let shadowApiCount = 0;
+    let missingImplementationCount = 0;
+    let undocumentedShadowCount = 0;
+    let verifiedMatchCount = 0;
+    let complianceRatePercent: number | null = null;
+
+    if (hasSource) {
+      compliantCount = cleanItems.filter((i) => i.verdict === 'COMPLIANT' || i.verdict === 'VERIFIED_MATCH').length;
+      missingInBackendCount = cleanItems.filter((i) => i.verdict === 'MISSING_IN_BACKEND' || i.verdict === 'MISSING_IMPLEMENTATION').length;
+      schemaMismatchCount = cleanItems.filter((i) => i.verdict === 'SCHEMA_TYPE_MISMATCH').length;
+      shadowApiCount = cleanItems.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_API' || i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE').length;
+      missingImplementationCount = cleanItems.filter((i) => i.verdict === 'MISSING_IMPLEMENTATION').length;
+      undocumentedShadowCount = cleanItems.filter((i) => i.verdict === 'UNDOCUMENTED_SHADOW_FEATURE' || i.verdict === 'UNDOCUMENTED_SHADOW_API').length;
+      verifiedMatchCount = compliantCount;
+      complianceRatePercent = totalAudited > 0 ? Math.round((compliantCount / totalAudited) * 1000) / 10 : 100;
+    } else {
+      baselineMatchCount = cleanItems.filter((i) => i.verdict === 'BASELINE_MATCH').length;
+      complianceRatePercent = null; // N/A — tidak ada baseline requirement pembanding
+    }
 
     return {
       items: cleanItems,
       summary: {
         totalAudited,
         compliantCount,
+        baselineMatchCount,
         missingInBackendCount,
         shadowApiCount,
         schemaMismatchCount,
@@ -471,11 +428,19 @@ Generated by OneSpec SDLC Workbench per ISO/IEC/IEEE 29148:2018 & ISO/IEC/IEEE 2
 Date: ${summary.auditTimestamp}
 
 ## 1. Executive Summary & Quality Gates
+${
+  summary.isZeroDocMode || !summary.hasSourceRequirements
+    ? `- **Mode:** AS-BUILT BASELINE (No Stakeholder Requirements Provided)
+- **Total Invariants Audited:** ${summary.totalAudited}
+- **Baseline Invariants Recorded:** ${summary.baselineMatchCount ?? summary.totalAudited}
+- **Compliance Rate:** N/A (tidak ada baseline requirement pembanding)`
+    : `- **Mode:** DUAL-TRACK (Stakeholder MoM/PRD vs Discovered Surface)
 - **Total Invariants Audited:** ${summary.totalAudited}
 - **Compliant Contracts:** ${summary.compliantCount} (${summary.complianceRatePercent}%)
 - **Missing Backend Handlers:** ${summary.missingInBackendCount}
 - **Schema Type Mismatches:** ${summary.schemaMismatchCount}
-- **Undocumented Shadow APIs:** ${summary.shadowApiCount}
+- **Undocumented Shadow APIs:** ${summary.shadowApiCount}`
+}
 
 ## 2. Discrepancy Matrix
 ${items

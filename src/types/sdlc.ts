@@ -779,6 +779,7 @@ export interface TriModalDiscoveryResult {
 
 export type GapAuditVerdict =
   | 'COMPLIANT'
+  | 'BASELINE_MATCH'
   | 'MISSING_IN_BACKEND'
   | 'UNDOCUMENTED_SHADOW_API'
   | 'SCHEMA_TYPE_MISMATCH'
@@ -821,13 +822,14 @@ export type DiscoveredFeatureModule = FeatureModuleSurface;
 export interface GapAuditSummary {
   totalAudited: number;
   compliantCount: number;
+  baselineMatchCount?: number;
   missingInBackendCount: number;
   shadowApiCount: number;
   schemaMismatchCount: number;
   missingImplementationCount?: number;
   undocumentedShadowCount?: number;
   verifiedMatchCount?: number;
-  complianceRatePercent: number;
+  complianceRatePercent: number | null;
   auditTimestamp: string;
   isZeroDocMode?: boolean;
   hasSourceRequirements?: boolean;

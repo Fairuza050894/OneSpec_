@@ -3341,18 +3341,31 @@ The system provides deterministic transaction processing, input validation, and 
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <span className="badge-tag px-2 py-0.5 bg-[#059669]/15 text-[#059669] border border-[#059669] text-[11px] font-bold tabular-nums">
-                    {auditResult.summary.compliantCount} COMPLIANT
-                  </span>
-                  <span className="badge-tag px-2 py-0.5 bg-[#DC2626]/15 text-[#DC2626] border border-[#DC2626] text-[11px] font-bold tabular-nums">
-                    {auditResult.summary.missingInBackendCount} MISSING
-                  </span>
-                  <span className="badge-tag px-2 py-0.5 bg-[#D97706]/15 text-[#D97706] border border-[#D97706] text-[11px] font-bold tabular-nums">
-                    {auditResult.summary.schemaMismatchCount} MISMATCH
-                  </span>
-                  <span className="badge-tag px-2 py-0.5 bg-[#8B5CF6]/15 text-[#A78BFA] border border-[#8B5CF6] text-[11px] font-bold tabular-nums">
-                    {auditResult.summary.shadowApiCount} SHADOW
-                  </span>
+                  {auditResult.summary.isZeroDocMode || !auditResult.summary.hasSourceRequirements ? (
+                    <>
+                      <span className="badge-tag px-2 py-0.5 bg-[#707070]/15 text-[#A1A1A1] border border-[#707070] text-[11px] font-bold tabular-nums">
+                        {auditResult.summary.baselineMatchCount ?? auditResult.summary.totalAudited} BASELINE
+                      </span>
+                      <span className="badge-tag px-2 py-0.5 bg-[#707070]/10 text-[#707070] border border-[#707070]/40 text-[11px] font-mono">
+                        Kepatuhan: N/A — tidak ada baseline requirement
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="badge-tag px-2 py-0.5 bg-[#059669]/15 text-[#059669] border border-[#059669] text-[11px] font-bold tabular-nums">
+                        {auditResult.summary.compliantCount} COMPLIANT ({auditResult.summary.complianceRatePercent}%)
+                      </span>
+                      <span className="badge-tag px-2 py-0.5 bg-[#DC2626]/15 text-[#DC2626] border border-[#DC2626] text-[11px] font-bold tabular-nums">
+                        {auditResult.summary.missingInBackendCount} MISSING
+                      </span>
+                      <span className="badge-tag px-2 py-0.5 bg-[#D97706]/15 text-[#D97706] border border-[#D97706] text-[11px] font-bold tabular-nums">
+                        {auditResult.summary.schemaMismatchCount} MISMATCH
+                      </span>
+                      <span className="badge-tag px-2 py-0.5 bg-[#8B5CF6]/15 text-[#A78BFA] border border-[#8B5CF6] text-[11px] font-bold tabular-nums">
+                        {auditResult.summary.shadowApiCount} SHADOW
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
 

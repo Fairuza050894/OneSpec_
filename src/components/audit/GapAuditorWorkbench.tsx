@@ -76,6 +76,8 @@ export function GapAuditorWorkbench({
       let matchVerdict = true;
       if (activeVerdictFilter === 'ALL') {
         matchVerdict = true;
+      } else if (activeVerdictFilter === 'BASELINE_MATCH') {
+        matchVerdict = item.verdict === 'BASELINE_MATCH';
       } else if (activeVerdictFilter === 'VERIFIED') {
         matchVerdict = item.verdict === 'VERIFIED_MATCH' || item.verdict === 'COMPLIANT';
       } else if (activeVerdictFilter === 'MISSING') {
@@ -100,6 +102,8 @@ export function GapAuditorWorkbench({
 
   const getVerdictBadge = (verdict: GapAuditVerdict) => {
     switch (verdict) {
+      case 'BASELINE_MATCH':
+        return 'bg-[#707070]/15 text-[#A1A1A1] border-[#707070]/40';
       case 'COMPLIANT':
       case 'VERIFIED_MATCH':
         return 'bg-[#059669]/15 text-[#059669] border-[#059669]/40';
@@ -159,6 +163,15 @@ export function GapAuditorWorkbench({
           <span className="text-[#707070] text-[10px]">
             Audited Rules: <strong className="text-[#EDEDED] tabular-nums">{summary.totalAudited}</strong>
           </span>
+          {summary.isZeroDocMode || !summary.hasSourceRequirements ? (
+            <span className="text-[10px] px-2 py-0.5 rounded-[2px] bg-[#707070]/15 text-[#A1A1A1] border border-[#707070]/40 font-bold">
+              {summary.baselineMatchCount ?? summary.totalAudited} BASELINE (N/A Kepatuhan)
+            </span>
+          ) : (
+            <span className="text-[10px] px-2 py-0.5 rounded-[2px] bg-[#059669]/15 text-[#059669] border border-[#059669]/40 font-bold">
+              {summary.compliantCount} COMPLIANT ({summary.complianceRatePercent}%)
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5">
@@ -193,7 +206,9 @@ export function GapAuditorWorkbench({
               <strong>Mode As-Built Baseline (Belum ada Dokumen PRD/MoM Pembanding)</strong> — Menganalisis konsistensi spesifikasi as-built hasil reverse-engineering dari live surface & AST. Untuk audit 1:1 terhadap kebutuhan bisnis, masukkan MoM/PRD pada Step 01.
             </span>
           </div>
-          <span className="text-[10px] text-[#94A3B8] font-mono">0 MISSING (Baseline Reference)</span>
+          <span className="text-[10px] text-[#94A3B8] font-mono">
+            {summary.baselineMatchCount ?? summary.totalAudited} BASELINE (N/A Kepatuhan — Baseline Reference)
+          </span>
         </div>
       )}
 
@@ -214,13 +229,19 @@ export function GapAuditorWorkbench({
             </div>
 
             <div className="flex items-center gap-1 bg-[#0B0C0E] border border-[#22262E] p-0.5 rounded-[2px]">
-              {[
-                { id: 'ALL', label: 'ALL' },
-                { id: 'VERIFIED', label: 'MATCH / COMPLIANT' },
-                { id: 'MISSING', label: 'MISSING' },
-                { id: 'SHADOW', label: 'SHADOW FEATURE' },
-                { id: 'SCHEMA_TYPE_MISMATCH', label: 'SCHEMA MISMATCH' },
-              ].map((v) => (
+              {(summary.isZeroDocMode || !summary.hasSourceRequirements
+                ? [
+                    { id: 'ALL', label: 'ALL' },
+                    { id: 'BASELINE_MATCH', label: 'BASELINE MATCH' },
+                  ]
+                : [
+                    { id: 'ALL', label: 'ALL' },
+                    { id: 'VERIFIED', label: 'MATCH / COMPLIANT' },
+                    { id: 'MISSING', label: 'MISSING' },
+                    { id: 'SHADOW', label: 'SHADOW FEATURE' },
+                    { id: 'SCHEMA_TYPE_MISMATCH', label: 'SCHEMA MISMATCH' },
+                  ]
+              ).map((v) => (
                 <button
                   key={v.id}
                   onClick={() => setActiveVerdictFilter(v.id)}
