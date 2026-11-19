@@ -210,7 +210,7 @@ function normalizeOrigin(o: string): string {
   }
 }
 
-function allowedOriginSet(): Set<string> {
+export function allowedOriginSet(): Set<string> {
   const base = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -222,6 +222,14 @@ function allowedOriginSet(): Set<string> {
     .map((s) => normalizeOrigin(s.trim()))
     .filter(Boolean);
   return new Set([...base, ...extra]);
+}
+
+/**
+ * Checks whether an incoming Origin header belongs to the authorized whitelist.
+ */
+export function isAllowedOrigin(origin: string | null | undefined): boolean {
+  if (!origin) return false;
+  return allowedOriginSet().has(normalizeOrigin(origin));
 }
 
 /**

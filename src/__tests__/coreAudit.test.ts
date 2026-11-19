@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateUrlForSsrf, isMetadataHost, isPrivateOrLoopbackHost, verifyInternalOriginOrToken } from '../lib/serverSecurity';
+import { NextRequest } from 'next/server';
+import {
+  validateUrlForSsrf,
+  isMetadataHost,
+  isPrivateOrLoopbackHost,
+  verifyInternalOriginOrToken,
+  isAllowedOrigin,
+  allowedOriginSet,
+} from '../lib/serverSecurity';
+import { middleware } from '../middleware';
 import { computeUnifiedQualityMetrics, isNoiseUiControlOrInternalId, cleanProjectDisplayName, type CompiledSdlcState } from '../services/sdlcCompiler';
 import { ReaBridgeService } from '../services/reaBridge';
 
@@ -216,4 +225,92 @@ test('Test 7: T-01 verifyInternalOriginOrToken blocks origin spoofing, weak toke
       delete process.env.ONESPEC_SESSION_TOKEN;
     }
   }
+});
+
+test('Test 8: Next.js middleware enforces auth & origin guard on all /api/* mutating endpoints (F-03)', async () => {
+  // Mutating requests to previously unmatcher endpoints must now be intercepted and return 403
+  const mutatingEndpoints = [
+    'http://localhost:3000/api/runner/execute',
+    'http://localhost:3000/api/security/dast-probe',
+    'http://localhost:3000/api/workspace/vault',
+    'http://localhost:3000/api/export/document',
+  ];
+
+  for (const url of mutatingEndpoints) {
+    const unauthReq = new NextRequest(url, {
+      method: 'POST',
+      headers: {},
+    });
+    const response = middleware(unauthReq);
+    assert.equal(response.status, 403, `Expected 403 for unauthorized POST to ${url}`);
+    const body = await response.json();
+    assert.equal(body.success, false);
+    assert.match(body.error, /Forbidden|Unauthorized|Origin tidak ada/i);
+  }
+
+  // Mutating request with authorized origin must pass through
+  const authReq = new NextRequest('http://localhost:3000/api/runner/execute', {
+    method: 'POST',
+    headers: {
+      origin: 'http://localhost:3000',
+    },
+  });
+  const authResponse = middleware(authReq);
+  assert.notEqual(authResponse.status, 403, 'Authorized origin must not be rejected with 403');
+
+  // Read-only GET requests must bypass mutating auth check
+  const getReq = new NextRequest('http://localhost:3000/api/manual-assets/sample.png', {
+    method: 'GET',
+    headers: {},
+  });
+  const getResponse = middleware(getReq);
+  assert.notEqual(getResponse.status, 403, 'GET requests must not be rejected by mutating middleware');
+});
+
+test('Test 9: WebSocket origin whitelist validation & CSWSH defense (F-09)', () => {
+  // Authorized origins
+  assert.equal(isAllowedOrigin('http://localhost:3000'), true);
+  assert.equal(isAllowedOrigin('http://127.0.0.1:3000'), true);
+  assert.equal(isAllowedOrigin('http://localhost:8080'), true);
+  assert.equal(isAllowedOrigin('http://127.0.0.1:8080'), true);
+
+  // Unauthorized / malicious origins
+  assert.equal(isAllowedOrigin('http://evil.com'), false);
+  assert.equal(isAllowedOrigin('http://localhost:3000.evil.com'), false);
+  assert.equal(isAllowedOrigin('https://attacker.org'), false);
+  assert.equal(isAllowedOrigin(''), false);
+  assert.equal(isAllowedOrigin(null), false);
+  assert.equal(isAllowedOrigin(undefined), false);
+
+  // Allowed origin set integrity
+  const set = allowedOriginSet();
+  assert.ok(set.has('http://localhost:3000'));
+  assert.ok(set.has('http://127.0.0.1:3000'));
+  assert.ok(!set.has('http://evil.com'));
+
+  // CSWSH Handshake protection simulation (as implemented in streamApp.get('/ws/runner-stream'))
+  let closeEvent: { code: number; reason: string } | null = null;
+  const mockSocket = {
+    close: (code: number, reason: string) => {
+      closeEvent = { code, reason };
+    },
+  };
+
+  // Malicious handshake
+  const untrustedReq = { headers: { origin: 'http://malicious-web.xyz' } };
+  if (untrustedReq.headers.origin && !isAllowedOrigin(untrustedReq.headers.origin)) {
+    mockSocket.close(1008, 'Policy Violation: Unauthorized WebSocket Origin');
+  }
+  assert.deepEqual(closeEvent, {
+    code: 1008,
+    reason: 'Policy Violation: Unauthorized WebSocket Origin',
+  });
+
+  // Legitimate local handshake
+  closeEvent = null;
+  const legitimateReq = { headers: { origin: 'http://localhost:3000' } };
+  if (legitimateReq.headers.origin && !isAllowedOrigin(legitimateReq.headers.origin)) {
+    mockSocket.close(1008, 'Policy Violation: Unauthorized WebSocket Origin');
+  }
+  assert.equal(closeEvent, null);
 });

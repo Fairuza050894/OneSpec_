@@ -5,6 +5,7 @@ import websocket from '@fastify/websocket';
 import { reaRoutes } from './routes/reaRoutes';
 import { workspaceRoutes } from './routes/workspaceRoutes';
 import { discoveryRoutes } from './routes/discoveryRoutes';
+import { isAllowedOrigin } from '../lib/serverSecurity';
 
 export async function createApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -65,9 +66,15 @@ export async function createApp(): Promise<FastifyInstance> {
   await app.register(workspaceRoutes, { prefix: '/api/workspaces' });
   await app.register(discoveryRoutes, { prefix: '/api/discovery' });
 
-  // WebSocket Live Telemetry Runner Stream (Step 7 Parity)
+  // WebSocket Live Telemetry Runner Stream (Step 7 Parity & CSWSH Defense)
   app.register(async (streamApp) => {
-    streamApp.get('/ws/runner-stream', { websocket: true }, (socket, _req) => {
+    streamApp.get('/ws/runner-stream', { websocket: true }, (socket, req) => {
+      const origin = req.headers.origin;
+      if (origin && !isAllowedOrigin(origin)) {
+        socket.close(1008, 'Policy Violation: Unauthorized WebSocket Origin');
+        return;
+      }
+
       socket.send(
         JSON.stringify({
           type: 'STREAM_CONNECTED',
